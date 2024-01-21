@@ -1,20 +1,27 @@
 from threading import Thread
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, QThread
 from yt_dlp import YoutubeDL
 import time
+
+# import logging
+
+# logging.basicConfig(filename="logfile.txt", level=logging.DEBUG)
 
 
 class QLogger(QObject):
     messageChanged = pyqtSignal(str)
 
     def debug(self, msg):
+        # logging.debug(msg)
         if "ETA" not in msg and "iB/s" not in msg:
             self.messageChanged.emit(msg)
 
     def warning(self, msg):
+        # logging.warning(msg)
         self.messageChanged.emit(msg)
 
     def error(self, msg):
+        # logging.error(msg)
         self.messageChanged.emit(msg)
 
 
@@ -25,27 +32,33 @@ class QHook(QObject):
         self.infoChanged.emit(d.copy())
 
 
-class QYTQueue(Thread):
-    def __init__(self, download_queue):
+class QYTQueue(QThread):
+    messageChanged = pyqtSignal(str)
+
+    def __init__(self, downloadQueue):
         super().__init__()
-        self.download_queue = download_queue
+        self.downloadQueue = downloadQueue
         self.is_downloading = False
         self.daemon = True
 
     def run(self):
         while True:
-            if not self.download_queue.empty():
+            if not self.downloadQueue.empty():
                 if self.is_downloading:
                     # Wait for the current download to finish
                     while self.is_downloading:
                         time.sleep(1)
 
-                item = self.download_queue.get()
+                item = self.downloadQueue.get()
                 self.is_downloading = True
-                print(f"Downloading {item[0]}")
+                self.messageChanged.emit(
+                    "\n".join(["------  Downloading  ------"] + item[0])
+                )
                 # Perform the download task
                 self.download(item[0], item[1])
-                print(f"Download finished for {item[0]}")
+                self.messageChanged.emit(
+                    "\n".join(["------  Finished downloading  ------"] + item[0])
+                )
                 self.is_downloading = False
             else:
                 time.sleep(1)  # Check for new items in the queue periodically
