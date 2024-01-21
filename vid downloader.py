@@ -8,15 +8,44 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QCheckBox,
+    QDialog,
+    QLineEdit,
+    QVBoxLayout,
 )
 from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIcon
 import QYT
 from hurry.filesize import size
 import queue
 import keyring
 from datetime import timedelta
 from threading import Timer
+from yt_dlp import YoutubeDL
+
+
+class PlaylistDialog(QDialog):
+    def __init__(self, playlistCount, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("Playlist Dialog")
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+
+        label = QLabel(
+            f"There are {playlistCount} in the playlist. Which do you want? Blank = all or format like (3,5,7-9)"
+        )
+        self.playlistInput = QLineEdit()
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+
+        layout = QVBoxLayout()
+        layout.addWidget(label)
+        layout.addWidget(self.playlistInput)
+        layout.addWidget(ok_button)
+
+        self.setLayout(layout)
+
+    def getPlaylistInput(self):
+        return self.playlistInput.text()
 
 
 class DropLabel(QLabel):
@@ -27,7 +56,7 @@ class DropLabel(QLabel):
         QLabel.__init__(self, text)
         self.originalText = text
         self.setStyleSheet(f"background-color:{color}")
-        self.setMinimumSize(300, 300)
+        self.setMinimumSize(150, 150)
         self.setAcceptDrops(True)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setFont(QFont("Arial", 32))
@@ -47,31 +76,38 @@ class DropLabel(QLabel):
         t = Timer(3, timeout)
         t.start()
         urls = event.mimeData().urls()
-        self.urlsDropped.emit([url.toString() for url in urls], self.text())
+        self.urlsDropped.emit([url.toString() for url in urls], self.originalText)
 
 
 class MyWindow(QWidget):
     def __init__(self):
         super().__init__()
+        self.setWindowTitle("Vid Downloader")
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.downloadQueue = queue.Queue()
         layout = QGridLayout()
 
         self.buttonPlaylists = QPushButton("Playlists")
         self.buttonPlaylists.clicked.connect(lambda: self.dropDetected([], "playlists"))
+        self.button720Playlists = QPushButton("720 Playlists")
+        self.button720Playlists.clicked.connect(
+            lambda: self.dropDetected([], "720playlists")
+        )
         self.checkIgnoreArchive = QCheckBox("Ignore Archive?")
         self.checkIgnoreArchive.setChecked(False)
-        self.label1080 = DropLabel("1080", "red", self.dropDetected)
-        self.label720 = DropLabel("720", "green", self.dropDetected)
-        self.labelAudio = DropLabel("audio", "brown", self.dropDetected)
+        self.label1080 = DropLabel("1080", "#424769", self.dropDetected)
+        self.label720 = DropLabel("720", "#7077A1", self.dropDetected)
+        self.labelAudio = DropLabel("audio", "#FF9843", self.dropDetected)
         self.labelOutput = QLabel("This is the output")
-        self.labelOutput.setStyleSheet("background-color:lightblue")
+        # self.labelOutput.setStyleSheet("background-color:lightblue")
         self.labelOutput.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.labelOutput.setFont(QFont("Arial", 16))
         self.barProgress = QProgressBar()
         self.logEdit = QPlainTextEdit(readOnly=True)
 
         layout.addWidget(self.buttonPlaylists, 0, 0)
-        layout.addWidget(self.checkIgnoreArchive, 0, 1)
+        layout.addWidget(self.button720Playlists, 0, 1)
+        layout.addWidget(self.checkIgnoreArchive, 0, 2)
         layout.addWidget(self.label1080, 1, 0)
         layout.addWidget(self.label720, 1, 1)
         layout.addWidget(self.labelAudio, 1, 2)
@@ -96,6 +132,14 @@ class MyWindow(QWidget):
                     line = line.strip()
                     if line[0] != "#":  # ignore comment lines
                         urls.append(line)
+        elif source == "720playlists":
+            with open(
+                "C:/Users/etreq/OneDrive/Desktop/scripts/720playlists.txt", "r"
+            ) as file:
+                for line in file:
+                    line = line.strip()
+                    if line[0] != "#":  # ignore comment lines
+                        urls.append(line)
 
         ydl_opts = {
             "logger": qlogger,
@@ -103,12 +147,25 @@ class MyWindow(QWidget):
             "windowsfilenames": True,
         }
         ydl_opts = self.getOptions(urls, source, ydl_opts)
-        self.downloadQueue.put((urls, ydl_opts))
-        qhook.infoChanged.connect(self.handleInfoChanged)
-        qlogger.messageChanged.connect(self.logEdit.appendPlainText)
-        self.barProgress.setRange(0, 1)
+        if ydl_opts:
+            self.downloadQueue.put((urls, ydl_opts))
+            qhook.infoChanged.connect(self.handleInfoChanged)
+            qlogger.messageChanged.connect(self.logEdit.appendPlainText)
+            self.barProgress.setRange(0, 1)
 
     def getOptions(self, urls, source, options):
+        if "list=" in urls[0] and "playlist" not in source:
+            with YoutubeDL({"extract_flat": "in_playlist"}) as ydl:
+                info = ydl.extract_info(urls[0], download=False)
+                playlistCount = info["playlist_count"]
+                dialog = PlaylistDialog(playlistCount)
+                if dialog.exec():
+                    playlistInput = dialog.getPlaylistInput()
+                    # a blank return will set no option so default to downloading whole playlist
+                    if playlistInput:
+                        options["playlist_items"] = playlistInput
+                else:  # will cancel playlist download
+                    return False
         if not self.checkIgnoreArchive.isChecked():
             options[
                 "download_archive"
@@ -126,6 +183,12 @@ class MyWindow(QWidget):
             options["outtmpl"] = "E:/vid storage/audio/%(title)s.%(ext)s"
         elif source == "playlists":
             options["format_sort"] = ["res:1080"]
+            options["merge_output_format"] = "mp4"
+            options[
+                "outtmpl"
+            ] = "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s"
+        elif source == "720playlists":
+            options["format_sort"] = ["res:720"]
             options["merge_output_format"] = "mp4"
             options[
                 "outtmpl"
@@ -160,7 +223,8 @@ class MyWindow(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setWindowIcon(QIcon("downFrog.png"))
     window = MyWindow()
-    window.setWindowTitle("Vid Downloader")
     window.show()
     sys.exit(app.exec())
