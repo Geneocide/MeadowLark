@@ -8,75 +8,17 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QCheckBox,
-    QDialog,
-    QLineEdit,
-    QVBoxLayout,
 )
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import Qt, QDir
 from PyQt6.QtGui import QFont, QIcon
 import QYT
 from hurry.filesize import size
 import queue
 import keyring
 from datetime import timedelta
-from threading import Timer
 from yt_dlp import YoutubeDL
-
-
-class PlaylistDialog(QDialog):
-    def __init__(self, playlistCount, parent=None):
-        super().__init__(parent)
-
-        self.setWindowTitle("Playlist Dialog")
-        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-
-        label = QLabel(
-            f"There are {playlistCount} in the playlist. Which do you want? Blank = all or format like (3,5,7-9)"
-        )
-        self.playlistInput = QLineEdit()
-        ok_button = QPushButton("OK")
-        ok_button.clicked.connect(self.accept)
-
-        layout = QVBoxLayout()
-        layout.addWidget(label)
-        layout.addWidget(self.playlistInput)
-        layout.addWidget(ok_button)
-
-        self.setLayout(layout)
-
-    def getPlaylistInput(self):
-        return self.playlistInput.text()
-
-
-class DropLabel(QLabel):
-    urlsDropped = pyqtSignal(list, str)
-    originalText = ""
-
-    def __init__(self, text, color, connection):
-        QLabel.__init__(self, text)
-        self.originalText = text
-        self.setStyleSheet(f"background-color:{color}")
-        self.setMinimumSize(150, 150)
-        self.setAcceptDrops(True)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setFont(QFont("Arial", 32))
-        self.urlsDropped.connect(connection)
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.accept()
-        else:
-            event.ignore()
-
-    def dropEvent(self, event):
-        def timeout():
-            self.setText(self.originalText)
-
-        self.setText("Added!!!")
-        t = Timer(3, timeout)
-        t.start()
-        urls = event.mimeData().urls()
-        self.urlsDropped.emit([url.toString() for url in urls], self.originalText)
+from os import path
+from UIClasses import *
 
 
 class MyWindow(QWidget):
@@ -99,7 +41,6 @@ class MyWindow(QWidget):
         self.label720 = DropLabel("720", "#7077A1", self.dropDetected)
         self.labelAudio = DropLabel("audio", "#FF9843", self.dropDetected)
         self.labelOutput = QLabel("This is the output")
-        # self.labelOutput.setStyleSheet("background-color:lightblue")
         self.labelOutput.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.labelOutput.setFont(QFont("Arial", 16))
         self.barProgress = QProgressBar()
@@ -117,25 +58,20 @@ class MyWindow(QWidget):
 
         self.downloader = QYT.QYTQueue(self.downloadQueue)
         self.downloader.messageChanged.connect(self.logEdit.appendPlainText)
+        self.downloader.queueEmpty.connect(self.handleQueueEmpty)
         self.downloader.start()
         self.setLayout(layout)
 
     def dropDetected(self, urls, source):
         qhook = QYT.QHook()
         qlogger = QYT.QLogger()
-
+        playlistsPath = ""
         if source == "playlists":
-            with open(
-                "C:/Users/etreq/OneDrive/Desktop/scripts/playlists.txt", "r"
-            ) as file:
-                for line in file:
-                    line = line.strip()
-                    if line[0] != "#":  # ignore comment lines
-                        urls.append(line)
+            playlistsPath = "C:/Users/etreq/OneDrive/Desktop/scripts/playlists.txt"
         elif source == "720playlists":
-            with open(
-                "C:/Users/etreq/OneDrive/Desktop/scripts/720playlists.txt", "r"
-            ) as file:
+            playlistsPath = "C:/Users/etreq/OneDrive/Desktop/scripts/720playlists.txt"
+        if playlistsPath:
+            with open(playlistsPath, "r") as file:
                 for line in file:
                     line = line.strip()
                     if line[0] != "#":  # ignore comment lines
@@ -220,11 +156,21 @@ class MyWindow(QWidget):
                 self.barProgress.setMaximum(total)
                 self.barProgress.setValue(downloaded)
 
+    def handleQueueEmpty(self, isEmpty):
+        if isEmpty:
+            self.labelOutput.setText("[ Ready ]")
+
 
 if __name__ == "__main__":
+    dirname = path.dirname(__file__)
+    QDir.addSearchPath("icons", path.join(dirname, "resources/icons"))
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    app.setWindowIcon(QIcon("downFrog.png"))
+    app.setWindowIcon(QIcon("icons:downFrog.png"))
+    app.setQuitOnLastWindowClosed(True)
+
     window = MyWindow()
     window.show()
+
     sys.exit(app.exec())

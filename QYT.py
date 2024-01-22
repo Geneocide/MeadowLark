@@ -34,6 +34,7 @@ class QHook(QObject):
 
 class QYTQueue(QThread):
     messageChanged = pyqtSignal(str)
+    queueEmpty = pyqtSignal(bool)
 
     def __init__(self, downloadQueue):
         super().__init__()
@@ -61,6 +62,7 @@ class QYTQueue(QThread):
                 )
                 self.is_downloading = False
             else:
+                self.queueEmpty.emit(True)
                 time.sleep(1)  # Check for new items in the queue periodically
 
     # def download(self, urls, options):
@@ -78,16 +80,16 @@ class QYTQueue(QThread):
             logger.deleteLater()
 
 
-class QYT(QObject):
-    def download(self, urls, options):
-        Thread(target=self._execute, args=(urls, options), daemon=True).start()
+# class QYT(QObject):
+#     def download(self, urls, options):
+#         Thread(target=self._execute, args=(urls, options), daemon=True).start()
 
-    def _execute(self, urls, options):
-        with YoutubeDL(options) as ydl:
-            ydl.download(urls)
-        for hook in options.get("progress_hooks", []):
-            if isinstance(hook, QHook):
-                hook.deleteLater()
-        logger = options.get("logger")
-        if isinstance(logger, QLogger):
-            logger.deleteLater()
+#     def _execute(self, urls, options):
+#         with YoutubeDL(options) as ydl:
+#             ydl.download(urls)
+#         for hook in options.get("progress_hooks", []):
+#             if isinstance(hook, QHook):
+#                 hook.deleteLater()
+#         logger = options.get("logger")
+#         if isinstance(logger, QLogger):
+#             logger.deleteLater()
