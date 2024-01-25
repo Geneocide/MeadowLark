@@ -30,16 +30,18 @@ class MyWindow(QWidget):
         layout = QGridLayout()
 
         self.buttonPlaylists = QPushButton("Playlists")
-        self.buttonPlaylists.clicked.connect(lambda: self.dropDetected([], "playlists"))
+        self.buttonPlaylists.clicked.connect(
+            lambda: self.requestDetected([], "playlists")
+        )
         self.button720Playlists = QPushButton("720 Playlists")
         self.button720Playlists.clicked.connect(
-            lambda: self.dropDetected([], "720playlists")
+            lambda: self.requestDetected([], "720playlists")
         )
         self.checkIgnoreArchive = QCheckBox("Ignore Archive?")
         self.checkIgnoreArchive.setChecked(False)
-        self.label1080 = DropLabel("1080", "#424769", self.dropDetected)
-        self.label720 = DropLabel("720", "#7077A1", self.dropDetected)
-        self.labelAudio = DropLabel("audio", "#FF9843", self.dropDetected)
+        self.label1080 = DropLabel("1080", "#424769", self.requestDetected)
+        self.label720 = DropLabel("720", "#7077A1", self.requestDetected)
+        self.labelAudio = DropLabel("audio", "#FF9843", self.requestDetected)
         self.labelOutput = QLabel("This is the output")
         self.labelOutput.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.labelOutput.setFont(QFont("Arial", 16))
@@ -62,10 +64,10 @@ class MyWindow(QWidget):
         self.downloader.start()
         self.setLayout(layout)
 
-    def dropDetected(self, urls, source):
+    def requestDetected(self, urls, source):
         qhook = QYT.QHook()
         qlogger = QYT.QLogger()
-        playlistsPath = ""
+        playlistsPath = None
         if source == "playlists":
             playlistsPath = "C:/Users/etreq/OneDrive/Desktop/scripts/playlists.txt"
         elif source == "720playlists":
@@ -77,6 +79,7 @@ class MyWindow(QWidget):
                     if line[0] != "#":  # ignore comment lines
                         urls.append(line)
 
+        # options constant for all downloads
         ydl_opts = {
             "logger": qlogger,
             "progress_hooks": [qhook],
@@ -89,7 +92,20 @@ class MyWindow(QWidget):
             qlogger.messageChanged.connect(self.logEdit.appendPlainText)
             self.barProgress.setRange(0, 1)
 
+    # parse input data and modify options accordingly
     def getOptions(self, urls, source, options):
+        # ignore archive checkbox
+        if not self.checkIgnoreArchive.isChecked():
+            options[
+                "download_archive"
+            ] = "C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt"
+        # detect and login to nebula when necessary
+        if "nebula.tv" in urls[0]:
+            options["username"] = "thegene@gmail.com"
+            options["password"] = keyring.get_password(
+                "vid downloader", "thegene@gmail.com"
+            )
+        # individual playlist dragged somewhere
         if "list=" in urls[0] and "playlist" not in source:
             with YoutubeDL({"extract_flat": "in_playlist"}) as ydl:
                 info = ydl.extract_info(urls[0], download=False)
@@ -102,37 +118,28 @@ class MyWindow(QWidget):
                         options["playlist_items"] = playlistInput
                 else:  # will cancel playlist download
                     return False
-        if not self.checkIgnoreArchive.isChecked():
-            options[
-                "download_archive"
-            ] = "C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt"
-        if "nebula.tv" in urls[0]:
-            options["username"] = "thegene@gmail.com"
-            options["password"] = keyring.get_password(
-                "vid downloader", "thegene@gmail.com"
-            )
+        # source
         if source == "audio":
             options["format"] = "m4a/bestaudio/best"
             options["postprocessors"] = [
                 {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}
             ]
             options["outtmpl"] = "E:/vid storage/audio/%(title)s.%(ext)s"
-        elif source == "playlists":
-            options["format_sort"] = ["res:1080"]
+        elif "playlists" in source:
+            options["format_sort"] = (
+                ["res:720"] if source == "720playlists" else ["res:1080"]
+            )
             options["merge_output_format"] = "mp4"
             options[
                 "outtmpl"
             ] = "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s"
-        elif source == "720playlists":
-            options["format_sort"] = ["res:720"]
-            options["merge_output_format"] = "mp4"
-            options[
-                "outtmpl"
-            ] = "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s"
+            options["ignoreerrors"] = "only_download"
+        # is a dragged 1080 or 720 video
         else:
             options["format_sort"] = [f"res:{source}"]
             options["merge_output_format"] = "mp4"
             options["outtmpl"] = "E:/vid storage/%(title)s.%(ext)s"
+
         return options
 
     def handleInfoChanged(self, d):
