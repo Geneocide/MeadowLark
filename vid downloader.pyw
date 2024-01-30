@@ -105,6 +105,8 @@ class MyWindow(QWidget):
             options["password"] = keyring.get_password(
                 "vid downloader", "thegene@gmail.com"
             )
+        # strip out unnecessary parts of URL if dropping from Watch Later
+        urls = [url.split("&list=WL")[0] for url in urls]
         # individual playlist dragged somewhere
         if "list=" in urls[0] and "playlist" not in source:
             with YoutubeDL({"extract_flat": "in_playlist"}) as ydl:
