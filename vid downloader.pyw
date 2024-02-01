@@ -167,14 +167,13 @@ class MyWindow(QWidget):
     def handleInfoChanged(self, d):
         MAX_INT = 2147483647
         if d.get("status") == "downloading":
-            if "total_bytes" in d:
-                total = d["total_bytes"]
-                downloaded = d["downloaded_bytes"]
-            elif "total_bytes_estimate" in d:
-                total = d["total_bytes_estimate"]
-                total = round(total)
-                downloaded = d["downloaded_bytes"]
-            speed = d["speed"] if d["speed"] else 0
+            total = d.get("total_bytes") or d.get(
+                "total_bytes_estimate", round(d.get("total_bytes_estimate", 0))
+            )
+            downloaded = d.get("downloaded_bytes", 0)
+            speed = d.get("speed", 0)
+            if not speed:
+                speed = 0
             output = f"{size(downloaded)} of {size(total)} at {size(speed)}/s"
             if d.get("eta"):
                 output += f" | ETA: {timedelta(seconds=round(d['eta']))}"
