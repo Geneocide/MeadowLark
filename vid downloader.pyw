@@ -31,7 +31,7 @@ class MyWindow(QWidget):
 
         self.buttonPlaylists = QPushButton("Playlists")
         self.buttonPlaylists.clicked.connect(
-            lambda: self.requestDetected([], "playlists")
+            lambda: self.requestDetected([], "1080playlists")
         )
         self.button720Playlists = QPushButton("720 Playlists")
         self.button720Playlists.clicked.connect(
@@ -42,7 +42,7 @@ class MyWindow(QWidget):
         self.label1080 = DropLabel("1080", "#424769", self.requestDetected)
         self.label720 = DropLabel("720", "#7077A1", self.requestDetected)
         self.labelAudio = DropLabel("audio", "#FF9843", self.requestDetected)
-        self.labelOutput = QLabel("This is the output")
+        self.labelOutput = QLabel("[ Waiting ]")
         self.labelOutput.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.labelOutput.setFont(QFont("Arial", 16))
         self.barProgress = QProgressBar()
@@ -59,16 +59,17 @@ class MyWindow(QWidget):
         layout.addWidget(self.logEdit, 4, 0, 1, 3)
 
         self.downloader = QYT.QYTQueue(self.downloadQueue)
-        self.downloader.messageChanged.connect(self.logEdit.appendPlainText)
+        # self.downloader.messageChanged.connect(self.logEdit.appendPlainText)
+        self.downloader.messageChanged.connect(self.handleLogEntry)
         self.downloader.queueEmpty.connect(self.handleQueueEmpty)
         self.downloader.start()
         self.setLayout(layout)
 
     def requestDetected(self, urls, source):
         qhook = QYT.QHook()
-        qlogger = QYT.QLogger()
+        qlogger = QYT.QLogger(self.downloadQueue)
         playlistsPath = {
-            "playlists": "C:/Users/etreq/OneDrive/Desktop/scripts/playlists.txt",
+            "1080playlists": "C:/Users/etreq/OneDrive/Desktop/scripts/playlists.txt",
             "720playlists": "C:/Users/etreq/OneDrive/Desktop/scripts/720playlists.txt",
         }.get(source)
         if playlistsPath:
@@ -88,7 +89,8 @@ class MyWindow(QWidget):
         if ydl_opts:
             self.downloadQueue.put((urls, ydl_opts))
             qhook.infoChanged.connect(self.handleInfoChanged)
-            qlogger.messageChanged.connect(self.logEdit.appendPlainText)
+            # qlogger.messageChanged.connect(self.logEdit.appendPlainText)
+            qlogger.messageChanged.connect(self.handleLogEntry)
             self.barProgress.setRange(0, 1)
 
     # parse input data and modify options accordingly
@@ -156,6 +158,11 @@ class MyWindow(QWidget):
             )
 
         return options
+
+    def handleLogEntry(self, entry):
+        if "[Merger]" in entry:
+            self.labelOutput.setText("Merging! This can take a while...")
+        self.logEdit.appendPlainText(entry)
 
     def handleInfoChanged(self, d):
         MAX_INT = 2147483647

@@ -1,7 +1,6 @@
-from threading import Thread
+from queue import Queue
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
 from yt_dlp import YoutubeDL
-import time
 
 # import logging
 
@@ -10,6 +9,11 @@ import time
 
 class QLogger(QObject):
     messageChanged = pyqtSignal(str)
+
+    def __init__(self, downloadQueue: Queue) -> None:
+        super().__init__()
+        self.downloadQueue = downloadQueue
+        self.daemon = True
 
     def debug(self, msg):
         # logging.debug(msg)
@@ -24,11 +28,46 @@ class QLogger(QObject):
         # logging.error(msg)
         self.messageChanged.emit(msg)
 
+    # def download(self, urls, options):
+    #     with YoutubeDL(options) as ydl:
+    #         ydl.cache.remove()
+    #         try:
+    #             ydl.download(urls)
+    #         except Exception as e:
+    #             return f"An error occurred during the download: {str(e)}"
+    #     for hook in options.get("progress_hooks", []):
+    #         if hasattr(hook, "deleteLater"):
+    #             hook.deleteLater()
+    #     logger = options.get("logger")
+    #     if hasattr(logger, "messageChanged"):
+    #         # Reuse logger for subsequent downloads
+    #         logger.messageChanged.disconnect()
+    #         logger.messageChanged.connect(self.messageChanged.emit)
+
 
 class QHook(QObject):
+    """
+    A class that emits a signal when the info is changed.
+    """
+
     infoChanged = pyqtSignal(dict)
 
-    def __call__(self, d):
+    def __init__(self, parent=None):
+        """
+        Initialize the QHook object.
+
+        Args:
+            parent (QObject): The parent object. Default is None.
+        """
+        super().__init__(parent)
+
+    def __call__(self, d: dict):
+        """
+        Call the QHook object.
+
+        Args:
+            d (dict): The dictionary containing the info.
+        """
         self.infoChanged.emit(d.copy())
 
 
@@ -38,46 +77,31 @@ class QYTQueue(QThread):
 
     def __init__(self, downloadQueue):
         super().__init__()
+
         self.downloadQueue = downloadQueue
-        self.is_downloading = False
         self.daemon = True
 
     def run(self):
         while True:
-            if not self.downloadQueue.empty():
-                if self.is_downloading:
-                    # Wait for the current download to finish
-                    while self.is_downloading:
-                        time.sleep(1)
-
-                item = self.downloadQueue.get()
-                self.is_downloading = True
-                self.messageChanged.emit(
-                    "\n".join(["------  Downloading  ------"] + item[0])
-                )
-                # Perform the download task
-                self.download(item[0], item[1])
-                self.messageChanged.emit(
-                    "\n".join(["------  Finished downloading  ------"] + item[0])
-                )
-                self.is_downloading = False
-            else:
+            item = self.downloadQueue.get()
+            self.messageChanged.emit(f"------  Downloading  ------\n{item[0]}")
+            # Perform the download task
+            self.download(item[0], item[1])
+            self.messageChanged.emit(f"------  Finished downloading  ------\n{item[0]}")
+            if self.downloadQueue.empty():
                 self.queueEmpty.emit(True)
-                time.sleep(1)  # Check for new items in the queue periodically
-
-    # def download(self, urls, options):
-    #     Thread(target=self._execute, args=(urls, options), daemon=True).start()
 
     def download(self, urls, options):
         with YoutubeDL(options) as ydl:
             ydl.cache.remove()
             ydl.download(urls)
         for hook in options.get("progress_hooks", []):
-            if isinstance(hook, QHook):
+            if hasattr(hook, "infoChanged"):
                 hook.deleteLater()
         logger = options.get("logger")
         if isinstance(logger, QLogger):
-            logger.deleteLater()
+            logger.messageChanged.disconnect()
+            logger.messageChanged.connect(self.messageChanged.emit)
 
 
 # class QYT(QObject):
