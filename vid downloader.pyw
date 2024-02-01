@@ -67,17 +67,16 @@ class MyWindow(QWidget):
     def requestDetected(self, urls, source):
         qhook = QYT.QHook()
         qlogger = QYT.QLogger()
-        playlistsPath = None
-        if source == "playlists":
-            playlistsPath = "C:/Users/etreq/OneDrive/Desktop/scripts/playlists.txt"
-        elif source == "720playlists":
-            playlistsPath = "C:/Users/etreq/OneDrive/Desktop/scripts/720playlists.txt"
+        playlistsPath = {
+            "playlists": "C:/Users/etreq/OneDrive/Desktop/scripts/playlists.txt",
+            "720playlists": "C:/Users/etreq/OneDrive/Desktop/scripts/720playlists.txt",
+        }.get(source)
         if playlistsPath:
-            with open(playlistsPath, "r") as file:
-                for line in file:
-                    line = line.strip()
-                    if line[0] != "#":  # ignore comment lines
-                        urls.append(line)
+            try:
+                with open(playlistsPath, "r") as file:
+                    urls = [line.strip() for line in file if line[0] != "#"]
+            except FileNotFoundError:
+                print("File not found.")
 
         # options constant for all downloads
         ydl_opts = {
@@ -107,6 +106,7 @@ class MyWindow(QWidget):
             )
         # strip out unnecessary parts of URL if dropping from Watch Later
         urls = [url.split("&list=WL")[0] for url in urls]
+
         # individual playlist dragged somewhere
         if "list=" in urls[0] and "playlist" not in source:
             with YoutubeDL({"extract_flat": "in_playlist"}) as ydl:
@@ -118,34 +118,48 @@ class MyWindow(QWidget):
                     # a blank return will set no option so default to downloading whole playlist
                     if playlistInput:
                         options["playlist_items"] = playlistInput
-                else:  # will cancel playlist download
-                    return False
+                    else:  # will cancel playlist download
+                        return False
+
         # source
-        if source == "audio":
-            options["format"] = "m4a/bestaudio/best"
-            options["postprocessors"] = [
-                {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}
-            ]
-            options["outtmpl"] = "E:/vid storage/audio/%(title)s.%(ext)s"
-        elif "playlists" in source:
-            options["format_sort"] = (
-                ["res:720"] if source == "720playlists" else ["res:1080"]
-            )
-            options["merge_output_format"] = "mp4"
-            options[
-                "outtmpl"
-            ] = "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s"
-            options["ignoreerrors"] = "only_download"
-        # is a dragged 1080 or 720 video
+        source_options = {
+            "audio": {
+                "format": "m4a/bestaudio/best",
+                "postprocessors": [
+                    {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}
+                ],
+                "outtmpl": "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/%(title)s.%(ext)s",
+            },
+            "720playlists": {
+                "format_sort": ["res:720"],
+                "merge_output_format": "mp4",
+                "outtmpl": "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s",
+                "ignoreerrors": "only_download",
+            },
+            "1080playlists": {
+                "format_sort": ["res:1080"],
+                "merge_output_format": "mp4",
+                "outtmpl": "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s",
+                "ignoreerrors": "only_download",
+            },
+        }
+
+        if source in source_options:
+            options.update(source_options[source])
         else:
-            options["format_sort"] = [f"res:{source}"]
-            options["merge_output_format"] = "mp4"
-            options["outtmpl"] = "E:/vid storage/%(title)s.%(ext)s"
+            options.update(
+                {
+                    "format_sort": [f"res:{source}"],
+                    "merge_output_format": "mp4",
+                    "outtmpl": "E:/vid storage/%(title)s.%(ext)s",
+                }
+            )
 
         return options
 
     def handleInfoChanged(self, d):
-        if d["status"] == "downloading":
+        MAX_INT = 2147483647
+        if d.get("status") == "downloading":
             if "total_bytes" in d:
                 total = d["total_bytes"]
                 downloaded = d["downloaded_bytes"]
@@ -155,19 +169,21 @@ class MyWindow(QWidget):
                 downloaded = d["downloaded_bytes"]
             speed = d["speed"] if d["speed"] else 0
             output = f"{size(downloaded)} of {size(total)} at {size(speed)}/s"
-            if d["eta"]:
+            if d.get("eta"):
                 output += f" | ETA: {timedelta(seconds=round(d['eta']))}"
             self.labelOutput.setText(output)
-            if total > 2147483647:  # scale things down if too big to fit in int
-                self.barProgress.setMaximum(2147483647)
-                self.barProgress.setValue(int(downloaded / total * 2147483647))
-            else:
-                self.barProgress.setMaximum(total)
-                self.barProgress.setValue(downloaded)
+            if total is not None:
+                if total > MAX_INT:
+                    self.barProgress.setMaximum(MAX_INT)
+                    self.barProgress.setValue(int(downloaded / total * MAX_INT))
+                else:
+                    self.barProgress.setMaximum(total)
+                    self.barProgress.setValue(downloaded)
 
     def handleQueueEmpty(self, isEmpty):
         if isEmpty:
             self.labelOutput.setText("[ Ready ]")
+        return isEmpty
 
 
 if __name__ == "__main__":
@@ -182,4 +198,4 @@ if __name__ == "__main__":
     window = MyWindow()
     window.show()
 
-    sys.exit(app.exec())
+    app.exec()
