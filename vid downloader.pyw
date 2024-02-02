@@ -176,14 +176,14 @@ class MyWindow(QWidget):
                 speed = 0
             output = f"{size(downloaded)} of {size(total)} at {size(speed)}/s"
             if d.get("eta"):
-                output += f" | ETA: {timedelta(seconds=round(d['eta']))}"
+                output += f" | ETA: {timedelta(seconds=round(d.get('eta')))}"
             self.labelOutput.setText(output)
             if total is not None:
                 if total > MAX_INT:
                     self.barProgress.setMaximum(MAX_INT)
                     self.barProgress.setValue(int(downloaded / total * MAX_INT))
                 else:
-                    self.barProgress.setMaximum(total)
+                    self.barProgress.setMaximum(int(total))
                     self.barProgress.setValue(downloaded)
 
     def handleQueueEmpty(self, isEmpty):
