@@ -65,6 +65,29 @@ class MyWindow(QWidget):
         self.downloader.start()
         self.setLayout(layout)
 
+    def append_properties(self, dictionary, properties):
+        """
+        Appends properties to a dictionary recursively.
+
+        Args:
+            dictionary (dict): The dictionary to append properties to.
+            properties (dict): The properties to append.
+
+        Returns:
+            dict: The updated dictionary.
+        """
+        new_dictionary = dictionary.copy()
+        for key, value in properties.items():
+            dictionary_value = new_dictionary.get(key)
+            if isinstance(dictionary_value, (list, dict)):
+                if isinstance(dictionary_value, list) and isinstance(value, list):
+                    dictionary_value.extend(value)
+                elif isinstance(dictionary_value, dict):
+                    self.append_properties(dictionary_value, value)
+            else:
+                new_dictionary[key] = value
+        return new_dictionary
+
     def requestDetected(self, urls, source):
         qhook = QYT.QHook()
         qlogger = QYT.QLogger(self.downloadQueue)
@@ -84,8 +107,16 @@ class MyWindow(QWidget):
             "logger": qlogger,
             "progress_hooks": [qhook],
             "windowsfilenames": True,
+            "postprocessors": [
+                {"key": "SponsorBlock"},
+                {
+                    "key": "ModifyChapters",
+                    "remove_sponsor_segments": ["sponsor", "selfpromo"],
+                },
+            ],
         }
-        ydl_opts = self.getOptions(urls, source, ydl_opts)
+        properties = self.getOptions(urls, source)
+        ydl_opts = self.append_properties(ydl_opts, properties)
         if ydl_opts:
             self.downloadQueue.put((urls, ydl_opts))
             qhook.infoChanged.connect(self.handleInfoChanged)
@@ -94,16 +125,17 @@ class MyWindow(QWidget):
             self.barProgress.setRange(0, 1)
 
     # parse input data and modify options accordingly
-    def getOptions(self, urls, source, options):
+    def getOptions(self, urls, source):
+        properties = {}
         # ignore archive checkbox
         if not self.checkIgnoreArchive.isChecked():
-            options[
-                "download_archive"
-            ] = "C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt"
+            properties["download_archive"] = (
+                "C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt"
+            )
         # detect and login to nebula when necessary
         if "nebula.tv" in urls[0]:
-            options["username"] = "thegene@gmail.com"
-            options["password"] = keyring.get_password(
+            properties["username"] = "thegene@gmail.com"
+            properties["password"] = keyring.get_password(
                 "vid downloader", "thegene@gmail.com"
             )
         # strip out unnecessary parts of URL if dropping from Watch Later
@@ -119,7 +151,7 @@ class MyWindow(QWidget):
                     playlistInput = dialog.getPlaylistInput()
                     # a blank return will set no option so default to downloading whole playlist
                     if playlistInput:
-                        options["playlist_items"] = playlistInput
+                        properties["playlist_items"] = playlistInput
                     else:  # will cancel playlist download
                         return False
 
@@ -147,9 +179,9 @@ class MyWindow(QWidget):
         }
 
         if source in source_options:
-            options.update(source_options[source])
+            properties.update(source_options[source])
         else:
-            options.update(
+            properties.update(
                 {
                     "format_sort": [f"res:{source}"],
                     "merge_output_format": "mp4",
@@ -157,7 +189,7 @@ class MyWindow(QWidget):
                 }
             )
 
-        return options
+        return properties
 
     def handleLogEntry(self, entry):
         if "[Merger]" in entry:

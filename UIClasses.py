@@ -27,7 +27,7 @@ class PlaylistDialog(QDialog):
         label.setFont(QFont(QFont().defaultFamily(), 12))
         self.playlistInput = QLineEdit()
         ok_button = QPushButton()
-        ok_button.setText(QPushButton.StandardButton.Ok.text())
+        ok_button.setText("OK")
         ok_button.clicked.connect(self.accept)
 
         layout = QGridLayout()
