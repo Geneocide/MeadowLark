@@ -1,10 +1,9 @@
 from queue import Queue
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
 from yt_dlp import YoutubeDL
+import logging
 
-# import logging
-
-# logging.basicConfig(filename="logfile.txt", level=logging.DEBUG)
+logging.basicConfig(filename="logfile.txt", level=logging.DEBUG)
 
 
 class QLogger(QObject):
@@ -25,7 +24,7 @@ class QLogger(QObject):
         self.messageChanged.emit(msg)
 
     def error(self, msg):
-        # logging.error(msg)
+        logging.error(msg)
         self.messageChanged.emit(msg)
 
     # def download(self, urls, options):
