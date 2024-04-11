@@ -17,7 +17,8 @@ import queue
 import keyring
 from datetime import timedelta
 from yt_dlp import YoutubeDL
-from os import path
+from os import path, remove
+import pickle
 from UIClasses import *
 
 
@@ -26,7 +27,7 @@ class MyWindow(QWidget):
         super().__init__()
         self.setWindowTitle("Vid Downloader")
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-        self.downloadQueue = queue.Queue()
+
         layout = QGridLayout()
 
         self.buttonPlaylists = QPushButton("Playlists")
@@ -57,6 +58,17 @@ class MyWindow(QWidget):
         layout.addWidget(self.labelOutput, 2, 0, 1, 3)
         layout.addWidget(self.barProgress, 3, 0, 1, 3)
         layout.addWidget(self.logEdit, 4, 0, 1, 3)
+
+        if path.exists("persisted_queue.txt"):
+            try:
+                with open("persisted_queue.txt", "rb") as f:
+                    self.downloadQueue = pickle.load(f)
+                remove("persisted_queue.txt")
+                print("Loaded queue from file")
+            except (IOError, pickle.UnpicklingError) as e:
+                print(f"Error loading queue from file: {e}")
+        else:
+            self.downloadQueue = queue.Queue()
 
         self.downloader = QYT.QYTQueue(self.downloadQueue)
         # self.downloader.messageChanged.connect(self.logEdit.appendPlainText)
