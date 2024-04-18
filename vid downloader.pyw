@@ -59,12 +59,17 @@ class MyWindow(QWidget):
         layout.addWidget(self.barProgress, 3, 0, 1, 3)
         layout.addWidget(self.logEdit, 4, 0, 1, 3)
 
-        if path.exists("persisted_queue.txt"):
+        queueFile = "persisted_queue.txt"
+        if path.exists(queueFile):
             try:
-                with open("persisted_queue.txt", "rb") as f:
-                    self.downloadQueue = pickle.load(f)
-                remove("persisted_queue.txt")
-                print("Loaded queue from file")
+                if path.getsize(queueFile) == 0:
+                    print("Empty Queue File... deleted")
+                    remove(queueFile)
+                else:
+                    with open(queueFile, "rb") as f:
+                        self.downloadQueue.unfinished_tasks = pickle.load(f)
+                    remove(queueFile)
+                    print("Loaded queue from file")
             except (IOError, pickle.UnpicklingError) as e:
                 print(f"Error loading queue from file: {e}")
         else:

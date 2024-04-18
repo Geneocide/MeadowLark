@@ -28,8 +28,8 @@ class QLogger(QObject):
 
     def error(self, msg):
         logging.error(msg)
-        with ("persisted_queue.txt", "wb") as f:
-            pickle.dump(self.downloadQueue)
+        with open("persisted_queue.txt", "wb") as f:
+            pickle.dump(self.downloadQueue.unfinished_tasks, f)
         self.messageChanged.emit(msg)
 
     # def download(self, urls, options):
