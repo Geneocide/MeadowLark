@@ -2,7 +2,6 @@ from queue import Queue
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
 from yt_dlp import YoutubeDL
 import logging
-import pickle
 
 logging.basicConfig(
     filename="logfile.txt", level=logging.ERROR, format="%(asctime)s %(message)s"
@@ -28,8 +27,6 @@ class QLogger(QObject):
 
     def error(self, msg):
         logging.error(msg)
-        with open("persisted_queue.txt", "wb") as f:
-            pickle.dump(self.downloadQueue.unfinished_tasks, f)
         self.messageChanged.emit(msg)
 
     # def download(self, urls, options):

@@ -18,7 +18,6 @@ import keyring
 from datetime import timedelta
 from yt_dlp import YoutubeDL
 from os import path, remove
-import pickle
 from UIClasses import *
 
 
@@ -59,22 +58,7 @@ class MyWindow(QWidget):
         layout.addWidget(self.barProgress, 3, 0, 1, 3)
         layout.addWidget(self.logEdit, 4, 0, 1, 3)
 
-        queueFile = "persisted_queue.txt"
-        if path.exists(queueFile):
-            try:
-                if path.getsize(queueFile) == 0:
-                    print("Empty Queue File... deleted")
-                    remove(queueFile)
-                else:
-                    with open(queueFile, "rb") as f:
-                        self.downloadQueue.unfinished_tasks = pickle.load(f)
-                    remove(queueFile)
-                    print("Loaded queue from file")
-            except (IOError, pickle.UnpicklingError) as e:
-                print(f"Error loading queue from file: {e}")
-        else:
-            self.downloadQueue = queue.Queue()
-
+        self.downloadQueue = queue.Queue()
         self.downloader = QYT.QYTQueue(self.downloadQueue)
         # self.downloader.messageChanged.connect(self.logEdit.appendPlainText)
         self.downloader.messageChanged.connect(self.handleLogEntry)
