@@ -17,7 +17,7 @@ import queue
 import keyring
 from datetime import timedelta
 from yt_dlp import YoutubeDL
-from os import path, remove
+from os import path, startfile
 from UIClasses import *
 
 
@@ -226,6 +226,7 @@ class MyWindow(QWidget):
 
 
 if __name__ == "__main__":
+    startfile(r"E:\vid storage")
     dirname = path.dirname(__file__)
     QDir.addSearchPath("icons", path.join(dirname, "resources/icons"))
 
