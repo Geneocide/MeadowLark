@@ -17,6 +17,7 @@ import queue
 import keyring
 from datetime import timedelta
 from yt_dlp import YoutubeDL
+from yt_dlp import utils
 from os import path, startfile
 from UIClasses import *
 
@@ -115,6 +116,8 @@ class MyWindow(QWidget):
                     "remove_sponsor_segments": ["sponsor", "selfpromo"],
                 },
             ],
+            "socket-timeout": 120,
+            "max_fragment_retries": 10,
         }
         properties = self.getOptions(urls, source)
         ydl_opts = self.append_properties(ydl_opts, properties)
@@ -187,6 +190,7 @@ class MyWindow(QWidget):
                     "format_sort": [f"res:{source}"],
                     "merge_output_format": "mp4",
                     "outtmpl": "E:/vid storage/%(title)s.%(ext)s",
+                    "match_filter": utils.match_filter_func("!is_live"),
                 }
             )
 

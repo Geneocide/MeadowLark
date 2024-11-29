@@ -2,6 +2,7 @@ from queue import Queue
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
 from yt_dlp import YoutubeDL
 import logging
+from wakepy import keep
 
 logging.basicConfig(
     filename="logfile.txt", level=logging.ERROR, format="%(asctime)s %(message)s"
@@ -83,14 +84,17 @@ class QYTQueue(QThread):
         self.daemon = True
 
     def run(self):
-        while True:
-            item = self.downloadQueue.get()
-            self.messageChanged.emit(f"------  Downloading  ------\n{item[0]}")
-            # Perform the download task
-            self.download(item[0], item[1])
-            self.messageChanged.emit(f"------  Finished downloading  ------\n{item[0]}")
-            if self.downloadQueue.empty():
-                self.queueEmpty.emit(True)
+        with keep.running():
+            while True:
+                item = self.downloadQueue.get()
+                self.messageChanged.emit(f"------  Downloading  ------\n{item[0]}")
+                # Perform the download task
+                self.download(item[0], item[1])
+                self.messageChanged.emit(
+                    f"------  Finished downloading  ------\n{item[0]}"
+                )
+                if self.downloadQueue.empty():
+                    self.queueEmpty.emit(True)
 
     def download(self, urls, options):
         with YoutubeDL(options) as ydl:
