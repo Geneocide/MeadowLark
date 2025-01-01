@@ -120,13 +120,14 @@ class MyWindow(QWidget):
             "max_fragment_retries": 10,
         }
         properties = self.getOptions(urls, source)
-        ydl_opts = self.append_properties(ydl_opts, properties)
-        if ydl_opts:
-            self.downloadQueue.put((urls, ydl_opts))
-            qhook.infoChanged.connect(self.handleInfoChanged)
-            # qlogger.messageChanged.connect(self.logEdit.appendPlainText)
-            qlogger.messageChanged.connect(self.handleLogEntry)
-            self.barProgress.setRange(0, 1)
+        if properties:
+            ydl_opts = self.append_properties(ydl_opts, properties)
+            if ydl_opts:
+                self.downloadQueue.put((urls, ydl_opts))
+                qhook.infoChanged.connect(self.handleInfoChanged)
+                # qlogger.messageChanged.connect(self.logEdit.appendPlainText)
+                qlogger.messageChanged.connect(self.handleLogEntry)
+                self.barProgress.setRange(0, 1)
 
     # parse input data and modify options accordingly
     def getOptions(self, urls, source):
@@ -156,8 +157,10 @@ class MyWindow(QWidget):
                     # a blank return will set no option so default to downloading whole playlist
                     if playlistInput:
                         properties["playlist_items"] = playlistInput
-                    else:  # will cancel playlist download
-                        return False
+                    if source is not "audio":
+                        source += "playlists"
+                else:  # will cancel playlist download
+                    return False
 
         # source
         source_options = {
