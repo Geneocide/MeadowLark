@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QCheckBox,
+    QHBoxLayout,
 )
 from PyQt6.QtCore import Qt, QDir
 from PyQt6.QtGui import QFont, QIcon
@@ -16,10 +17,15 @@ from hurry.filesize import size
 import queue
 import keyring
 from datetime import timedelta
+
 from yt_dlp import YoutubeDL
 from yt_dlp import utils
+
 from os import path, startfile
 from UIClasses import *
+import subprocess
+import os
+import psutil
 
 
 class MyWindow(QWidget):
@@ -38,8 +44,12 @@ class MyWindow(QWidget):
         self.button720Playlists.clicked.connect(
             lambda: self.requestDetected([], "720playlists")
         )
+        rightBox = QHBoxLayout()
         self.checkIgnoreArchive = QCheckBox("Ignore Archive?")
         self.checkIgnoreArchive.setChecked(False)
+        self.buttonUpdate = QPushButton("⤓")
+        self.buttonUpdate.clicked.connect(lambda: self.requestDetected([], "Update"))
+        self.buttonUpdate.setVisible(True)
         self.label1080 = DropLabel("1080", "#424769", self.requestDetected)
         self.label720 = DropLabel("720", "#7077A1", self.requestDetected)
         self.labelAudio = DropLabel("audio", "#FF9843", self.requestDetected)
@@ -49,9 +59,15 @@ class MyWindow(QWidget):
         self.barProgress = QProgressBar()
         self.logEdit = QPlainTextEdit(readOnly=True)
 
+        rightBox.addWidget(self.checkIgnoreArchive)
+        rightBox.addWidget(self.buttonUpdate)
+
         layout.addWidget(self.buttonPlaylists, 0, 0)
         layout.addWidget(self.button720Playlists, 0, 1)
-        layout.addWidget(self.checkIgnoreArchive, 0, 2)
+        layout.addLayout(rightBox, 0, 2)
+        layout.setColumnStretch(2, 1)
+        # layout.addWidget(self.checkIgnoreArchive, 0, 2)
+        # layout.addWidget(self.buttonUpdate, 0, 3)
         layout.addWidget(self.label1080, 1, 0)
         layout.addWidget(self.label720, 1, 1)
         layout.addWidget(self.labelAudio, 1, 2)
@@ -66,6 +82,8 @@ class MyWindow(QWidget):
         self.downloader.queueEmpty.connect(self.handleQueueEmpty)
         self.downloader.start()
         self.setLayout(layout)
+
+        self.latest_version = self.checkForUpdates()
 
     def append_properties(self, dictionary, properties):
         """
@@ -93,6 +111,9 @@ class MyWindow(QWidget):
     def requestDetected(self, urls, source):
         qhook = QYT.QHook()
         qlogger = QYT.QLogger(self.downloadQueue)
+        if source == "Update":
+            self.doUpdates(self.latest_version)
+            return
         playlistsPath = {
             "1080playlists": "C:/Users/etreq/OneDrive/Desktop/scripts/playlists.txt",
             "720playlists": "C:/Users/etreq/OneDrive/Desktop/scripts/720playlists.txt",
@@ -143,6 +164,10 @@ class MyWindow(QWidget):
             properties["password"] = keyring.get_password(
                 "vid downloader", "thegene@gmail.com"
             )
+        # detect and use cookies for youtube if necessary
+        elif "youtube.com" in urls[0]:
+            properties["cookiefile"] = "cookies.txt"
+            # properties["cookiesfrombrowser"] = ("edge",)
         # strip out unnecessary parts of URL if dropping from Watch Later
         urls = [url.split("&list=WL")[0] for url in urls]
 
@@ -157,7 +182,7 @@ class MyWindow(QWidget):
                     # a blank return will set no option so default to downloading whole playlist
                     if playlistInput:
                         properties["playlist_items"] = playlistInput
-                    if source is not "audio":
+                    if source != "audio":
                         source += "playlists"
                 else:  # will cancel playlist download
                     return False
@@ -231,11 +256,61 @@ class MyWindow(QWidget):
             self.labelOutput.setText("[ Ready ]")
         return isEmpty
 
+    def checkForUpdates(self):
+        result = subprocess.run(
+            ["pip", "index", "versions", "yt-dlp"], capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            self.buttonUpdate.setStyleSheet("color: red;")
+            return
+
+        index_info = result.stdout.split("\n")
+        installed_version = index_info[2].split(":")[1].strip()
+        latest_version = index_info[3].split(":")[1].strip()
+
+        if latest_version == installed_version:
+            self.buttonUpdate.setVisible(False)
+        else:
+            self.buttonUpdate.setStyleSheet("color: red;")
+
+        return latest_version
+
+    def doUpdates(self, latest_version):
+        upgrade_process = subprocess.run(["pip", "install", "--upgrade", "yt-dlp"])
+        if upgrade_process.returncode == 0:
+            result = subprocess.run(
+                ["pip", "show", "yt-dlp"], capture_output=True, text=True
+            )
+            installed_version = result.stdout.split("\n")[1].split(":")[1].strip()
+            if installed_version == latest_version:
+                # update successful
+                python = sys.executable
+                script = os.path.realpath(sys.argv[0])
+
+                os.execl(python, python, script, *sys.argv[1:])
+            else:
+                # update failed
+                self.buttonUpdate.setStyleSheet("color: red;")
+
+
+# def is_firefox_running():
+#     """Check if Firefox is already running."""
+#     for process in psutil.process_iter(["name"]):
+#         if process.info["name"] == "firefox.exe":
+#             return True
+#     return False
+
 
 if __name__ == "__main__":
     startfile(r"E:\vid storage")
     dirname = path.dirname(__file__)
     QDir.addSearchPath("icons", path.join(dirname, "resources/icons"))
+
+    # Open Firefox
+    # if not is_firefox_running():
+    #     subprocess.Popen(
+    #         [r"C:/Program Files/Mozilla Firefox/firefox.exe", "https://www.youtube.com"]
+    #     )
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")

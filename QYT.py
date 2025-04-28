@@ -97,16 +97,24 @@ class QYTQueue(QThread):
                     self.queueEmpty.emit(True)
 
     def download(self, urls, options):
-        with YoutubeDL(options) as ydl:
-            ydl.cache.remove()
-            ydl.download(urls)
-        for hook in options.get("progress_hooks", []):
-            if hasattr(hook, "infoChanged"):
-                hook.deleteLater()
-        logger = options.get("logger")
-        if isinstance(logger, QLogger):
-            logger.messageChanged.disconnect()
-            logger.messageChanged.connect(self.messageChanged.emit)
+        try:
+            with YoutubeDL(options) as ydl:
+                ydl.cache.remove()
+                ydl.download(urls)
+        except Exception as e:
+            error_message = f"Error downloading {urls}: {str(e)}"
+            self.messageChanged.emit(error_message)
+            logger = options.get("logger")
+            if isinstance(logger, QLogger):
+                logger.error(error_message)
+        finally:
+            for hook in options.get("progress_hooks", []):
+                if hasattr(hook, "infoChanged"):
+                    hook.deleteLater()
+            logger = options.get("logger")
+            if isinstance(logger, QLogger):
+                logger.messageChanged.disconnect()
+                logger.messageChanged.connect(self.messageChanged.emit)
 
 
 # class QYT(QObject):
