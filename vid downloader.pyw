@@ -25,7 +25,7 @@ from os import path, startfile
 from UIClasses import *
 import subprocess
 import os
-import psutil
+import webbrowser
 
 
 class MyWindow(QWidget):
@@ -139,6 +139,7 @@ class MyWindow(QWidget):
             ],
             "socket-timeout": 120,
             "max_fragment_retries": 10,
+            "mtime": True,
         }
         properties = self.getOptions(urls, source)
         if properties:
@@ -277,6 +278,7 @@ class MyWindow(QWidget):
 
     def doUpdates(self, latest_version):
         upgrade_process = subprocess.run(["pip", "install", "--upgrade", "yt-dlp"])
+        webbrowser.open("https://github.com/yt-dlp/yt-dlp/blob/master/Changelog.md")
         if upgrade_process.returncode == 0:
             result = subprocess.run(
                 ["pip", "show", "yt-dlp"], capture_output=True, text=True
@@ -286,8 +288,8 @@ class MyWindow(QWidget):
                 # update successful
                 python = sys.executable
                 script = os.path.realpath(sys.argv[0])
-
-                os.execl(python, python, script, *sys.argv[1:])
+                subprocess.Popen([python, script] + sys.argv[1:])
+                sys.exit()  # terminate the current process.
             else:
                 # update failed
                 self.buttonUpdate.setStyleSheet("color: red;")
