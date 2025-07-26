@@ -1,35 +1,83 @@
+"""
+Vid Downloader - A PyQt6-based GUI application for downloading and managing video and audio content from YouTube and other platforms using yt-dlp.
+
+This application provides a user-friendly interface for batch downloading videos, playlists, and audio files with customizable options. It supports drag-and-drop, playlist selection, progress tracking, and automatic updates for yt-dlp.
+
+Features:
+- Drag-and-drop support for video/audio URLs.
+- Batch downloading of playlists (1080p, 720p, audio-only).
+- Custom output templates and post-processing (e.g., SponsorBlock, chapter modification).
+- Progress bar and real-time log output.
+- Optional archive checking to avoid duplicate downloads.
+- Automatic detection and login for supported platforms (e.g., Nebula).
+- Cookie-based authentication for YouTube.
+- Update checker and one-click upgrade for yt-dlp.
+- Integration with system keyring for secure credential storage.
+- Opens download directory and sets up application icon resources on startup.
+
+Usage:
+- Run this script directly to launch the GUI.
+- Drag URLs or select playlist options to queue downloads.
+- Monitor progress and logs in the main window.
+- Use the update button to check for and install yt-dlp updates.
+
+Dependencies:
+- Python 3.10+
+- PyQt6
+- yt-dlp
+- hurry.filesize
+- keyring
+- Custom modules: QYT, UIClasses
+
+Author: Gene
+"""
+
+import os
+import queue
+import shutil
+import subprocess
 import sys
+import webbrowser
+from datetime import timedelta
+from os import startfile
+from pathlib import Path
+
+import keyring
+from hurry.filesize import size
+from PyQt6.QtCore import QDir, Qt
+from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
-    QLabel,
-    QWidget,
-    QGridLayout,
-    QProgressBar,
-    QPlainTextEdit,
-    QPushButton,
     QCheckBox,
+    QGridLayout,
     QHBoxLayout,
+    QLabel,
+    QPlainTextEdit,
+    QProgressBar,
+    QPushButton,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, QDir
-from PyQt6.QtGui import QFont, QIcon
+from yt_dlp import YoutubeDL, utils
+
 import QYT
-from hurry.filesize import size
-import queue
-import keyring
-from datetime import timedelta
-
-from yt_dlp import YoutubeDL
-from yt_dlp import utils
-
-from os import path, startfile
-from UIClasses import *
-import subprocess
-import os
-import webbrowser
+from UIClasses import DropLabel, PlaylistDialog
 
 
 class MyWindow(QWidget):
-    def __init__(self):
+    """
+    MyWindow - A PyQt6-based main window for the Vid Downloader application, providing a GUI for downloading and managing video and audio content from YouTube and other platforms.
+
+    Features include playlist and audio download options, drag-and-drop support, progress tracking, log display, update checking, and integration with custom download queue and processing logic.
+    """
+
+    def __init__(self) -> None:
+        """
+        Vid Downloader is a PyQt6-based GUI application for downloading and managing video and audio content from YouTube and other platforms using yt-dlp.
+
+        Provides a user-friendly interface for batch downloading videos, playlists, and audio files with customizable options. Features include drag-and-drop support, playlist selection, progress tracking, real-time logging, archive checking, automatic yt-dlp updates, and secure credential storage via keyring.
+
+        Run this script to launch the GUI, queue downloads, monitor progress, and manage updates.
+        """
         super().__init__()
         self.setWindowTitle("Vid Downloader")
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
@@ -38,33 +86,33 @@ class MyWindow(QWidget):
 
         self.buttonPlaylists = QPushButton("Playlists")
         self.buttonPlaylists.clicked.connect(
-            lambda: self.requestDetected([], "1080playlists")
+            lambda: self.request_detected([], "1080playlists"),
         )
         self.button720Playlists = QPushButton("720 Playlists")
         self.button720Playlists.clicked.connect(
-            lambda: self.requestDetected([], "720playlists")
+            lambda: self.request_detected([], "720playlists"),
         )
-        rightBox = QHBoxLayout()
+        right_box = QHBoxLayout()
         self.checkIgnoreArchive = QCheckBox("Ignore Archive?")
         self.checkIgnoreArchive.setChecked(False)
         self.buttonUpdate = QPushButton("⤓")
-        self.buttonUpdate.clicked.connect(lambda: self.requestDetected([], "Update"))
+        self.buttonUpdate.clicked.connect(lambda: self.request_detected([], "Update"))
         self.buttonUpdate.setVisible(True)
-        self.label1080 = DropLabel("1080", "#424769", self.requestDetected)
-        self.label720 = DropLabel("720", "#7077A1", self.requestDetected)
-        self.labelAudio = DropLabel("audio", "#FF9843", self.requestDetected)
+        self.label1080 = DropLabel("1080", "#424769", self.request_detected)
+        self.label720 = DropLabel("720", "#7077A1", self.request_detected)
+        self.labelAudio = DropLabel("audio", "#FF9843", self.request_detected)
         self.labelOutput = QLabel("[ Waiting ]")
         self.labelOutput.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.labelOutput.setFont(QFont("Arial", 16))
         self.barProgress = QProgressBar()
         self.logEdit = QPlainTextEdit(readOnly=True)
 
-        rightBox.addWidget(self.checkIgnoreArchive)
-        rightBox.addWidget(self.buttonUpdate)
+        right_box.addWidget(self.checkIgnoreArchive)
+        right_box.addWidget(self.buttonUpdate)
 
         layout.addWidget(self.buttonPlaylists, 0, 0)
         layout.addWidget(self.button720Playlists, 0, 1)
-        layout.addLayout(rightBox, 0, 2)
+        layout.addLayout(right_box, 0, 2)
         layout.setColumnStretch(2, 1)
         # layout.addWidget(self.checkIgnoreArchive, 0, 2)
         # layout.addWidget(self.buttonUpdate, 0, 3)
@@ -78,16 +126,16 @@ class MyWindow(QWidget):
         self.downloadQueue = queue.Queue()
         self.downloader = QYT.QYTQueue(self.downloadQueue)
         # self.downloader.messageChanged.connect(self.logEdit.appendPlainText)
-        self.downloader.messageChanged.connect(self.handleLogEntry)
-        self.downloader.queueEmpty.connect(self.handleQueueEmpty)
+        self.downloader.message_changed.connect(self.handle_log_entry)
+        self.downloader.queue_empty.connect(self.handle_queue_empty)
         self.downloader.start()
         self.setLayout(layout)
 
-        self.latest_version = self.checkForUpdates()
+        self.is_up_to_date = self.check_for_updates()
 
-    def append_properties(self, dictionary, properties):
+    def append_properties(self, dictionary: dict, properties: dict) -> dict:
         """
-        Appends properties to a dictionary recursively.
+        Append properties to a dictionary recursively.
 
         Args:
             dictionary (dict): The dictionary to append properties to.
@@ -108,19 +156,28 @@ class MyWindow(QWidget):
                 new_dictionary[key] = value
         return new_dictionary
 
-    def requestDetected(self, urls, source):
+    def request_detected(self, urls: list, source: str) -> None:
+        """
+        Handle a detected download request by preparing options, updating URLs if needed, and queuing the download task.
+
+        Args:
+            urls (list): List of URLs to process.
+            source (str): The source type or action (e.g., playlist type or 'Update').
+
+        If the source is 'Update', triggers the update process. Otherwise, prepares yt-dlp options, merges additional properties, and enqueues the download with progress and log handlers.
+        """
         qhook = QYT.QHook()
         qlogger = QYT.QLogger(self.downloadQueue)
         if source == "Update":
-            self.doUpdates(self.latest_version)
+            self.do_updates(self.is_up_to_date)
             return
-        playlistsPath = {
+        playlists_path = {
             "1080playlists": "C:/Users/etreq/OneDrive/Desktop/scripts/playlists.txt",
             "720playlists": "C:/Users/etreq/OneDrive/Desktop/scripts/720playlists.txt",
         }.get(source)
-        if playlistsPath:
+        if playlists_path:
             try:
-                with open(playlistsPath, "r") as file:
+                with Path.open(playlists_path, "r") as file:
                     urls = [line.strip() for line in file if line[0] != "#"]
             except FileNotFoundError:
                 print("File not found.")
@@ -141,18 +198,27 @@ class MyWindow(QWidget):
             "max_fragment_retries": 10,
             "mtime": True,
         }
-        properties = self.getOptions(urls, source)
+        properties = self.get_options(urls, source)
         if properties:
             ydl_opts = self.append_properties(ydl_opts, properties)
             if ydl_opts:
                 self.downloadQueue.put((urls, ydl_opts))
-                qhook.infoChanged.connect(self.handleInfoChanged)
+                qhook.infoChanged.connect(self.handle_info_changed)
                 # qlogger.messageChanged.connect(self.logEdit.appendPlainText)
-                qlogger.messageChanged.connect(self.handleLogEntry)
+                qlogger.messageChanged.connect(self.handle_log_entry)
                 self.barProgress.setRange(0, 1)
 
     # parse input data and modify options accordingly
-    def getOptions(self, urls, source):
+    def get_options(self, urls: list, source: str) -> dict | None:
+        """
+        Handle a detected download request by preparing options, updating URLs if needed, and queuing the download task.
+
+        Args:
+            urls (list): List of URLs to process.
+            source (str): The source type or action (e.g., playlist type or 'Update').
+
+        If the source is 'Update', triggers the update process. Otherwise, prepares yt-dlp options, merges additional properties, and enqueues the download with progress and log handlers.
+        """
         properties = {}
         # ignore archive checkbox
         if not self.checkIgnoreArchive.isChecked():
@@ -163,7 +229,8 @@ class MyWindow(QWidget):
         if "nebula.tv" in urls[0]:
             properties["username"] = "thegene@gmail.com"
             properties["password"] = keyring.get_password(
-                "vid downloader", "thegene@gmail.com"
+                "vid downloader",
+                "thegene@gmail.com",
             )
         # detect and use cookies for youtube if necessary
         elif "youtube.com" in urls[0]:
@@ -176,24 +243,24 @@ class MyWindow(QWidget):
         if "list=" in urls[0] and "playlist" not in source:
             with YoutubeDL({"extract_flat": "in_playlist"}) as ydl:
                 info = ydl.extract_info(urls[0], download=False)
-                playlistCount = info["playlist_count"]
-                dialog = PlaylistDialog(playlistCount)
+                playlist_count = info["playlist_count"]
+                dialog = PlaylistDialog(playlist_count)
                 if dialog.exec():
-                    playlistInput = dialog.getPlaylistInput()
+                    playlist_input = dialog.getPlaylistInput()
                     # a blank return will set no option so default to downloading whole playlist
-                    if playlistInput:
-                        properties["playlist_items"] = playlistInput
+                    if playlist_input:
+                        properties["playlist_items"] = playlist_input
                     if source != "audio":
                         source += "playlists"
                 else:  # will cancel playlist download
-                    return False
+                    return None
 
         # source
         source_options = {
             "audio": {
                 "format": "m4a/bestaudio/best",
                 "postprocessors": [
-                    {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}
+                    {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
                 ],
                 "outtmpl": "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/%(title)s.%(ext)s",
             },
@@ -220,21 +287,34 @@ class MyWindow(QWidget):
                     "merge_output_format": "mp4",
                     "outtmpl": "E:/vid storage/%(title)s.%(ext)s",
                     "match_filter": utils.match_filter_func("!is_live"),
-                }
+                },
             )
 
         return properties
 
-    def handleLogEntry(self, entry):
+    def handle_log_entry(self, entry: str) -> None:
+        """
+        Append a log entry to the log display and updates the output label if a merge operation is detected.
+
+        Args:
+            entry: The log message to display.
+        """
         if "[Merger]" in entry:
             self.labelOutput.setText("Merging! This can take a while...")
         self.logEdit.appendPlainText(entry)
 
-    def handleInfoChanged(self, d):
-        MAX_INT = 2147483647
+    def handle_info_changed(self, d: dict) -> None:
+        """
+        Update the progress bar and output label with current download status, including downloaded size, total size, speed, and ETA.
+
+        Args:
+            d (dict): Dictionary containing download progress information.
+        """
+        max_int = 2147483647
         if d.get("status") == "downloading":
             total = d.get("total_bytes") or d.get(
-                "total_bytes_estimate", round(d.get("total_bytes_estimate", 0))
+                "total_bytes_estimate",
+                round(d.get("total_bytes_estimate", 0)),
             )
             downloaded = d.get("downloaded_bytes", 0)
             speed = d.get("speed", 0)
@@ -245,50 +325,66 @@ class MyWindow(QWidget):
                 output += f" | ETA: {timedelta(seconds=round(d.get('eta')))}"
             self.labelOutput.setText(output)
             if total is not None:
-                if total > MAX_INT:
-                    self.barProgress.setMaximum(MAX_INT)
-                    self.barProgress.setValue(int(downloaded / total * MAX_INT))
+                if total > max_int:
+                    self.barProgress.setMaximum(max_int)
+                    self.barProgress.setValue(int(downloaded / total * max_int))
                 else:
                     self.barProgress.setMaximum(int(total))
                     self.barProgress.setValue(downloaded)
 
-    def handleQueueEmpty(self, isEmpty):
-        if isEmpty:
-            self.labelOutput.setText("[ Ready ]")
-        return isEmpty
+    def handle_queue_empty(self) -> None:
+        """Update the output label to indicate that the download queue is ready."""
+        self.labelOutput.setText("[ Ready ]")
 
-    def checkForUpdates(self):
-        result = subprocess.run(
-            ["pip", "index", "versions", "yt-dlp"], capture_output=True, text=True
+    def check_for_updates(self) -> None | bool:
+        """
+        Check for available updates to yt-dlp using uv, update the UI to indicate status, and return True if up to date, False if not, or None on error.
+
+        Returns:
+            bool | None: True if yt-dlp is up to date, False if update is available, or None if an error occurred.
+        """
+        uv_path = shutil.which("uv")
+        if uv_path is None:
+            msg = f"{uv_path} was not found."
+            raise FileNotFoundError(msg)
+
+        result = subprocess.run(  # noqa: S603
+            [uv_path, "pip", "install", "yt-dlp", "--dry-run"],
+            check=False,
+            capture_output=True,
+            text=True,
         )
         if result.returncode != 0:
             self.buttonUpdate.setStyleSheet("color: red;")
-            return
+            return None
 
-        index_info = result.stdout.split("\n")
-        installed_version = index_info[2].split(":")[1].strip()
-        latest_version = index_info[3].split(":")[1].strip()
-
-        if latest_version == installed_version:
+        is_up_to_date = result.stderr.endswith("Would make no changes\n")
+        if is_up_to_date:
             self.buttonUpdate.setVisible(False)
         else:
             self.buttonUpdate.setStyleSheet("color: red;")
 
-        return latest_version
+        return is_up_to_date
 
-    def doUpdates(self, latest_version):
-        upgrade_process = subprocess.run(["pip", "install", "--upgrade", "yt-dlp"])
+    def do_updates(self) -> None:
+        """Upgrade yt-dlp to the latest version using uv, open the changelog in the default browser, and restart the application if the update is successful. Updates the UI to indicate failure if the installed version does not match the latest version."""
+        uv_path = shutil.which("uv")
+        if uv_path is None:
+            self.buttonUpdate.setStyleSheet("color: red;")
+            return
+
+        # Upgrade yt-dlp using uv
+        upgrade_process = subprocess.run(  # noqa: S603
+            [uv_path, "lock", "--upgrade-package", "yt-dlp"],
+            check=False,
+        )
         webbrowser.open("https://github.com/yt-dlp/yt-dlp/blob/master/Changelog.md")
         if upgrade_process.returncode == 0:
-            result = subprocess.run(
-                ["pip", "show", "yt-dlp"], capture_output=True, text=True
-            )
-            installed_version = result.stdout.split("\n")[1].split(":")[1].strip()
-            if installed_version == latest_version:
+            if self.check_for_updates:
                 # update successful
                 python = sys.executable
                 script = os.path.realpath(sys.argv[0])
-                subprocess.Popen([python, script] + sys.argv[1:])
+                subprocess.Popen([python, script, *sys.argv[1:]])  # noqa: S603
                 sys.exit()  # terminate the current process.
             else:
                 # update failed
@@ -304,9 +400,9 @@ class MyWindow(QWidget):
 
 
 if __name__ == "__main__":
-    startfile(r"E:\vid storage")
-    dirname = path.dirname(__file__)
-    QDir.addSearchPath("icons", path.join(dirname, "resources/icons"))
+    startfile(r"E:\vid storage")  # noqa: S606
+    dirname = Path(__file__).parent
+    QDir.addSearchPath("icons", str(dirname / "resources" / "icons"))
 
     # Open Firefox
     # if not is_firefox_running():

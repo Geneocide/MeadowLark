@@ -1,19 +1,40 @@
+"""
+Defines custom PyQt6 widgets for playlist selection and drag-and-drop functionality.
+
+PlaylistDialog provides a dialog for users to specify which videos from a playlist to select, supporting both manual input and drag-and-drop of URLs.
+
+DropLabel is a QLabel subclass that accepts dropped URLs, emits a signal when URLs are dropped, and provides visual feedback.
+
+"""
+
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QFont
 from PyQt6.QtWidgets import (
-    QLabel,
-    QGridLayout,
-    QPushButton,
     QDialog,
+    QGridLayout,
+    QLabel,
     QLineEdit,
+    QPushButton,
+    QWidget,
 )
-from PyQt6.QtGui import QFont, QDragEnterEvent
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 
 
 class PlaylistDialog(QDialog):
-    ADDED_TEXT = "Added!!!"
-    urlsDropped = pyqtSignal(list, str)
+    """
+    A dialog for selecting specific videos from a playlist, supporting manual input and drag-and-drop of URLs.
 
-    def __init__(self, playlistCount, parent=None):
+    Provides a text input for specifying video indices and an OK button to confirm selection. Emits a signal when URLs are dropped.
+    """
+
+    ADDED_TEXT = "Added!!!"
+    urls_dropped = pyqtSignal(list, str)
+
+    def __init__(self, playlist_count: int, parent: QWidget = None) -> None:
+        """
+        Initialize the playlist selection dialog, setting up the window title, input field, and OK button.
+
+        Displays the total number of videos in the playlist and allows users to specify which videos to select.
+        """
         super().__init__(parent)
 
         self.setWindowTitle(self.tr("Playlist Dialog"))
@@ -21,8 +42,8 @@ class PlaylistDialog(QDialog):
 
         label = QLabel(
             self.tr(
-                f"There are {playlistCount} videos in the playlist. Which do you want? Blank = all or format like (3,5,7-9)"
-            )
+                f"There are {playlist_count} videos in the playlist. Which do you want? Blank = all or format like (3,5,7-9)",
+            ),
         )
         label.setFont(QFont(QFont().defaultFamily(), 12))
         self.playlistInput = QLineEdit()
@@ -37,10 +58,16 @@ class PlaylistDialog(QDialog):
 
         self.setLayout(layout)
 
-    def getPlaylistInput(self):
+    def get_playlist_input(self) -> str:
+        """
+        Return the current text entered in the playlist input field.
+
+        Returns:
+            str: The text from the playlist input.
+        """
         return self.playlistInput.text()
 
-    def dragEnterEvent(self, event):
+    def drag_enter_event(self, event: QDragEnterEvent) -> None:
         """
         Handle the drag enter event.
 
@@ -54,30 +81,45 @@ class PlaylistDialog(QDialog):
 
 
 class DropLabel(QLabel):
-    ADDED_TEXT = "Added!!!"
-    urlsDropped = pyqtSignal(list, str)
+    """
+    A QLabel subclass that accepts drag-and-drop of URLs, emits a signal when URLs are dropped, and provides visual feedback by temporarily changing its text.
 
-    def __init__(
-        self,
-        text,
-        color,
-        connection,
-        min_width=150,
-        min_height=150,
-        font_family="Arial",
-        font_size=32,
-    ):
+    Args:
+        text (str): The label's initial text.
+        color (str): The background color for the label.
+        connection (callable): Slot to connect to the urls_dropped signal.
+
+    Signals:
+        urls_dropped (list, str): Emitted with a list of dropped URLs and the original label text.
+    """
+
+    ADDED_TEXT = "Added!!!"
+    urls_dropped = pyqtSignal(list, str)
+
+    def __init__(self, text: str, color: str, connection: callable) -> None:
+        """
+        Initialize the label with custom text, background color, and a connection for the URLs dropped signal.
+
+        Args:
+            text (str): The label text.
+            color (str): The background color.
+            connection (callable): Slot to connect to the urls_dropped signal.
+        """
         super().__init__(text)
+        min_width = 150
+        min_height = 150
+        font_family = "Arial"
+        font_size = 32
         self.originalText = text
         self.setStyleSheet(f"background-color:{color}")
         self.setMinimumSize(min_width, min_height)
         self.setAcceptDrops(True)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setFont(QFont(font_family, font_size))
-        self.urlsDropped.connect(connection)
+        self.urls_dropped.connect(connection)
         self.timer = QTimer()
 
-    def dragEnterEvent(self, event: QDragEnterEvent) -> bool:
+    def drag_enter_event(self, event: QDragEnterEvent) -> bool:
         """
         Handle the drag enter event.
 
@@ -89,13 +131,19 @@ class DropLabel(QLabel):
         else:
             event.ignore()
 
-    def dropEvent(self, event):
+    def drop_event(self, event: QDropEvent) -> None:
+        """
+        Handle the drop event by updating the label text, starting a timer to revert the text, and emitting the dropped URLs via the urls_dropped signal.
+
+        Args:
+            event (QDropEvent): The drop event containing the dropped data.
+        """
         self.setText(self.ADDED_TEXT)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(lambda: self.setText(self.originalText))
         self.timer.start(2000)
         urls = event.mimeData().urls()
-        self.urlsDropped.emit([url.toString() for url in urls], self.originalText)
+        self.urls_dropped.emit([url.toString() for url in urls], self.originalText)
 
     # def dropEvent(self, event):
     #     def timeout():

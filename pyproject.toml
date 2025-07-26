@@ -1,0 +1,17 @@
+[project]
+name = "vid-downloader"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "hurry-filesize>=0.9",
+    "keyring>=25.6.0",
+    "pyqt6>=6.9.1",
+    "wakepy>=0.10.2.post1",
+    "yt-dlp>=2025.7.21",
+]
+
+[tool.ruff]
+lint.extend-select = ["ALL"]
+lint.ignore = ["T201", "D103", "D212", "D413", "E501", "ERA001"]
