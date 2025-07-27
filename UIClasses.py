@@ -67,7 +67,7 @@ class PlaylistDialog(QDialog):
         """
         return self.playlistInput.text()
 
-    def drag_enter_event(self, event: QDragEnterEvent) -> None:
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
         """
         Handle the drag enter event.
 
@@ -119,7 +119,7 @@ class DropLabel(QLabel):
         self.urls_dropped.connect(connection)
         self.timer = QTimer()
 
-    def drag_enter_event(self, event: QDragEnterEvent) -> bool:
+    def dragEnterEvent(self, event: QDragEnterEvent) -> bool:  # noqa: N802
         """
         Handle the drag enter event.
 
@@ -131,7 +131,7 @@ class DropLabel(QLabel):
         else:
             event.ignore()
 
-    def drop_event(self, event: QDropEvent) -> None:
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
         """
         Handle the drop event by updating the label text, starting a timer to revert the text, and emitting the dropped URLs via the urls_dropped signal.
 

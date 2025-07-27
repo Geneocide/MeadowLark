@@ -125,7 +125,7 @@ class MyWindow(QWidget):
 
         self.downloadQueue = queue.Queue()
         self.downloader = QYT.QYTQueue(self.downloadQueue)
-        # self.downloader.messageChanged.connect(self.logEdit.appendPlainText)
+        # self.downloader.message_changed.connect(self.logEdit.appendPlainText)
         self.downloader.message_changed.connect(self.handle_log_entry)
         self.downloader.queue_empty.connect(self.handle_queue_empty)
         self.downloader.start()
@@ -177,7 +177,7 @@ class MyWindow(QWidget):
         }.get(source)
         if playlists_path:
             try:
-                with Path.open(playlists_path, "r") as file:
+                with Path(playlists_path).open("r") as file:
                     urls = [line.strip() for line in file if line[0] != "#"]
             except FileNotFoundError:
                 print("File not found.")
@@ -203,9 +203,9 @@ class MyWindow(QWidget):
             ydl_opts = self.append_properties(ydl_opts, properties)
             if ydl_opts:
                 self.downloadQueue.put((urls, ydl_opts))
-                qhook.infoChanged.connect(self.handle_info_changed)
-                # qlogger.messageChanged.connect(self.logEdit.appendPlainText)
-                qlogger.messageChanged.connect(self.handle_log_entry)
+                qhook.info_changed.connect(self.handle_info_changed)
+                # qlogger.message_changed.connect(self.logEdit.appendPlainText)
+                qlogger.message_changed.connect(self.handle_log_entry)
                 self.barProgress.setRange(0, 1)
 
     # parse input data and modify options accordingly
