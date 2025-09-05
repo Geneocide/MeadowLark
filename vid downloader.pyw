@@ -42,7 +42,7 @@ from datetime import timedelta
 from os import startfile
 from pathlib import Path
 
-import keyring
+import yt_dlp
 from hurry.filesize import size
 from PyQt6.QtCore import QDir, Qt
 from PyQt6.QtGui import QFont, QIcon
@@ -57,9 +57,9 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QWidget,
 )
-from yt_dlp import YoutubeDL, utils
 
 import QYT
+import utils
 from UIClasses import DropLabel, PlaylistDialog
 
 
@@ -131,7 +131,8 @@ class MyWindow(QWidget):
         self.downloader.start()
         self.setLayout(layout)
 
-        self.is_up_to_date = self.check_for_updates()
+        update_available, _, _ = utils.is_yt_dlp_update_available()
+        self.buttonUpdate.setVisible(update_available)
 
     def append_properties(self, dictionary: dict, properties: dict) -> dict:
         """
@@ -169,7 +170,7 @@ class MyWindow(QWidget):
         qhook = QYT.QHook()
         qlogger = QYT.QLogger(self.downloadQueue)
         if source == "Update":
-            self.do_updates(self.is_up_to_date)
+            self.do_updates()
             return
         playlists_path = {
             "1080playlists": "C:/Users/etreq/OneDrive/Desktop/scripts/playlists.txt",
@@ -225,23 +226,27 @@ class MyWindow(QWidget):
             properties["download_archive"] = (
                 "C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt"
             )
-        # detect and login to nebula when necessary
-        if "nebula.tv" in urls[0]:
-            properties["username"] = "thegene@gmail.com"
-            properties["password"] = keyring.get_password(
-                "vid downloader",
-                "thegene@gmail.com",
-            )
-        # detect and use cookies for youtube if necessary
-        elif "youtube.com" in urls[0]:
+        # # detect and login to nebula when necessary
+        # if "nebula.tv" in urls[0]:
+        #     properties["username"] = "thegene@gmail.com"
+        #     properties["password"] = keyring.get_password(
+        #         "vid downloader",
+        #         "thegene@gmail.com",
+        #     )
+        # # detect and use cookies for youtube if necessary
+        # elif "youtube.com" in urls[0]:
+        #     properties["cookiefile"] = "cookies.txt"
+        #     # properties["cookiesfrombrowser"] = ("edge",)
+        # # strip out unnecessary parts of URL if dropping from Watch Later
+        # urls = [url.split("&list=WL")[0] for url in urls]
+
+        # Always use cookies.txt for authentication with supported sites
+        if any(domain in urls[0] for domain in ["youtube.com", "nebula.tv"]):
             properties["cookiefile"] = "cookies.txt"
-            # properties["cookiesfrombrowser"] = ("edge",)
-        # strip out unnecessary parts of URL if dropping from Watch Later
-        urls = [url.split("&list=WL")[0] for url in urls]
 
         # individual playlist dragged somewhere
         if "list=" in urls[0] and "playlist" not in source:
-            with YoutubeDL({"extract_flat": "in_playlist"}) as ydl:
+            with yt_dlp.YoutubeDL({"extract_flat": "in_playlist"}) as ydl:
                 info = ydl.extract_info(urls[0], download=False)
                 playlist_count = info["playlist_count"]
                 dialog = PlaylistDialog(playlist_count)
@@ -286,7 +291,7 @@ class MyWindow(QWidget):
                     "format_sort": [f"res:{source}"],
                     "merge_output_format": "mp4",
                     "outtmpl": "E:/vid storage/%(title)s.%(ext)s",
-                    "match_filter": utils.match_filter_func("!is_live"),
+                    "match_filter": yt_dlp.utils.match_filter_func("!is_live"),
                 },
             )
 
@@ -336,59 +341,50 @@ class MyWindow(QWidget):
         """Update the output label to indicate that the download queue is ready."""
         self.labelOutput.setText("[ Ready ]")
 
-    def check_for_updates(self) -> None | bool:
-        """
-        Check for available updates to yt-dlp using uv, update the UI to indicate status, and return True if up to date, False if not, or None on error.
-
-        Returns:
-            bool | None: True if yt-dlp is up to date, False if update is available, or None if an error occurred.
-        """
-        uv_path = shutil.which("uv")
-        if uv_path is None:
-            msg = f"{uv_path} was not found."
-            raise FileNotFoundError(msg)
-
-        result = subprocess.run(  # noqa: S603
-            [uv_path, "pip", "install", "yt-dlp", "--dry-run"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            self.buttonUpdate.setStyleSheet("color: red;")
-            return None
-
-        is_up_to_date = result.stderr.endswith("Would make no changes\n")
-        if is_up_to_date:
-            self.buttonUpdate.setVisible(False)
-        else:
-            self.buttonUpdate.setStyleSheet("color: red;")
-
-        return is_up_to_date
-
     def do_updates(self) -> None:
-        """Upgrade yt-dlp to the latest version using uv, open the changelog in the default browser, and restart the application if the update is successful. Updates the UI to indicate failure if the installed version does not match the latest version."""
+        """
+        Update YT_DLP at start.
+
+        Upgrade yt-dlp to the latest version using uv, open the changelog in the default browser,
+        and restart the application if the update is successful. Updates the UI to indicate failure
+        if the installed version does not match the latest version after the update attempt.
+        """
         uv_path = shutil.which("uv")
         if uv_path is None:
             self.buttonUpdate.setStyleSheet("color: red;")
             return
 
-        # Upgrade yt-dlp using uv
-        upgrade_process = subprocess.run(  # noqa: S603
+        old_version = utils.get_current_yt_dlp_version()
+
+        # 1. Update the lockfile to the latest yt-dlp
+        lock_process = subprocess.run(  # noqa: S603
             [uv_path, "lock", "--upgrade-package", "yt-dlp"],
             check=False,
         )
-        webbrowser.open("https://github.com/yt-dlp/yt-dlp/blob/master/Changelog.md")
-        if upgrade_process.returncode == 0:
-            if self.check_for_updates:
-                # update successful
-                python = sys.executable
-                script = os.path.realpath(sys.argv[0])
-                subprocess.Popen([python, script, *sys.argv[1:]])  # noqa: S603
-                sys.exit()  # terminate the current process.
-            else:
-                # update failed
-                self.buttonUpdate.setStyleSheet("color: red;")
+        # 2. Sync the environment to actually install the new yt-dlp, using the updated lockfile
+        sync_process = subprocess.run(  # noqa: S603
+            [uv_path, "sync"],
+            check=False,
+        )
+
+        new_version = utils.get_current_yt_dlp_version()
+
+        if (
+            lock_process.returncode == 0
+            and sync_process.returncode == 0
+            and old_version is not None
+            and new_version is not None
+            and new_version != old_version
+        ):
+            webbrowser.open("https://github.com/yt-dlp/yt-dlp/blob/master/Changelog.md")
+            # Update successful, restart app
+            python = sys.executable
+            script = os.path.realpath(sys.argv[0])
+            subprocess.Popen([python, script, *sys.argv[1:]])  # noqa: S603
+            sys.exit()
+        else:
+            # Update failed or no version change
+            self.buttonUpdate.setStyleSheet("color: red;")
 
 
 # def is_firefox_running():
@@ -419,3 +415,5 @@ if __name__ == "__main__":
     window.show()
 
     app.exec()
+
+# TODO: add a history function, perhaps last 5 actually downloaded... maybe 5 for nebula and YT separately
