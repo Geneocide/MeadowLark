@@ -92,9 +92,15 @@ class MyWindow(QWidget):
         self.button720Playlists.clicked.connect(
             lambda: self.request_detected([], "720playlists"),
         )
+        self.buttonAudioPlaylists = QPushButton("YT Podcasts")
+        self.buttonAudioPlaylists.clicked.connect(
+            lambda: self.request_detected([], "audio_playlists"),
+        )
         right_box = QHBoxLayout()
         self.checkIgnoreArchive = QCheckBox("Ignore Archive?")
         self.checkIgnoreArchive.setChecked(False)
+        self.checkSkipDownload = QCheckBox("Skip Download")
+        self.checkSkipDownload.setChecked(False)
         self.buttonUpdate = QPushButton("⤓")
         self.buttonUpdate.clicked.connect(lambda: self.request_detected([], "Update"))
         self.buttonUpdate.setVisible(True)
@@ -107,21 +113,25 @@ class MyWindow(QWidget):
         self.barProgress = QProgressBar()
         self.logEdit = QPlainTextEdit(readOnly=True)
 
+        right_box.addWidget(self.checkSkipDownload)
         right_box.addWidget(self.checkIgnoreArchive)
         right_box.addWidget(self.buttonUpdate)
 
-        layout.addWidget(self.buttonPlaylists, 0, 0)
-        layout.addWidget(self.button720Playlists, 0, 1)
-        layout.addLayout(right_box, 0, 2)
+        layout.addWidget(self.checkSkipDownload, 0, 0)
+        layout.addWidget(self.checkIgnoreArchive, 0, 1)
+        layout.addWidget(self.buttonUpdate, 0, 2)
+        layout.addWidget(self.buttonPlaylists, 1, 0)
+        layout.addWidget(self.button720Playlists, 1, 1)
+        layout.addWidget(self.buttonAudioPlaylists, 1, 2)
         layout.setColumnStretch(2, 1)
         # layout.addWidget(self.checkIgnoreArchive, 0, 2)
         # layout.addWidget(self.buttonUpdate, 0, 3)
-        layout.addWidget(self.label1080, 1, 0)
-        layout.addWidget(self.label720, 1, 1)
-        layout.addWidget(self.labelAudio, 1, 2)
-        layout.addWidget(self.labelOutput, 2, 0, 1, 3)
-        layout.addWidget(self.barProgress, 3, 0, 1, 3)
-        layout.addWidget(self.logEdit, 4, 0, 1, 3)
+        layout.addWidget(self.label1080, 2, 0)
+        layout.addWidget(self.label720, 2, 1)
+        layout.addWidget(self.labelAudio, 2, 2)
+        layout.addWidget(self.labelOutput, 3, 0, 1, 3)
+        layout.addWidget(self.barProgress, 4, 0, 1, 3)
+        layout.addWidget(self.logEdit, 5, 0, 1, 3)
 
         self.downloadQueue = queue.Queue()
         self.downloader = QYT.QYTQueue(self.downloadQueue)
@@ -173,8 +183,9 @@ class MyWindow(QWidget):
             self.do_updates()
             return
         playlists_path = {
-            "1080playlists": "C:/Users/etreq/OneDrive/Desktop/scripts/playlists.txt",
-            "720playlists": "C:/Users/etreq/OneDrive/Desktop/scripts/720playlists.txt",
+            "1080playlists": "resources/playlists/playlists.txt",
+            "720playlists": "resources/playlists/720playlists.txt",
+            "audio_playlists": "resources/playlists/audio playlists.txt",
         }.get(source)
         if playlists_path:
             try:
@@ -221,6 +232,35 @@ class MyWindow(QWidget):
         If the source is 'Update', triggers the update process. Otherwise, prepares yt-dlp options, merges additional properties, and enqueues the download with progress and log handlers.
         """
         properties = {}
+        if self.checkSkipDownload.isChecked():
+            self.labelOutput.setText("Skipping downloads.")
+            qlogger = QYT.QLogger(self.downloadQueue)
+            total_added = 0
+            archive_path = Path("C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt")
+            for url in urls:
+                # Use extract_flat="in_playlist" for playlists, True for single videos
+                ydl_opts = {
+                    "extract_flat": "in_playlist" if "lists" in source else True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    entries = info.get("entries", [info])
+                    with archive_path.open("a", encoding="utf-8") as archive:
+                        for entry in entries:
+                            video_id = entry.get("id")
+                            if video_id:
+                                archive.write(f"youtube {video_id}\n")
+                                total_added += 1
+                                qlogger.debug("Added to archive: youtube %(video_id)s")
+            self.labelOutput.setText("IDs added to archive.")
+            self.barProgress.setRange(0, 1)
+            self.barProgress.setValue(1)
+            self.logEdit.appendPlainText(
+                f"Archive-only mode: {total_added} IDs written.",
+            )
+            self.handle_queue_empty()
+            return None
+
         # ignore archive checkbox
         if not self.checkIgnoreArchive.isChecked():
             properties["download_archive"] = (
@@ -241,7 +281,7 @@ class MyWindow(QWidget):
         # urls = [url.split("&list=WL")[0] for url in urls]
 
         # Always use cookies.txt for authentication with supported sites
-        if any(domain in urls[0] for domain in ["youtube.com", "nebula.tv"]):
+        if urls and any(domain in urls[0] for domain in ["youtube.com", "nebula.tv"]):
             properties["cookiefile"] = "cookies.txt"
 
         # individual playlist dragged somewhere
@@ -268,6 +308,13 @@ class MyWindow(QWidget):
                     {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
                 ],
                 "outtmpl": "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/%(title)s.%(ext)s",
+            },
+            "audio_playlists": {
+                "format": "m4a/bestaudio/best",
+                "postprocessors": [
+                    {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
+                ],
+                "outtmpl": "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/%(playlist)s/%(title)s.%(ext)s",
             },
             "720playlists": {
                 "format_sort": ["res:720"],

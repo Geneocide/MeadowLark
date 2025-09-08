@@ -1,4 +1,3 @@
-logfile.txt
+*.txt
 .qodo
 .sqlite
-cookies.txt
