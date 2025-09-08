@@ -307,7 +307,7 @@ class MyWindow(QWidget):
                 "postprocessors": [
                     {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
                 ],
-                "outtmpl": "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/%(title)s.%(ext)s",
+                "outtmpl": "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/misc/%(title)s.%(ext)s",
             },
             "audio_playlists": {
                 "format": "m4a/bestaudio/best",
