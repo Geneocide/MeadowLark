@@ -251,7 +251,7 @@ class MyWindow(QWidget):
                 playlist_count = info["playlist_count"]
                 dialog = PlaylistDialog(playlist_count)
                 if dialog.exec():
-                    playlist_input = dialog.getPlaylistInput()
+                    playlist_input = dialog.get_playlist_input()
                     # a blank return will set no option so default to downloading whole playlist
                     if playlist_input:
                         properties["playlist_items"] = playlist_input
@@ -354,8 +354,6 @@ class MyWindow(QWidget):
             self.buttonUpdate.setStyleSheet("color: red;")
             return
 
-        old_version = utils.get_current_yt_dlp_version()
-
         # 1. Update the lockfile to the latest yt-dlp
         lock_process = subprocess.run(  # noqa: S603
             [uv_path, "lock", "--upgrade-package", "yt-dlp"],
@@ -367,15 +365,7 @@ class MyWindow(QWidget):
             check=False,
         )
 
-        new_version = utils.get_current_yt_dlp_version()
-
-        if (
-            lock_process.returncode == 0
-            and sync_process.returncode == 0
-            and old_version is not None
-            and new_version is not None
-            and new_version != old_version
-        ):
+        if lock_process.returncode == 0 and sync_process.returncode == 0:
             webbrowser.open("https://github.com/yt-dlp/yt-dlp/blob/master/Changelog.md")
             # Update successful, restart app
             python = sys.executable
