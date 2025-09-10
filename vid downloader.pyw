@@ -50,7 +50,6 @@ from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
     QGridLayout,
-    QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QProgressBar,
@@ -96,7 +95,6 @@ class MyWindow(QWidget):
         self.buttonAudioPlaylists.clicked.connect(
             lambda: self.request_detected([], "audio_playlists"),
         )
-        right_box = QHBoxLayout()
         self.checkIgnoreArchive = QCheckBox("Ignore Archive?")
         self.checkIgnoreArchive.setChecked(False)
         self.checkSkipDownload = QCheckBox("Skip Download")
@@ -113,10 +111,6 @@ class MyWindow(QWidget):
         self.barProgress = QProgressBar()
         self.logEdit = QPlainTextEdit(readOnly=True)
 
-        right_box.addWidget(self.checkSkipDownload)
-        right_box.addWidget(self.checkIgnoreArchive)
-        right_box.addWidget(self.buttonUpdate)
-
         layout.addWidget(self.checkSkipDownload, 0, 0)
         layout.addWidget(self.checkIgnoreArchive, 0, 1)
         layout.addWidget(self.buttonUpdate, 0, 2)
@@ -124,8 +118,6 @@ class MyWindow(QWidget):
         layout.addWidget(self.button720Playlists, 1, 1)
         layout.addWidget(self.buttonAudioPlaylists, 1, 2)
         layout.setColumnStretch(2, 1)
-        # layout.addWidget(self.checkIgnoreArchive, 0, 2)
-        # layout.addWidget(self.buttonUpdate, 0, 3)
         layout.addWidget(self.label1080, 2, 0)
         layout.addWidget(self.label720, 2, 1)
         layout.addWidget(self.labelAudio, 2, 2)
@@ -135,7 +127,6 @@ class MyWindow(QWidget):
 
         self.downloadQueue = queue.Queue()
         self.downloader = QYT.QYTQueue(self.downloadQueue)
-        # self.downloader.message_changed.connect(self.logEdit.appendPlainText)
         self.downloader.message_changed.connect(self.handle_log_entry)
         self.downloader.queue_empty.connect(self.handle_queue_empty)
         self.downloader.start()
@@ -209,6 +200,7 @@ class MyWindow(QWidget):
             "socket-timeout": 120,
             "max_fragment_retries": 10,
             "mtime": True,
+            "match_filter": yt_dlp.utils.match_filter_func("!is_live"),
         }
         properties = self.get_options(urls, source)
         if properties:
@@ -219,6 +211,34 @@ class MyWindow(QWidget):
                 # qlogger.message_changed.connect(self.logEdit.appendPlainText)
                 qlogger.message_changed.connect(self.handle_log_entry)
                 self.barProgress.setRange(0, 1)
+
+    def skip_downloading(self, urls: list, source: str) -> None:
+        self.labelOutput.setText("Skipping downloads.")
+        qlogger = QYT.QLogger(self.downloadQueue)
+        total_added = 0
+        archive_path = Path("C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt")
+        for url in urls:
+            # Use extract_flat="in_playlist" for playlists, True for single videos
+            ydl_opts = {
+                "extract_flat": "in_playlist" if "lists" in source else True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                entries = info.get("entries", [info])
+                with archive_path.open("a", encoding="utf-8") as archive:
+                    for entry in entries:
+                        video_id = entry.get("id")
+                        if video_id:
+                            archive.write(f"youtube {video_id}\n")
+                            total_added += 1
+                            qlogger.debug("Added to archive: youtube %(video_id)s")
+        self.labelOutput.setText("IDs added to archive.")
+        self.barProgress.setRange(0, 1)
+        self.barProgress.setValue(1)
+        self.logEdit.appendPlainText(
+            f"Archive-only mode: {total_added} IDs written.",
+        )
+        self.handle_queue_empty()
 
     # parse input data and modify options accordingly
     def get_options(self, urls: list, source: str) -> dict | None:
@@ -233,32 +253,7 @@ class MyWindow(QWidget):
         """
         properties = {}
         if self.checkSkipDownload.isChecked():
-            self.labelOutput.setText("Skipping downloads.")
-            qlogger = QYT.QLogger(self.downloadQueue)
-            total_added = 0
-            archive_path = Path("C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt")
-            for url in urls:
-                # Use extract_flat="in_playlist" for playlists, True for single videos
-                ydl_opts = {
-                    "extract_flat": "in_playlist" if "lists" in source else True,
-                }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    entries = info.get("entries", [info])
-                    with archive_path.open("a", encoding="utf-8") as archive:
-                        for entry in entries:
-                            video_id = entry.get("id")
-                            if video_id:
-                                archive.write(f"youtube {video_id}\n")
-                                total_added += 1
-                                qlogger.debug("Added to archive: youtube %(video_id)s")
-            self.labelOutput.setText("IDs added to archive.")
-            self.barProgress.setRange(0, 1)
-            self.barProgress.setValue(1)
-            self.logEdit.appendPlainText(
-                f"Archive-only mode: {total_added} IDs written.",
-            )
-            self.handle_queue_empty()
+            self.skip_downloading(urls, source)
             return None
 
         # ignore archive checkbox
@@ -338,7 +333,6 @@ class MyWindow(QWidget):
                     "format_sort": [f"res:{source}"],
                     "merge_output_format": "mp4",
                     "outtmpl": "E:/vid storage/%(title)s.%(ext)s",
-                    "match_filter": yt_dlp.utils.match_filter_func("!is_live"),
                 },
             )
 
