@@ -217,6 +217,14 @@ class MyWindow(QWidget):
         qlogger = QYT.QLogger(self.downloadQueue)
         total_added = 0
         archive_path = Path("C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt")
+        # Read existing IDs into a set
+        if archive_path.exists():
+            with archive_path.open("r", encoding="utf-8") as archive:
+                existing_ids = {
+                    line.strip().split()[-1] for line in archive if line.strip()
+                }
+        else:
+            existing_ids = set()
         for url in urls:
             # Use extract_flat="in_playlist" for playlists, True for single videos
             ydl_opts = {
@@ -228,7 +236,7 @@ class MyWindow(QWidget):
                 with archive_path.open("a", encoding="utf-8") as archive:
                     for entry in entries:
                         video_id = entry.get("id")
-                        if video_id:
+                        if video_id and video_id not in existing_ids:
                             archive.write(f"youtube {video_id}\n")
                             total_added += 1
                             qlogger.debug("Added to archive: youtube %(video_id)s")
