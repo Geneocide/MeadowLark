@@ -174,9 +174,9 @@ class MyWindow(QWidget):
             self.do_updates()
             return
         playlists_path = {
-            "1080playlists": "resources/playlists/playlists.txt",
-            "720playlists": "resources/playlists/720playlists.txt",
-            "audio_playlists": "resources/playlists/audio playlists.txt",
+            "1080playlists": r"Z:\misc\dev\vid downloader\resources\playlists\playlists.txt",
+            "720playlists": r"Z:\misc\dev\vid downloader\resources\playlists\720playlists.txt",
+            "audio_playlists": r"Z:\misc\dev\vid downloader\resources\playlists\audio playlists.txt",
         }.get(source)
         if playlists_path:
             try:
@@ -190,17 +190,11 @@ class MyWindow(QWidget):
             "logger": qlogger,
             "progress_hooks": [qhook],
             "windowsfilenames": True,
-            "postprocessors": [
-                {"key": "SponsorBlock"},
-                {
-                    "key": "ModifyChapters",
-                    "remove_sponsor_segments": ["sponsor", "selfpromo"],
-                },
-            ],
             "socket-timeout": 120,
             "max_fragment_retries": 10,
             "mtime": True,
             "match_filter": yt_dlp.utils.match_filter_func("!is_live"),
+            "cookiefile": r"resources\cookies.txt",
         }
         properties = self.get_options(urls, source)
         if properties:
@@ -269,23 +263,19 @@ class MyWindow(QWidget):
             properties["download_archive"] = (
                 "C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt"
             )
-        # # detect and login to nebula when necessary
-        # if "nebula.tv" in urls[0]:
-        #     properties["username"] = "thegene@gmail.com"
-        #     properties["password"] = keyring.get_password(
-        #         "vid downloader",
-        #         "thegene@gmail.com",
-        #     )
-        # # detect and use cookies for youtube if necessary
-        # elif "youtube.com" in urls[0]:
-        #     properties["cookiefile"] = "cookies.txt"
-        #     # properties["cookiesfrombrowser"] = ("edge",)
-        # # strip out unnecessary parts of URL if dropping from Watch Later
-        # urls = [url.split("&list=WL")[0] for url in urls]
 
-        # Always use cookies.txt for authentication with supported sites
-        if urls and any(domain in urls[0] for domain in ["youtube.com", "nebula.tv"]):
-            properties["cookiefile"] = "cookies.txt"
+        # # detect if YT
+        if "youtube.com" in urls[0]:
+            properties["postprocessors"] = [
+                {"key": "SponsorBlock"},
+                {
+                    "key": "ModifyChapters",
+                    "remove_sponsor_segments": ["sponsor", "selfpromo"],
+                },
+            ]
+
+        # strip out unnecessary parts of URL if dropping from Watch Later
+        urls = [url.split("&list=WL")[0] for url in urls]
 
         # individual playlist dragged somewhere
         if "list=" in urls[0] and "playlist" not in source:
