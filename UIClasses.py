@@ -7,6 +7,9 @@ DropLabel is a QLabel subclass that accepts dropped URLs, emits a signal when UR
 
 """
 
+from os import startfile
+from pathlib import Path
+
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QFont
 from PyQt6.QtWidgets import (
@@ -154,3 +157,18 @@ class DropLabel(QLabel):
     #     t.start()
     #     urls = event.mimeData().urls()
     #     self.urlsDropped.emit([url.toString() for url in urls], self.originalText)
+
+
+class PlaylistButton(QPushButton):
+    def __init__(self, text, playlist_path, *args, **kwargs) -> None:
+        super().__init__(text, *args, **kwargs)
+        self.playlist_path = Path(playlist_path)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.RightButton:
+            if self.playlist_path.exists():
+                startfile(self.playlist_path)  # noqa: S606
+            else:
+                print(f"Playlist file not found: {self.playlist_path}")
+        else:
+            super().mousePressEvent(event)

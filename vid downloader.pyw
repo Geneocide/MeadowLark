@@ -59,7 +59,7 @@ from PyQt6.QtWidgets import (
 
 import QYT
 import utils
-from UIClasses import DropLabel, PlaylistDialog
+from UIClasses import DropLabel, PlaylistButton, PlaylistDialog
 
 
 class MyWindow(QWidget):
@@ -83,15 +83,24 @@ class MyWindow(QWidget):
 
         layout = QGridLayout()
 
-        self.buttonPlaylists = QPushButton("Playlists")
+        self.buttonPlaylists = PlaylistButton(
+            "Playlists",
+            r"Z:\misc\dev\vid downloader\resources\playlists\playlists.txt",
+        )
         self.buttonPlaylists.clicked.connect(
             lambda: self.request_detected([], "1080playlists"),
         )
-        self.button720Playlists = QPushButton("720 Playlists")
+        self.button720Playlists = PlaylistButton(
+            "720 Playlists",
+            r"Z:\misc\dev\vid downloader\resources\playlists\720playlists.txt",
+        )
         self.button720Playlists.clicked.connect(
             lambda: self.request_detected([], "720playlists"),
         )
-        self.buttonAudioPlaylists = QPushButton("YT Podcasts")
+        self.buttonAudioPlaylists = PlaylistButton(
+            "YT Podcasts",
+            r"Z:\misc\dev\vid downloader\resources\playlists\audio playlists.txt",
+        )
         self.buttonAudioPlaylists.clicked.connect(
             lambda: self.request_detected([], "audio_playlists"),
         )
@@ -193,7 +202,9 @@ class MyWindow(QWidget):
             "socket-timeout": 120,
             "max_fragment_retries": 10,
             "mtime": True,
-            "match_filter": yt_dlp.utils.match_filter_func("!is_live"),
+            "match_filter": yt_dlp.utils.match_filter_func(
+                "!is_live",
+            ),
             "cookiefile": r"resources\cookies.txt",
         }
         properties = self.get_options(urls, source)
@@ -264,8 +275,16 @@ class MyWindow(QWidget):
                 "C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt"
             )
 
-        # # detect if YT
+        # detect if YT
         if "youtube.com" in urls[0]:
+            # Existing match_filter
+            match_filters = ["!is_live"]
+            # Append your requested filters
+            match_filters.append("live_status!=is_upcoming")
+            match_filters.append("availability=public")
+            properties["match_filter"] = yt_dlp.utils.match_filter_func(
+                " & ".join(match_filters),
+            )
             properties["postprocessors"] = [
                 {"key": "SponsorBlock"},
                 {
@@ -324,6 +343,14 @@ class MyWindow(QWidget):
         }
 
         if source in source_options:
+            # Existing match_filter
+            match_filters = ["!is_live"]
+            # Append your requested filters
+            match_filters.append("live_status!=is_upcoming")
+            match_filters.append("availability=public")
+            properties["match_filter"] = yt_dlp.utils.match_filter_func(
+                " & ".join(match_filters),
+            )
             properties.update(source_options[source])
         else:
             properties.update(
