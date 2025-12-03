@@ -206,7 +206,15 @@ class MyWindow(QWidget):
                 "!is_live",
             ),
             "cookiefile": r"resources\cookies.txt",
+            "postprocessors": [
+                {"key": "SponsorBlock"},
+                {
+                    "key": "ModifyChapters",
+                    "remove_sponsor_segments": ["sponsor", "selfpromo"],
+                },
+            ],
         }
+
         properties = self.get_options(urls, source)
         if properties:
             ydl_opts = self.append_properties(ydl_opts, properties)
@@ -281,17 +289,17 @@ class MyWindow(QWidget):
             match_filters = ["!is_live"]
             # Append your requested filters
             match_filters.append("live_status!=is_upcoming")
-            match_filters.append("availability=public")
+            match_filters.append("availability!=needs_auth")
             properties["match_filter"] = yt_dlp.utils.match_filter_func(
                 " & ".join(match_filters),
             )
-            properties["postprocessors"] = [
-                {"key": "SponsorBlock"},
-                {
-                    "key": "ModifyChapters",
-                    "remove_sponsor_segments": ["sponsor", "selfpromo"],
-                },
-            ]
+            # properties["postprocessors"] = [
+            #     {"key": "SponsorBlock"},
+            #     {
+            #         "key": "ModifyChapters",
+            #         "remove_sponsor_segments": ["sponsor", "selfpromo"],
+            #     },
+            # ]
 
         # strip out unnecessary parts of URL if dropping from Watch Later
         urls = [url.split("&list=WL")[0] for url in urls]
@@ -327,6 +335,7 @@ class MyWindow(QWidget):
                     {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
                 ],
                 "outtmpl": "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/%(playlist)s/%(title)s.%(ext)s",
+                "ignoreerrors": "only_download",
             },
             "720playlists": {
                 "format_sort": ["res:720"],
@@ -343,14 +352,14 @@ class MyWindow(QWidget):
         }
 
         if source in source_options:
-            # Existing match_filter
-            match_filters = ["!is_live"]
-            # Append your requested filters
-            match_filters.append("live_status!=is_upcoming")
-            match_filters.append("availability=public")
-            properties["match_filter"] = yt_dlp.utils.match_filter_func(
-                " & ".join(match_filters),
-            )
+            if "playlists" in source:
+                # Existing match_filter
+                match_filters = ["!is_live"]
+                match_filters.append("live_status!=is_upcoming")
+                match_filters.append("availability!=needs_auth")
+                properties["match_filter"] = yt_dlp.utils.match_filter_func(
+                    " & ".join(match_filters),
+                )
             properties.update(source_options[source])
         else:
             properties.update(
@@ -456,6 +465,13 @@ if __name__ == "__main__":
     dirname = Path(__file__).parent
     QDir.addSearchPath("icons", str(dirname / "resources" / "icons"))
 
+    if not os.environ.get("YTDLP_JS"):
+        deno = shutil.which("deno")
+        if deno:
+            os.environ["YTDLP_JS"] = deno
+        else:
+            os.environ["YTDLP_JS"] = "deno"  # fallback; if on PATH later it will work
+
     # Open Firefox
     # if not is_firefox_running():
     #     subprocess.Popen(
@@ -473,3 +489,4 @@ if __name__ == "__main__":
     app.exec()
 
 # TODO: add a history function, perhaps last 5 actually downloaded... maybe 5 for nebula and YT separately
+# TODO: queue and recheck anything that's live and dl once it's done being live?
