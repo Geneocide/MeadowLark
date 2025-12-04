@@ -44,7 +44,7 @@ from pathlib import Path
 
 import yt_dlp
 from hurry.filesize import size
-from PyQt6.QtCore import QDir, Qt
+from PyQt6.QtCore import QDir, Qt, QTimer
 from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
@@ -141,6 +141,17 @@ class MyWindow(QWidget):
         self.downloader.start()
         self.setLayout(layout)
 
+        # Live queue setup and periodic recheck every 30 minutes
+        self.live_queue_path = Path("resources/live_queue.txt")
+        self.live_queue_path.parent.mkdir(parents=True, exist_ok=True)
+        self.live_queue_path.touch(exist_ok=True)
+        self.live_check_timer = QTimer(self)
+        self.live_check_timer.setInterval(30 * 60 * 1000)  # 30 minutes
+        self.live_check_timer.timeout.connect(self.check_live_queue)
+        self.live_check_timer.start()
+        # Do an initial check on startup
+        self.check_live_queue()
+
         update_available, _, _ = utils.is_yt_dlp_update_available()
         self.buttonUpdate.setVisible(update_available)
 
@@ -202,9 +213,7 @@ class MyWindow(QWidget):
             "socket-timeout": 120,
             "max_fragment_retries": 10,
             "mtime": True,
-            "match_filter": yt_dlp.utils.match_filter_func(
-                "!is_live",
-            ),
+            # Custom match_filter will be set in get_options per-source
             "cookiefile": r"resources\cookies.txt",
             "postprocessors": [
                 {"key": "SponsorBlock"},
@@ -285,14 +294,8 @@ class MyWindow(QWidget):
 
         # detect if YT
         if "youtube.com" in urls[0]:
-            # Existing match_filter
-            match_filters = ["!is_live"]
-            # Append your requested filters
-            match_filters.append("live_status!=is_upcoming")
-            match_filters.append("availability!=needs_auth")
-            properties["match_filter"] = yt_dlp.utils.match_filter_func(
-                " & ".join(match_filters),
-            )
+            # Use a custom match_filter that records live videos for later
+            properties["match_filter"] = self.make_match_filter(source)
             # properties["postprocessors"] = [
             #     {"key": "SponsorBlock"},
             #     {
@@ -353,13 +356,8 @@ class MyWindow(QWidget):
 
         if source in source_options:
             if "playlists" in source:
-                # Existing match_filter
-                match_filters = ["!is_live"]
-                match_filters.append("live_status!=is_upcoming")
-                match_filters.append("availability!=needs_auth")
-                properties["match_filter"] = yt_dlp.utils.match_filter_func(
-                    " & ".join(match_filters),
-                )
+                # Use a custom match_filter that records live videos for later
+                properties["match_filter"] = self.make_match_filter(source)
             properties.update(source_options[source])
         else:
             properties.update(
@@ -369,6 +367,10 @@ class MyWindow(QWidget):
                     "outtmpl": "E:/vid storage/%(title)s.%(ext)s",
                 },
             )
+
+        # Ensure we always apply our custom match filter if not already set
+        if "match_filter" not in properties:
+            properties["match_filter"] = self.make_match_filter(source)
 
         return properties
 
@@ -415,6 +417,128 @@ class MyWindow(QWidget):
     def handle_queue_empty(self) -> None:
         """Update the output label to indicate that the download queue is ready."""
         self.labelOutput.setText("[ Ready ]")
+
+    # --- Live queue management ---
+    def make_match_filter(self, source: str):
+        """
+        Build a custom match_filter that:
+        - Skips live and upcoming videos now
+        - Records them into a persistent live queue for later re-check
+        - Skips videos that need auth
+        """
+
+        def _mf(info: dict, incomplete: bool) -> str | None:
+            try:
+                is_live = info.get("is_live")
+                live_status = info.get("live_status")
+                availability = info.get("availability")
+                if availability == "needs_auth":
+                    return "Skipping: needs_auth"
+                if is_live or live_status in ("is_live", "is_upcoming"):
+                    url = (
+                        info.get("webpage_url")
+                        or info.get("original_url")
+                        or info.get("url")
+                    )
+                    if url:
+                        self.add_to_live_queue(url, source)
+                        self.logEdit.appendPlainText(
+                            f"Queued live for later: {url} [{source}]",
+                        )
+                    return "Skipping live; queued for later"
+            except Exception:
+                # If anything goes wrong, allow download to proceed rather than crash
+                return None
+            return None
+
+        return _mf
+
+    def load_live_queue(self) -> dict[str, str]:
+        entries: dict[str, str] = {}
+        if self.live_queue_path.exists():
+            with self.live_queue_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # stored as: source|url
+                    parts = line.split("|", 1)
+                    if len(parts) == 2 and parts[1]:
+                        entries[parts[1]] = parts[0]
+        return entries
+
+    def save_live_queue(self, entries: dict[str, str]) -> None:
+        with self.live_queue_path.open("w", encoding="utf-8") as f:
+            for url, source in entries.items():
+                f.write(f"{source}|{url}\n")
+
+    def add_to_live_queue(self, url: str, source: str) -> None:
+        entries = self.load_live_queue()
+        # Avoid duplicates
+        entries[url] = source
+        self.save_live_queue(entries)
+
+    def check_live_queue(self) -> None:
+        entries = self.load_live_queue()
+        if not entries:
+            return
+        remaining: dict[str, str] = {}
+        for url, source in entries.items():
+            try:
+                with yt_dlp.YoutubeDL(
+                    {
+                        "quiet": True,
+                        "skip_download": True,
+                        "cookiefile": r"resources\cookies.txt",
+                        "extract_flat": True,
+                    },
+                ) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                is_live = info.get("is_live")
+                live_status = info.get("live_status")
+                if is_live or live_status in ("is_live", "is_upcoming"):
+                    # Still live; keep it in the queue
+                    remaining[url] = source
+                else:
+                    # Live ended -> enqueue for download with original source options
+                    self.logEdit.appendPlainText(
+                        f"Live ended, queued: {url} [{source}]",
+                    )
+                    qhook = QYT.QHook()
+                    qlogger = QYT.QLogger(self.downloadQueue)
+                    ydl_opts = {
+                        "logger": qlogger,
+                        "progress_hooks": [qhook],
+                        "windowsfilenames": True,
+                        "socket-timeout": 120,
+                        "max_fragment_retries": 10,
+                        "mtime": True,
+                        "cookiefile": r"resources\cookies.txt",
+                        "postprocessors": [
+                            {"key": "SponsorBlock"},
+                            {
+                                "key": "ModifyChapters",
+                                "remove_sponsor_segments": [
+                                    "sponsor",
+                                    "selfpromo",
+                                ],
+                            },
+                        ],
+                    }
+                    properties = self.get_options([url], source)
+                    if properties:
+                        properties["match_filter"] = self.make_match_filter(source)
+                        ydl_opts = self.append_properties(ydl_opts, properties)
+                        self.downloadQueue.put(([url], ydl_opts))
+                        qhook.info_changed.connect(self.handle_info_changed)
+                        qlogger.message_changed.connect(self.handle_log_entry)
+            except Exception as e:  # noqa: BLE001
+                # If any error in checking, keep it for later
+                self.logEdit.appendPlainText(
+                    f"Error checking live url {url}: {e}",
+                )
+                remaining[url] = source
+        self.save_live_queue(remaining)
 
     def do_updates(self) -> None:
         """
