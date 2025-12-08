@@ -228,6 +228,17 @@ class MyWindow(QWidget):
         if properties:
             ydl_opts = self.append_properties(ydl_opts, properties)
             if ydl_opts:
+                # Provide metadata for history logging
+                def _detect_site(u: list[str]) -> str:
+                    all_urls = " ".join(u).lower()
+                    if "youtube.com" in all_urls or "youtu.be" in all_urls:
+                        return "youtube"
+                    if "nebula" in all_urls or "watchnebula" in all_urls:
+                        return "nebula"
+                    return "unknown"
+
+                ydl_opts["qmeta"] = {"site": _detect_site(urls), "type": source}
+
                 self.downloadQueue.put((urls, ydl_opts))
                 qhook.info_changed.connect(self.handle_info_changed)
                 # qlogger.message_changed.connect(self.logEdit.appendPlainText)
@@ -421,7 +432,8 @@ class MyWindow(QWidget):
     # --- Live queue management ---
     def make_match_filter(self, source: str):
         """
-        Build a custom match_filter that:
+        Build a custom match_filter that...
+
         - Skips live and upcoming videos now
         - Records them into a persistent live queue for later re-check
         - Skips videos that need auth
@@ -529,6 +541,21 @@ class MyWindow(QWidget):
                     if properties:
                         properties["match_filter"] = self.make_match_filter(source)
                         ydl_opts = self.append_properties(ydl_opts, properties)
+
+                        # Provide metadata for history logging on requeued lives
+                        def _detect_site_single(u: str) -> str:
+                            lu = (u or "").lower()
+                            if "youtube.com" in lu or "youtu.be" in lu:
+                                return "youtube"
+                            if "nebula" in lu or "watchnebula" in lu:
+                                return "nebula"
+                            return "unknown"
+
+                        ydl_opts["qmeta"] = {
+                            "site": _detect_site_single(url),
+                            "type": source,
+                        }
+
                         self.downloadQueue.put(([url], ydl_opts))
                         qhook.info_changed.connect(self.handle_info_changed)
                         qlogger.message_changed.connect(self.handle_log_entry)
@@ -613,4 +640,3 @@ if __name__ == "__main__":
     app.exec()
 
 # TODO: add a history function, perhaps last 5 actually downloaded... maybe 5 for nebula and YT separately
-# TODO: queue and recheck anything that's live and dl once it's done being live?

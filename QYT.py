@@ -1,6 +1,7 @@
 """Provides PyQt-based classes for logging, progress signaling, and threaded download queue management using yt-dlp. Includes QLogger for emitting log messages, QHook for progress updates, and QYTQueue for managing and executing download tasks in a background thread with wake lock support."""
 
 import logging
+import os
 from queue import Queue
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
@@ -8,8 +9,16 @@ from wakepy import keep
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError, ExtractorError, MaxDownloadsReached
 
+# Migrate prior logfile name to the new error log if present
+try:
+    if os.path.exists("logfile.txt") and not os.path.exists("error_log.txt"):
+        os.replace("logfile.txt", "error_log.txt")
+except Exception:
+    # Never fail on migration
+    pass
+
 logging.basicConfig(
-    filename="logfile.txt",
+    filename="error_log.txt",
     level=logging.ERROR,
     format="%(asctime)s %(message)s",
 )
@@ -117,6 +126,100 @@ class QHook(QObject):
         self.info_changed.emit(d.copy())
 
 
+class HistoryLogger:
+    """Writes human-readable download history entries to history_log.txt."""
+
+    HISTORY_PATH = "history_log.txt"
+
+    @staticmethod
+    def _format_entry(dt: str, site: str, dtype: str, title: str, result: str) -> str:
+        return (
+            f"[{dt}] Site: {site} | Type: {dtype} | Title: {title} | Result: {result}\n"
+        )
+
+    @staticmethod
+    def log(site: str, dtype: str, title: str, success: bool) -> None:
+        from datetime import datetime
+
+        dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        result = "SUCCESS" if success else "FAIL"
+        try:
+            with open(HistoryLogger.HISTORY_PATH, "a", encoding="utf-8") as f:
+                f.write(HistoryLogger._format_entry(dt, site, dtype, title, result))
+        except Exception:
+            # Never allow history logging to crash downloading
+            pass
+
+
+class HistoryHook:
+    """
+    A yt-dlp progress hook that records per-item success into history_log.txt.
+
+    Expects meta with keys: 'site' and 'type'. Deduplicates by video id and
+    prefers logging on postprocessing merger completion; falls back to the
+    first 'finished' event for cases without merging (e.g., audio-only).
+    """
+
+    def __init__(self, meta: dict | None) -> None:
+        self.meta = meta or {}
+        self._seen_ids: set[str] = set()
+
+    def _infer_site(self, info: dict) -> str:
+        site = (self.meta.get("site") or "").strip().lower()
+        if not site or site == "unknown":
+            ek = (info.get("extractor_key") or info.get("extractor") or "").lower()
+            if "youtube" in ek:
+                site = "youtube"
+            elif "nebula" in ek:
+                site = "nebula"
+            elif ek:
+                site = ek
+            else:
+                site = "unknown"
+        return site
+
+    def _vid_id(self, info: dict) -> str:
+        return str(
+            info.get("id")
+            or info.get("_filename")
+            or info.get("url")
+            or info.get("playlist_id")
+            or "unknown",
+        )
+
+    def __call__(self, d: dict) -> None:
+        try:
+            status = d.get("status")
+            info = d.get("info_dict") or {}
+            vid = self._vid_id(info)
+            # If already recorded for this id, ignore further events
+            if vid in self._seen_ids:
+                return
+
+            postproc = (d.get("postprocessor") or "").lower()
+            title = (
+                info.get("title")
+                or info.get("_filename")
+                or info.get("id")
+                or "(unknown title)"
+            )
+            site = self._infer_site(info)
+            dtype = self.meta.get("type") or self.meta.get("source") or "unknown"
+
+            if status == "postprocessing":
+                # Prefer logging when a merge or audio-extract postprocessor finishes
+                if "merger" in postproc or "ffmpegextractaudio" in postproc:
+                    HistoryLogger.log(site, dtype, title, True)
+                    self._seen_ids.add(vid)
+            elif status == "finished":
+                # Fallback for non-merged items (e.g., audio-only) or if no postprocessing runs
+                HistoryLogger.log(site, dtype, title, True)
+                self._seen_ids.add(vid)
+        except Exception:
+            # Never let history logging break the download
+            pass
+
+
 class QYTQueue(QThread):
     """
     Manages a threaded download queue using QThread, emitting progress and completion signals.
@@ -166,6 +269,11 @@ class QYTQueue(QThread):
             options (dict): yt-dlp options, including logger and progress_hooks.
         """
         try:
+            # Ensure history hook is attached with metadata
+            progress_hooks = list(options.get("progress_hooks", []))
+            progress_hooks.append(HistoryHook(options.get("qmeta")))
+            options["progress_hooks"] = progress_hooks
+
             with YoutubeDL(options) as ydl:
                 ydl.cache.remove()
                 ydl.download(urls)
@@ -181,6 +289,13 @@ class QYTQueue(QThread):
             logger = options.get("logger")
             if isinstance(logger, QLogger):
                 logger.exception(error_message)
+            # Attempt to record a failure entry for the batch when title is unknown
+            meta = options.get("qmeta") or {}
+            site = meta.get("site", "unknown")
+            dtype = meta.get("type", meta.get("source", "unknown"))
+            # Use first URL as the title placeholder
+            title = urls[0] if urls else "(unknown)"
+            HistoryLogger.log(site, dtype, title, False)
         finally:
             for hook in options.get("progress_hooks", []):
                 if hasattr(hook, "infoChanged"):
