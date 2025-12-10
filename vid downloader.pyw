@@ -157,26 +157,9 @@ class MyWindow(QWidget):
 
     def append_properties(self, dictionary: dict, properties: dict) -> dict:
         """
-        Append properties to a dictionary recursively.
-
-        Args:
-            dictionary (dict): The dictionary to append properties to.
-            properties (dict): The properties to append.
-
-        Returns:
-            dict: The updated dictionary.
+        Merge properties into dictionary recursively using the shared utility.
         """
-        new_dictionary = dictionary.copy()
-        for key, value in properties.items():
-            dictionary_value = new_dictionary.get(key)
-            if isinstance(dictionary_value, (list, dict)):
-                if isinstance(dictionary_value, list) and isinstance(value, list):
-                    dictionary_value.extend(value)
-                elif isinstance(dictionary_value, dict):
-                    self.append_properties(dictionary_value, value)
-            else:
-                new_dictionary[key] = value
-        return new_dictionary
+        return utils.merge_dicts_recursive(dictionary, properties)
 
     def request_detected(self, urls: list, source: str) -> None:
         """
@@ -193,11 +176,7 @@ class MyWindow(QWidget):
         if source == "Update":
             self.do_updates()
             return
-        playlists_path = {
-            "1080playlists": r"Z:\misc\dev\vid downloader\resources\playlists\playlists.txt",
-            "720playlists": r"Z:\misc\dev\vid downloader\resources\playlists\720playlists.txt",
-            "audio_playlists": r"Z:\misc\dev\vid downloader\resources\playlists\audio playlists.txt",
-        }.get(source)
+        playlists_path = utils.get_playlist_file_for_source(source)
         if playlists_path:
             try:
                 with Path(playlists_path).open("r") as file:
@@ -206,38 +185,17 @@ class MyWindow(QWidget):
                 print("File not found.")
 
         # options constant for all downloads
-        ydl_opts = {
-            "logger": qlogger,
-            "progress_hooks": [qhook],
-            "windowsfilenames": True,
-            "socket-timeout": 120,
-            "max_fragment_retries": 10,
-            "mtime": True,
-            # Custom match_filter will be set in get_options per-source
-            "cookiefile": r"resources\cookies.txt",
-            "postprocessors": [
-                {"key": "SponsorBlock"},
-                {
-                    "key": "ModifyChapters",
-                    "remove_sponsor_segments": ["sponsor", "selfpromo"],
-                },
-            ],
-        }
+        ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
 
         properties = self.get_options(urls, source)
         if properties:
             ydl_opts = self.append_properties(ydl_opts, properties)
             if ydl_opts:
                 # Provide metadata for history logging
-                def _detect_site(u: list[str]) -> str:
-                    all_urls = " ".join(u).lower()
-                    if "youtube.com" in all_urls or "youtu.be" in all_urls:
-                        return "youtube"
-                    if "nebula" in all_urls or "watchnebula" in all_urls:
-                        return "nebula"
-                    return "unknown"
-
-                ydl_opts["qmeta"] = {"site": _detect_site(urls), "type": source}
+                ydl_opts["qmeta"] = {
+                    "site": utils.detect_site_from_urls(urls),
+                    "type": source,
+                }
 
                 self.downloadQueue.put((urls, ydl_opts))
                 qhook.info_changed.connect(self.handle_info_changed)
@@ -352,13 +310,23 @@ class MyWindow(QWidget):
                 "ignoreerrors": "only_download",
             },
             "720playlists": {
-                "format_sort": ["res:720"],
+                # Prefer 720p mp4 video + m4a audio, else best 720p with any audio, else fallback best
+                "format": (
+                    "bestvideo*[height=720][ext=mp4]+bestaudio[ext=m4a]/"
+                    "bestvideo*[height=720]+bestaudio/"
+                    "best[height=720]/best"
+                ),
                 "merge_output_format": "mp4",
                 "outtmpl": "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s",
                 "ignoreerrors": "only_download",
             },
             "1080playlists": {
-                "format_sort": ["res:1080"],
+                # Prefer 1080p mp4 video + m4a audio, else best 1080p with any audio, else fallback best
+                "format": (
+                    "bestvideo*[height=1080][ext=mp4]+bestaudio[ext=m4a]/"
+                    "bestvideo*[height=1080]+bestaudio/"
+                    "best[height=1080]/best"
+                ),
                 "merge_output_format": "mp4",
                 "outtmpl": "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s",
                 "ignoreerrors": "only_download",
@@ -371,9 +339,22 @@ class MyWindow(QWidget):
                 properties["match_filter"] = self.make_match_filter(source)
             properties.update(source_options[source])
         else:
+            # Build a format string that targets the requested height if source is numeric like "1080" or "720"
+            try:
+                height = int(source)
+            except ValueError:
+                height = None
+            if height:
+                fmt = (
+                    f"bestvideo*[height={height}][ext=mp4]+bestaudio[ext=m4a]/"
+                    f"bestvideo*[height={height}]+bestaudio/"
+                    f"best[height={height}]/best"
+                )
+            else:
+                fmt = "bestvideo*+bestaudio/best"
             properties.update(
                 {
-                    "format_sort": [f"res:{source}"],
+                    "format": fmt,
                     "merge_output_format": "mp4",
                     "outtmpl": "E:/vid storage/%(title)s.%(ext)s",
                 },
@@ -518,41 +499,14 @@ class MyWindow(QWidget):
                     )
                     qhook = QYT.QHook()
                     qlogger = QYT.QLogger(self.downloadQueue)
-                    ydl_opts = {
-                        "logger": qlogger,
-                        "progress_hooks": [qhook],
-                        "windowsfilenames": True,
-                        "socket-timeout": 120,
-                        "max_fragment_retries": 10,
-                        "mtime": True,
-                        "cookiefile": r"resources\cookies.txt",
-                        "postprocessors": [
-                            {"key": "SponsorBlock"},
-                            {
-                                "key": "ModifyChapters",
-                                "remove_sponsor_segments": [
-                                    "sponsor",
-                                    "selfpromo",
-                                ],
-                            },
-                        ],
-                    }
+                    ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
                     properties = self.get_options([url], source)
                     if properties:
                         properties["match_filter"] = self.make_match_filter(source)
                         ydl_opts = self.append_properties(ydl_opts, properties)
-
                         # Provide metadata for history logging on requeued lives
-                        def _detect_site_single(u: str) -> str:
-                            lu = (u or "").lower()
-                            if "youtube.com" in lu or "youtu.be" in lu:
-                                return "youtube"
-                            if "nebula" in lu or "watchnebula" in lu:
-                                return "nebula"
-                            return "unknown"
-
                         ydl_opts["qmeta"] = {
-                            "site": _detect_site_single(url),
+                            "site": utils.detect_site_from_urls([url]),
                             "type": source,
                         }
 
@@ -639,4 +593,4 @@ if __name__ == "__main__":
 
     app.exec()
 
-# TODO: add a history function, perhaps last 5 actually downloaded... maybe 5 for nebula and YT separately
+# TODO: add way of seeing history info in app?
