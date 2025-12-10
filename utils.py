@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -94,6 +95,11 @@ def _default_postprocessors() -> list[dict]:
 
 
 def build_base_ydl_opts(logger: Any, qhook: Any) -> dict:
+    js_runtimes_config = {
+        "deno": {
+            "path": Path(".venv/Scripts"),
+        },
+    }
     """Centralize common yt-dlp options used across the app."""
     return {
         "logger": logger,
@@ -105,6 +111,7 @@ def build_base_ydl_opts(logger: Any, qhook: Any) -> dict:
         # Custom match_filter will be set per-source by callers
         "cookiefile": r"resources\cookies.txt",
         "postprocessors": _default_postprocessors(),
+        "js_runtimes": js_runtimes_config,
         "remote_components": ["ejs:github"],
     }
 

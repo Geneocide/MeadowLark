@@ -570,13 +570,6 @@ if __name__ == "__main__":
     dirname = Path(__file__).parent
     QDir.addSearchPath("icons", str(dirname / "resources" / "icons"))
 
-    if not os.environ.get("YTDLP_JS"):
-        deno = shutil.which("deno")
-        if deno:
-            os.environ["YTDLP_JS"] = deno
-        else:
-            os.environ["YTDLP_JS"] = "deno"  # fallback; if on PATH later it will work
-
     # Open Firefox
     # if not is_firefox_running():
     #     subprocess.Popen(
