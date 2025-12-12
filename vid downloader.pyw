@@ -51,6 +51,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QGridLayout,
     QLabel,
+    QMessageBox,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
@@ -88,21 +89,21 @@ class MyWindow(QWidget):
             r"Z:\misc\dev\vid downloader\resources\playlists\playlists.txt",
         )
         self.buttonPlaylists.clicked.connect(
-            lambda: self.request_detected([], "1080playlists"),
+            lambda: self.playlist_button_clicked("1080playlists"),
         )
         self.button720Playlists = PlaylistButton(
             "720 Playlists",
             r"Z:\misc\dev\vid downloader\resources\playlists\720playlists.txt",
         )
         self.button720Playlists.clicked.connect(
-            lambda: self.request_detected([], "720playlists"),
+            lambda: self.playlist_button_clicked("720playlists"),
         )
         self.buttonAudioPlaylists = PlaylistButton(
             "YT Podcasts",
             r"Z:\misc\dev\vid downloader\resources\playlists\audio playlists.txt",
         )
         self.buttonAudioPlaylists.clicked.connect(
-            lambda: self.request_detected([], "audio_playlists"),
+            lambda: self.playlist_button_clicked("audio_playlists"),
         )
         self.checkIgnoreArchive = QCheckBox("Ignore Archive?")
         self.checkIgnoreArchive.setChecked(False)
@@ -154,6 +155,25 @@ class MyWindow(QWidget):
 
         update_available, _, _ = utils.is_yt_dlp_update_available()
         self.buttonUpdate.setVisible(update_available)
+
+    def playlist_button_clicked(self, source: str) -> None:
+        """
+        Handle playlist button click with optional confirmation if Ignore Archive is checked.
+
+        Args:
+            source (str): The source/playlist type (e.g., "1080playlists", "720playlists", "audio_playlists").
+        """
+        if self.checkIgnoreArchive.isChecked():
+            reply = QMessageBox.warning(
+                self,
+                "Ignore Archive Enabled",
+                "You have 'Ignore Archive?' checked. This will re-download previously downloaded videos.\n\nDo you want to continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.No:
+                return
+        self.request_detected([], source)
 
     def append_properties(self, dictionary: dict, properties: dict) -> dict:
         """
