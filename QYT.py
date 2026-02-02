@@ -284,17 +284,26 @@ class QYTQueue(QThread):
             OSError,
             ValueError,
         ) as e:
-            error_message = f"Error downloading {urls}: {e!s}"
+            # Extract title for error logging
+            title = urls[0] if urls else "(unknown)"
+            try:
+                with YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+                    info = ydl.extract_info(urls[0], download=False)
+                    title = info.get("title", title)
+            except Exception:
+                pass
+
+            meta = options.get("qmeta") or {}
+            site = meta.get("site", "unknown")
+            dtype = meta.get("type", meta.get("source", "unknown"))
+            error_message = (
+                f"Error downloading '{title}' (site: {site}, type: {dtype}): {e!s}"
+            )
             self.message_changed.emit(error_message)
             logger = options.get("logger")
             if isinstance(logger, QLogger):
                 logger.exception(error_message)
             # Attempt to record a failure entry for the batch when title is unknown
-            meta = options.get("qmeta") or {}
-            site = meta.get("site", "unknown")
-            dtype = meta.get("type", meta.get("source", "unknown"))
-            # Use first URL as the title placeholder
-            title = urls[0] if urls else "(unknown)"
             HistoryLogger.log(site, dtype, title, False)
         finally:
             for hook in options.get("progress_hooks", []):

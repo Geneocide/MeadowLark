@@ -445,8 +445,8 @@ class MyWindow(QWidget):
                 is_live = info.get("is_live")
                 live_status = info.get("live_status")
                 availability = info.get("availability")
-                if availability == "needs_auth":
-                    return "Skipping: needs_auth"
+                if availability in ("needs_auth", "scheduled"):
+                    return f"Skipping: {availability}"
                 if is_live or live_status in ("is_live", "is_upcoming"):
                     url = (
                         info.get("webpage_url")
