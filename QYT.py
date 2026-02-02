@@ -293,9 +293,44 @@ class QYTQueue(QThread):
             except Exception:
                 pass
 
+            error_str = str(e)
             meta = options.get("qmeta") or {}
             site = meta.get("site", "unknown")
             dtype = meta.get("type", meta.get("source", "unknown"))
+
+            # If requested 1080 and the format is unavailable, try 720 once before failing
+            if (
+                "Requested format is not available" in error_str
+                and dtype == "1080"
+                and not options.get("_tried_720_fallback")
+            ):
+                self.message_changed.emit(
+                    f"Requested 1080 format not available for '{title}'; retrying at 720...",
+                )
+                # Prepare fallback options (shallow copy is sufficient)
+                fallback = options.copy()
+                fallback["_tried_720_fallback"] = True
+                fallback["format"] = (
+                    "bestvideo*[height=720][ext=mp4]+bestaudio[ext=m4a]/"
+                    "bestvideo*[height=720]+bestaudio/"
+                    "best[height=720]/best"
+                )
+                fallback.setdefault("merge_output_format", "mp4")
+                fq = dict(fallback.get("qmeta", {}))
+                fq["type"] = "720"
+                fallback["qmeta"] = fq
+                try:
+                    with YoutubeDL(fallback) as ydl:
+                        ydl.cache.remove()
+                        ydl.download(urls)
+                    # Success on fallback; log and return
+                    HistoryLogger.log(site, "720", title, True)
+                    return
+                except Exception as e2:  # noqa: BLE001
+                    # Continue with original failure path using the new exception
+                    e = e2
+                    error_str = str(e)
+
             error_message = (
                 f"Error downloading '{title}' (site: {site}, type: {dtype}): {e!s}"
             )
