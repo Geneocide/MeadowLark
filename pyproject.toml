@@ -14,6 +14,16 @@ dependencies = [
     "yt-dlp>=2025.7.21",
 ]
 
-[tool.ruff]
-lint.extend-select = ["ALL"]
-lint.ignore = ["T201", "D103", "D212", "D413", "E501", "ERA001"]
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "T201",   # `print` found: Prevents print statements (prefers proper logging).
+    "D103",   # Missing docstring in public function: Requires comments for all functions.
+    "D212",   # Multi-line docstring summary should start at the first line.
+    "D413",   # Missing blank line after last section in docstring.
+    "E501",   # Line too long: Enforces the standard 88 or 120 character limit.
+    "ERA001", # Found commented-out code: Prevents "dead code" from cluttering files.
+    "TD002",  # Missing author in TODO: Requires `TODO(name):` format.
+    "TD003",  # Missing issue link on the line following a TODO.
+    "FIX002", # Line contains TODO
+]

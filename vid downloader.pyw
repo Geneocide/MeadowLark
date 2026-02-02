@@ -34,6 +34,7 @@ Author: Gene
 
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -833,26 +834,31 @@ class MyWindow(QWidget):
                         except Exception:
                             ts = None
                     if ts:
-                        age_seconds = now_ts - ts
-                        if age_seconds < (24 * 60 * 60):
-                            # New episode; check SponsorBlock (only YouTube)
-                            site = utils.detect_site_from_urls([webpage])
-                            if site == "youtube":
-                                has_sb = self._check_sponsorblock_for_video_id(vid)
-                                if has_sb:
+                        # If timestamp is in the future, treat as an upcoming scheduled episode
+                        if ts > now_ts:
+                            status_entry["status"] = "Upcoming"
+                            status_entry["recheck_ts"] = ts
+                        else:
+                            age_seconds = now_ts - ts
+                            if age_seconds < (24 * 60 * 60):
+                                # New episode; check SponsorBlock (only YouTube)
+                                site = utils.detect_site_from_urls([webpage])
+                                if site == "youtube":
+                                    has_sb = self._check_sponsorblock_for_video_id(vid)
+                                    if has_sb:
+                                        to_download.append(webpage)
+                                        status_entry["status"] = "Ready"
+                                    else:
+                                        pending.append(webpage)
+                                        status_entry["status"] = "Pending SponsorBlock"
+                                else:
+                                    # Non-YouTube: fall back to not requiring SponsorBlock
                                     to_download.append(webpage)
                                     status_entry["status"] = "Ready"
-                                else:
-                                    pending.append(webpage)
-                                    status_entry["status"] = "Pending SponsorBlock"
                             else:
-                                # Non-YouTube: fall back to not requiring SponsorBlock
+                                # Older than 24h -> download
                                 to_download.append(webpage)
                                 status_entry["status"] = "Ready"
-                        else:
-                            # Older than 24h -> download
-                            to_download.append(webpage)
-                            status_entry["status"] = "Ready"
                     else:
                         # No timestamp -> be permissive and download
                         to_download.append(webpage)
@@ -872,17 +878,68 @@ class MyWindow(QWidget):
                 # Append a single status entry per podcast after evaluating its latest entry
                 statuses.append(status_entry)
             except Exception as e:
-                # If extracting playlist fails, record the error and continue
-                had_error = True
-                messages.append(f"Error expanding playlist/url {url}: {e}")
-                statuses.append(
-                    {
-                        "podcast": url,
-                        "latest_date": "(error)",
-                        "status": f"Error: {e}",
-                        "url": url,
-                    },
+                # Try to detect scheduled/upcoming events and treat them as 'Upcoming' rather than errors
+                errstr = str(e)
+                now_ts = datetime.now().timestamp()
+                scheduled_ts = None
+                # Pattern like: 'This live event will begin in 29 hours.'
+                m = re.search(
+                    r"will begin in\s*(\d+)\s*(hour|hours|day|days)",
+                    errstr,
+                    re.IGNORECASE,
                 )
+                if m:
+                    n = int(m.group(1))
+                    unit = m.group(2).lower()
+                    if unit.startswith("hour"):
+                        delay = n * 3600
+                    else:
+                        delay = n * 86400
+                    scheduled_ts = now_ts + delay
+                else:
+                    # Pattern: 'scheduled to begin on 2026-02-03 15:00' or similar
+                    m2 = re.search(
+                        r"scheduled to begin .*?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?)",
+                        errstr,
+                        re.IGNORECASE,
+                    )
+                    if m2:
+                        datestr = m2.group(1)
+                        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+                            try:
+                                scheduled_ts = datetime.strptime(
+                                    datestr,
+                                    fmt,
+                                ).timestamp()
+                                break
+                            except Exception:
+                                scheduled_ts = None
+                if scheduled_ts:
+                    statuses.append(
+                        {
+                            "podcast": url,
+                            "latest_date": "(scheduled)",
+                            "status": "Upcoming",
+                            "url": url,
+                            "recheck_ts": scheduled_ts,
+                        },
+                    )
+                    messages.append(
+                        f"Podcast {url} scheduled; will recheck at {datetime.fromtimestamp(scheduled_ts).strftime('%Y-%m-%d %H:%M:%S')}",
+                    )
+                else:
+                    # If extracting playlist fails, record the error and continue
+                    had_error = True
+                    messages.append(f"Error expanding playlist/url {url}: {e}")
+                    statuses.append(
+                        {
+                            "podcast": url,
+                            "latest_date": "(error)",
+                            "status": f"Error: {e}",
+                            "url": url,
+                        },
+                    )
+
         return to_download, pending, had_error, messages, statuses
 
     def _set_podcast_indicator(self, state: str) -> None:
@@ -1018,6 +1075,49 @@ class MyWindow(QWidget):
         # Cache last known statuses for non-blocking status dialog display
         if statuses:
             self._podcast_last_statuses = statuses
+            # Record any per-podcast recheck timestamps so we can skip checks until scheduled time,
+            # and schedule a precise recheck for feeds with known scheduled times.
+            if not hasattr(self, "_podcast_recheck_times"):
+                self._podcast_recheck_times = {}
+            if not hasattr(self, "_podcast_recheck_timers"):
+                self._podcast_recheck_timers = {}
+            for s in statuses:
+                try:
+                    url = s.get("url")
+                    rts = s.get("recheck_ts")
+                    if rts:
+                        self._podcast_recheck_times[url] = rts
+                        # schedule a one-shot timer to re-run check at the scheduled time if not already scheduled
+                        now_ts = datetime.now().timestamp()
+                        if rts > now_ts and url not in self._podcast_recheck_timers:
+                            delay_ms = int((rts - now_ts) * 1000)
+                            t = QTimer(self)
+                            t.setSingleShot(True)
+                            t.timeout.connect(
+                                lambda u=url: self.request_detected(
+                                    [u],
+                                    "audio_playlists",
+                                ),
+                            )
+                            try:
+                                t.start(delay_ms)
+                                self._podcast_recheck_timers[url] = t
+                            except Exception:
+                                # If timer scheduling fails, just log and continue
+                                self.logEdit.appendPlainText(
+                                    f"Failed to schedule recheck timer for {url}",
+                                )
+                    else:
+                        # Remove any stale scheduled time and cancel any timer
+                        self._podcast_recheck_times.pop(url, None)
+                        t = self._podcast_recheck_timers.pop(url, None)
+                        if t:
+                            try:
+                                t.stop()
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
 
         # Update internal state
         self._last_podcast_check_error = had_error
@@ -1179,6 +1279,9 @@ class MyWindow(QWidget):
                 # Determine status
                 if vid and vid in archived_ids:
                     status = "Downloaded"
+                elif ts and ts > now_ts:
+                    # Scheduled for the future -> Upcoming
+                    status = "Upcoming"
                 # If very new (<24h), check SponsorBlock
                 elif ts and (now_ts - ts) < (24 * 60 * 60):
                     site = utils.detect_site_from_urls(
@@ -1191,14 +1294,16 @@ class MyWindow(QWidget):
                         status = "Ready"
                 else:
                     status = "Ready"
-                statuses.append(
-                    {
-                        "podcast": title,
-                        "latest_date": latest_date,
-                        "status": status,
-                        "url": url,
-                    },
-                )
+
+                entry = {
+                    "podcast": title,
+                    "latest_date": latest_date,
+                    "status": status,
+                    "url": url,
+                }
+                if ts and ts > now_ts:
+                    entry["recheck_ts"] = ts
+                statuses.append(entry)
             except Exception as e:
                 statuses.append(
                     {
