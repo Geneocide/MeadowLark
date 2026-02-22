@@ -151,8 +151,71 @@ def is_primitive_technology(info: dict) -> bool:
 def get_playlist_file_for_source(source: str) -> str | None:
     """Return the on-disk playlist file path for a given source key, if any."""
     mapping = {
-        "1080playlists": r"Z:\misc\dev\vid downloader\resources\playlists\playlists.txt",
-        "720playlists": r"Z:\misc\dev\vid downloader\resources\playlists\720playlists.txt",
-        "audio_playlists": r"Z:\misc\dev\vid downloader\resources\playlists\audio playlists.txt",
+        "1080playlists": r"Z:\\misc\\dev\\vid downloader\\resources\\playlists\\playlists.txt",
+        "720playlists": r"Z:\\misc\\dev\\vid downloader\\resources\\playlists\\720playlists.txt",
+        "audio_playlists": r"Z:\\misc\\dev\\vid downloader\\resources\\playlists\\audio playlists.txt",
     }
     return mapping.get(source)
+
+
+# -----------------
+# Path/label helpers for robust audio playlist handling
+# -----------------
+import hashlib
+import os
+from urllib.parse import urlparse, parse_qs
+
+WINDOWS_INVALID = '<>:"/\\|?*'
+
+
+essential_whitespace_re = re.compile(r"\s+")
+
+def sanitize_for_path(name: str) -> str:
+    """Return a Windows-safe folder/file component, or 'misc' if empty."""
+    if not name:
+        return "misc"
+    table = str.maketrans({c: "_" for c in WINDOWS_INVALID})
+    cleaned = name.translate(table)
+    # Remove control chars
+    cleaned = re.sub(r"[\x00-\x1f]", "_", cleaned)
+    # Collapse whitespace, strip trailing dots/spaces
+    cleaned = essential_whitespace_re.sub(" ", cleaned).strip().rstrip(".")
+    return cleaned or "misc"
+
+
+def slugify_if_too_long(
+    base_dir: str,
+    playlist_label: str,
+    filename_hint: str = "%(title)s.%(ext)s",
+    max_total: int = 240,
+) -> str:
+    """
+    If the full path might exceed a safe Windows max, replace the label with a short slug.
+
+    Windows MAX_PATH is ~260; we keep a margin for long titles at runtime.
+    """
+    label = sanitize_for_path(playlist_label)
+    tentative = os.path.join(base_dir, label, filename_hint)
+    if len(tentative) <= max_total:
+        return label
+    base = re.sub(r"[^A-Za-z0-9]+", "-", label).strip("-")[:40]
+    h = hashlib.sha1(label.encode("utf-8")).hexdigest()[:8]
+    slug = f"{base}-{h}" if base else h
+    return slug or "misc"
+
+
+def resolve_playlist_label(info: dict, url: str) -> str:
+    """Derive a human-friendly playlist label from yt-dlp info or URL."""
+    label = info.get("title") or info.get("uploader")
+    if not label:
+        try:
+            u = urlparse(url)
+            qs = parse_qs(u.query or "")
+            if "list" in qs and qs["list"]:
+                label = f"playlist-{qs['list'][0]}"
+            else:
+                segs = [s for s in (u.path or "").split("/") if s]
+                label = segs[-1] if segs else url
+        except Exception:
+            label = url
+    return sanitize_for_path(label)

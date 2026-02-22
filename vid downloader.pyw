@@ -279,7 +279,7 @@ class MyWindow(QWidget):
                         self._podcast_check_running = True
                         self._set_podcast_indicator("checking")
                         self.labelOutput.setText(
-                            "Checking podcast episodes for SponsorBlock info...",
+                            "Checking podcasts for SponsorBlock info...",
                         )
 
                         # Avoid passing Qt QObject instances (logger/progress hooks) into worker threads.
@@ -462,7 +462,7 @@ class MyWindow(QWidget):
                 "postprocessors": [
                     {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
                 ],
-                "outtmpl": "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/%(playlist)s/%(title)s.%(ext)s",
+                "outtmpl": "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/misc/%(title)s.%(ext)s",
                 "ignoreerrors": "only_download",
             },
             "720playlists": {
@@ -767,9 +767,11 @@ class MyWindow(QWidget):
         self,
         urls: list,
         ydl_opts: dict,
-    ) -> tuple[list, list, bool, list]:
+    ) -> tuple[list, list, bool, list, list]:
         """
-        Expand playlist URLs and return (to_download_urls, pending_urls, had_error, messages, statuses).
+        Expand playlist URLs and return enriched objects with per-episode URL and resolved playlist label.
+        Returns: (to_download_objs, pending_objs, had_error, messages, statuses)
+        where each obj is {"url": <video_url>, "playlist": <playlist_label>}.
 
         This inspects only the latest episode for each playlist to reduce work. pending_urls is a
         list of video URLs for which SponsorBlock info was not yet present. had_error will be True
@@ -805,10 +807,10 @@ class MyWindow(QWidget):
                     info = ydl.extract_info(url, download=False)
                 entries = info.get("entries", [info])
 
-                # Build base status entry for this podcast
-                title = info.get("title") or info.get("uploader") or url
+                # Resolve a robust playlist label and build base status entry for this podcast
+                playlist_label = utils.resolve_playlist_label(info, url)
                 status_entry: dict = {
-                    "podcast": title,
+                    "podcast": playlist_label,
                     "latest_date": "(unknown)",
                     "status": "(unknown)",
                     "url": url,
@@ -846,22 +848,22 @@ class MyWindow(QWidget):
                                 if site == "youtube":
                                     has_sb = self._check_sponsorblock_for_video_id(vid)
                                     if has_sb:
-                                        to_download.append(webpage)
+                                        to_download.append({"url": webpage, "playlist": playlist_label})
                                         status_entry["status"] = "Ready"
                                     else:
-                                        pending.append(webpage)
+                                        pending.append({"url": webpage, "playlist": playlist_label})
                                         status_entry["status"] = "Pending SponsorBlock"
                                 else:
                                     # Non-YouTube: fall back to not requiring SponsorBlock
-                                    to_download.append(webpage)
+                                    to_download.append({"url": webpage, "playlist": playlist_label})
                                     status_entry["status"] = "Ready"
                             else:
                                 # Older than 24h -> download
-                                to_download.append(webpage)
+                                to_download.append({"url": webpage, "playlist": playlist_label})
                                 status_entry["status"] = "Ready"
                     else:
                         # No timestamp -> be permissive and download
-                        to_download.append(webpage)
+                        to_download.append({"url": webpage, "playlist": playlist_label})
                         status_entry["status"] = "Ready"
 
                     # latest_date formatting
@@ -1123,25 +1125,57 @@ class MyWindow(QWidget):
         self._last_podcast_check_error = had_error
         self._podcast_pending_urls.clear()
         for v in pending:
-            self._podcast_pending_urls.add(v)
+            self._podcast_pending_urls.add(v.get("url") if isinstance(v, dict) else v)
 
         # Queue downloads if present
         if to_download:
-            qhook = QYT.QHook()
-            qlogger = QYT.QLogger(self.downloadQueue)
-            # Attach hooks/loggers to a fresh copy of ydl_opts for this download batch,
-            # and keep refs so they don't get garbage-collected while downloads run.
-            download_opts = dict(ydl_opts) if isinstance(ydl_opts, dict) else {}
-            download_opts["logger"] = qlogger
-            download_opts["progress_hooks"] = [qhook]
-            self.downloadQueue.put((to_download, download_opts))
-            qhook.info_changed.connect(self.handle_info_changed)
-            qlogger.message_changed.connect(self.handle_log_entry)
-            # Keep references so they persist for the lifetime of the download batch
-            if not hasattr(self, "_active_qhooks"):
-                self._active_qhooks = []
-            self._active_qhooks.append((qhook, qlogger))
-            self.barProgress.setRange(0, 1)
+            # Determine if we received enriched objects or plain URLs
+            is_obj_list = (
+                isinstance(to_download, list)
+                and len(to_download) > 0
+                and isinstance(to_download[0], dict)
+            )
+            if is_obj_list:
+                # Group per playlist label and set per-group outtmpl
+                base_dir = "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts"
+                groups: dict[str, list[str]] = {}
+                for obj in to_download:
+                    try:
+                        label = obj.get("playlist") or "misc"
+                    except Exception:
+                        label = "misc"
+                    # Enforce safe/short label for Windows paths
+                    safe_label = utils.slugify_if_too_long(base_dir, label)
+                    url = obj.get("url") if isinstance(obj, dict) else obj
+                    if url:
+                        groups.setdefault(safe_label, []).append(url)
+                for label, urls in groups.items():
+                    qhook = QYT.QHook()
+                    qlogger = QYT.QLogger(self.downloadQueue)
+                    batch_opts = dict(ydl_opts) if isinstance(ydl_opts, dict) else {}
+                    batch_opts["logger"] = qlogger
+                    batch_opts["progress_hooks"] = [qhook]
+                    batch_opts["outtmpl"] = f"{base_dir}/{label}/%(title)s.%(ext)s"
+                    self.downloadQueue.put((urls, batch_opts))
+                    qhook.info_changed.connect(self.handle_info_changed)
+                    qlogger.message_changed.connect(self.handle_log_entry)
+                    if not hasattr(self, "_active_qhooks"):
+                        self._active_qhooks = []
+                    self._active_qhooks.append((qhook, qlogger))
+                self.barProgress.setRange(0, 1)
+            else:
+                qhook = QYT.QHook()
+                qlogger = QYT.QLogger(self.downloadQueue)
+                download_opts = dict(ydl_opts) if isinstance(ydl_opts, dict) else {}
+                download_opts["logger"] = qlogger
+                download_opts["progress_hooks"] = [qhook]
+                self.downloadQueue.put((to_download, download_opts))
+                qhook.info_changed.connect(self.handle_info_changed)
+                qlogger.message_changed.connect(self.handle_log_entry)
+                if not hasattr(self, "_active_qhooks"):
+                    self._active_qhooks = []
+                self._active_qhooks.append((qhook, qlogger))
+                self.barProgress.setRange(0, 1)
 
         # Update indicator according to results
         if had_error:
