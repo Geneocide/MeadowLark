@@ -38,6 +38,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import webbrowser
 from datetime import datetime, timedelta
 from os import startfile
@@ -46,7 +47,7 @@ from pathlib import Path
 import requests
 import yt_dlp
 from hurry.filesize import size
-from PyQt6.QtCore import QDir, QObject, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QDir, QObject, QPoint, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
@@ -55,6 +56,7 @@ from PyQt6.QtWidgets import (
     QGridLayout,
     QHeaderView,
     QLabel,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -132,6 +134,8 @@ class MyWindow(QWidget):
         self._podcast_worker_thread = None
         # Cache the last podcast statuses (populated after each background check)
         self._podcast_last_statuses: list[dict] = []
+        # Latest-URL cache: maps playlist_url -> {"latest_url": str, "latest_ts": int|None, "fetched_at": float}
+        self._podcast_latest_url_cache: dict[str, dict] = {}
         # default indicator to unknown/all good
         self._set_podcast_indicator("all_good")
         self.checkIgnoreArchive = QCheckBox("Ignore Archive?")
@@ -821,6 +825,17 @@ class MyWindow(QWidget):
                     webpage = entry.get("webpage_url") or entry.get("url")
                     if not vid or not webpage:
                         continue
+                    # Store for status_entry later
+                    status_entry["latest_url"] = webpage
+                    status_entry["latest_ts"] = entry.get("timestamp")
+                    if status_entry["latest_ts"] is None and entry.get("upload_date"):
+                        try:
+                            status_entry["latest_ts"] = datetime.strptime(
+                                entry.get("upload_date"),
+                                "%Y%m%d",
+                            ).timestamp()
+                        except Exception:
+                            status_entry["latest_ts"] = None
                     if vid in existing_ids:
                         # Already archived — mark and stop evaluating further entries for this podcast
                         status_entry["status"] = "Downloaded"
@@ -848,18 +863,26 @@ class MyWindow(QWidget):
                                 if site == "youtube":
                                     has_sb = self._check_sponsorblock_for_video_id(vid)
                                     if has_sb:
-                                        to_download.append({"url": webpage, "playlist": playlist_label})
+                                        to_download.append(
+                                            {"url": webpage, "playlist": playlist_label}
+                                        )
                                         status_entry["status"] = "Ready"
                                     else:
-                                        pending.append({"url": webpage, "playlist": playlist_label})
+                                        pending.append(
+                                            {"url": webpage, "playlist": playlist_label}
+                                        )
                                         status_entry["status"] = "Pending SponsorBlock"
                                 else:
                                     # Non-YouTube: fall back to not requiring SponsorBlock
-                                    to_download.append({"url": webpage, "playlist": playlist_label})
+                                    to_download.append(
+                                        {"url": webpage, "playlist": playlist_label}
+                                    )
                                     status_entry["status"] = "Ready"
                             else:
                                 # Older than 24h -> download
-                                to_download.append({"url": webpage, "playlist": playlist_label})
+                                to_download.append(
+                                    {"url": webpage, "playlist": playlist_label}
+                                )
                                 status_entry["status"] = "Ready"
                     else:
                         # No timestamp -> be permissive and download
@@ -878,6 +901,11 @@ class MyWindow(QWidget):
                             status_entry["latest_date"] = "(unknown)"
 
                 # Append a single status entry per podcast after evaluating its latest entry
+                # Cache the latest URL if present
+                if status_entry.get("latest_url"):
+                    self._cache_put(
+                        url, status_entry["latest_url"], status_entry.get("latest_ts")
+                    )
                 statuses.append(status_entry)
             except Exception as e:
                 # Try to detect scheduled/upcoming events and treat them as 'Upcoming' rather than errors
@@ -1006,6 +1034,11 @@ class MyWindow(QWidget):
                 table.setItem(i, 2, QTableWidgetItem(s.get("status") or "(unknown)"))
             layout.addWidget(table)
             self._podcast_status_table = table
+            # Wire up context menu for right-click
+            table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            table.customContextMenuRequested.connect(
+                self._on_podcast_status_context_menu
+            )
 
         dialog.setLayout(layout)
         dialog.setModal(False)  # non-blocking
@@ -1019,6 +1052,134 @@ class MyWindow(QWidget):
         """Clear stored references when the status dialog is destroyed."""
         self._podcast_status_dialog = None
         self._podcast_status_table = None
+
+    # Cache TTL: 6 hours
+    CACHE_TTL_SECONDS = 6 * 60 * 60
+
+    def _cache_put(
+        self, playlist_url: str, latest_url: str, latest_ts: int | None
+    ) -> None:
+        """Store or update a cache entry for a podcast's latest URL."""
+        if not playlist_url or not latest_url:
+            return
+        self._podcast_latest_url_cache[playlist_url] = {
+            "latest_url": latest_url,
+            "latest_ts": latest_ts,
+            "fetched_at": time.time(),
+        }
+
+    def _cache_get_fresh(self, playlist_url: str) -> str | None:
+        """Retrieve cached latest URL if present and not stale (within TTL)."""
+        entry = self._podcast_latest_url_cache.get(playlist_url)
+        if not entry:
+            return None
+        # Check time-based TTL
+        if (time.time() - entry.get("fetched_at", 0)) > self.CACHE_TTL_SECONDS:
+            return None
+        return entry.get("latest_url")
+
+    def _on_podcast_status_context_menu(self, pos: QPoint) -> None:
+        """Handle right-click context menu on Podcast Status table."""
+        table = getattr(self, "_podcast_status_table", None)
+        if not table:
+            return
+        index = table.indexAt(pos)
+        if not index.isValid():
+            return
+        row = index.row()
+        menu = QMenu(table)
+        action_open = menu.addAction("Open Latest Video in Browser")
+
+        def _do_open() -> None:
+            statuses = getattr(self, "_podcast_last_statuses", [])
+            if 0 <= row < len(statuses):
+                st = statuses[row]
+                playlist_url = st.get("url")
+                label = st.get("podcast")
+                # Prefer status-provided latest_url (from cache populated by status generation)
+                latest_url = st.get("latest_url")
+                if not latest_url and playlist_url:
+                    latest_url = self._cache_get_fresh(playlist_url)
+                if latest_url:
+                    self._open_url_in_browser(latest_url, label)
+                else:
+                    # Fallback: resolve on-demand and cache
+                    resolved = self._resolve_latest_via_ytdlp(playlist_url)
+                    if resolved:
+                        self._cache_put(
+                            playlist_url, resolved["url"], resolved.get("ts")
+                        )
+                        self._open_url_in_browser(resolved["url"], label)
+                    else:
+                        self.logEdit.appendPlainText(
+                            f"Could not resolve latest episode for {label or playlist_url}",
+                        )
+
+        action_open.triggered.connect(_do_open)
+        menu.exec(table.viewport().mapToGlobal(pos))
+
+    def _resolve_latest_via_ytdlp(self, playlist_url: str) -> dict | None:
+        """
+        Use yt-dlp to resolve the latest episode URL from a playlist.
+        Returns dict with {"url": webpage_url, "ts": timestamp} or None on error.
+        """
+        try:
+            with yt_dlp.YoutubeDL(
+                {"quiet": True, "no_warnings": True, "playlistend": 1},
+            ) as ydl:
+                info = ydl.extract_info(playlist_url, download=False)
+            entries = info.get("entries", [info])
+            if not entries:
+                return None
+            latest = entries[0]
+            webpage = latest.get("webpage_url") or latest.get("url")
+            ts = latest.get("timestamp")
+            if webpage:
+                return {"url": webpage, "ts": ts}
+            return None
+        except Exception:
+            return None
+
+    def _open_url_in_browser(self, latest_url: str, label: str | None = None) -> None:
+        """Open a URL in the default browser, with fallback to Brave."""
+        # Try default browser first
+        try:
+            if webbrowser.open_new_tab(latest_url):
+                self.logEdit.appendPlainText(
+                    f"Opened latest for {label or latest_url} in default browser",
+                )
+                return
+        except Exception:
+            pass
+        # Fallback to Brave
+        try:
+            try:
+                controller = webbrowser.get("brave")
+            except Exception:
+                brave_paths = [
+                    r"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+                    r"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+                ]
+                controller = None
+                for p in brave_paths:
+                    if os.path.exists(p):
+                        webbrowser.register(
+                            "windows-brave",
+                            None,
+                            webbrowser.BackgroundBrowser(p),
+                        )
+                        controller = webbrowser.get("windows-brave")
+                        break
+            if controller:
+                controller.open_new_tab(latest_url)
+                self.logEdit.appendPlainText(
+                    f"Opened latest for {label or latest_url} in Brave",
+                )
+                return
+        except Exception as e:
+            self.logEdit.appendPlainText(f"Failed to open Brave: {e}")
+        # If all fails
+        self.logEdit.appendPlainText(f"Failed to open latest for {label or latest_url}")
 
     def _refresh_podcast_status_dialog(self) -> None:
         """Refresh the contents of the Podcast Status dialog if it's currently visible."""
@@ -1058,6 +1219,9 @@ class MyWindow(QWidget):
             table.setItem(i, 2, QTableWidgetItem(s.get("status") or "(unknown)"))
         layout.addWidget(table)
         self._podcast_status_table = table
+        # Wire up context menu for right-click
+        table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        table.customContextMenuRequested.connect(self._on_podcast_status_context_menu)
 
     def _on_podcast_check_finished(
         self,
@@ -1086,6 +1250,11 @@ class MyWindow(QWidget):
             for s in statuses:
                 try:
                     url = s.get("url")
+                    # Sync cache with latest_url and latest_ts from status
+                    lu = s.get("latest_url")
+                    lts = s.get("latest_ts")
+                    if url and lu:
+                        self._cache_put(url, lu, lts)
                     rts = s.get("recheck_ts")
                     if rts:
                         self._podcast_recheck_times[url] = rts
@@ -1297,6 +1466,7 @@ class MyWindow(QWidget):
                 latest = entries[0]
                 vid = latest.get("id") or latest.get("url")
                 ts = latest.get("timestamp")
+                webpage = latest.get("webpage_url") or latest.get("url")
                 if not ts and latest.get("upload_date"):
                     try:
                         ts = datetime.strptime(
@@ -1334,9 +1504,14 @@ class MyWindow(QWidget):
                     "latest_date": latest_date,
                     "status": status,
                     "url": url,
+                    "latest_url": webpage,
+                    "latest_ts": ts,
                 }
                 if ts and ts > now_ts:
                     entry["recheck_ts"] = ts
+                # Update cache immediately
+                if webpage:
+                    self._cache_put(url, webpage, ts)
                 statuses.append(entry)
             except Exception as e:
                 statuses.append(
