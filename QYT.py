@@ -1,7 +1,8 @@
 """Provides PyQt-based classes for logging, progress signaling, and threaded download queue management using yt-dlp. Includes QLogger for emitting log messages, QHook for progress updates, and QYTQueue for managing and executing download tasks in a background thread with wake lock support."""
 
 import logging
-import os
+from datetime import datetime
+from pathlib import Path
 from queue import Queue
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
@@ -11,8 +12,8 @@ from yt_dlp.utils import DownloadError, ExtractorError, MaxDownloadsReached
 
 # Migrate prior logfile name to the new error log if present
 try:
-    if os.path.exists("logfile.txt") and not os.path.exists("error_log.txt"):
-        os.replace("logfile.txt", "error_log.txt")
+    if Path("logfile.txt").exists() and not Path("error_log.txt").exists():
+        Path.replace("logfile.txt", "error_log.txt")
 except Exception:
     # Never fail on migration
     pass
@@ -139,12 +140,12 @@ class HistoryLogger:
 
     @staticmethod
     def log(site: str, dtype: str, title: str, success: bool) -> None:
-        from datetime import datetime
-
-        dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        dt = datetime.datetime.now(tz=datetime.timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S",
+        )
         result = "SUCCESS" if success else "FAIL"
         try:
-            with open(HistoryLogger.HISTORY_PATH, "a", encoding="utf-8") as f:
+            with Path.open(HistoryLogger.HISTORY_PATH, "a", encoding="utf-8") as f:
                 f.write(HistoryLogger._format_entry(dt, site, dtype, title, result))
         except Exception:
             # Never allow history logging to crash downloading
@@ -324,7 +325,7 @@ class QYTQueue(QThread):
                         ydl.cache.remove()
                         ydl.download(urls)
                     # Success on fallback; log and return
-                    HistoryLogger.log(site, "720", title, True)
+                    HistoryLogger.log(site, "720", title, success=True)
                     return
                 except Exception as e2:  # noqa: BLE001
                     # Continue with original failure path using the new exception
@@ -339,7 +340,7 @@ class QYTQueue(QThread):
             if isinstance(logger, QLogger):
                 logger.exception(error_message)
             # Attempt to record a failure entry for the batch when title is unknown
-            HistoryLogger.log(site, dtype, title, False)
+            HistoryLogger.log(site, dtype, title, success=False)
         finally:
             for hook in options.get("progress_hooks", []):
                 if hasattr(hook, "infoChanged"):

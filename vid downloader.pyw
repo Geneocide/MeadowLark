@@ -32,6 +32,7 @@ Dependencies:
 Author: Gene
 """
 
+import contextlib
 import os
 import queue
 import re
@@ -40,7 +41,7 @@ import subprocess
 import sys
 import time
 import webbrowser
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from os import startfile
 from pathlib import Path
 
@@ -70,6 +71,90 @@ from PyQt6.QtWidgets import (
 import QYT
 import utils
 from UIClasses import DropLabel, PlaylistButton, PlaylistDialog
+
+# Helper for podcast playlist handling -------------------------------------------------
+#
+# YouTube sometimes reports that the *latest* video in a playlist is a "Private
+# video".  Calling ``yt_dlp`` with ``playlistend=1`` will either raise an exception
+# containing the words "Private video" or return an info dict whose one entry has a
+# title beginning with that string.  In both cases the normal podcast-check logic
+# treats that as a hard error and flags the entire playlist as broken.  The desired
+# behaviour is instead to ignore the private item and pretend the previous accessible
+# video is the latest.  ``_fetch_latest_accessible_entry`` encapsulates that logic so
+# it can be exercised by unit tests.
+#
+# New strategy (2026-02-27): instead of scraping the entire playlist when a
+# private video is detected we incrementally request the last N entries, growing
+# N by one each attempt.  This avoids a full playlist fetch in the common case of
+# a single private stub.  A limit prevents runaway loops.
+
+# how many entries to look ahead before giving up
+MAX_LOOKAHEAD = 5
+
+
+def _fetch_latest_accessible_entry(url: str) -> tuple[list, bool, dict]:
+    """
+    Return a tuple suitable for :func:`_filter_audio_playlist_urls`.
+
+    This function employs an incremental lookahead strategy (increasing
+    ``playlistend``) rather than fetching the entire playlist when private
+    videos are encountered.
+
+    ``url`` is a playlist or channel URL.  First we attempt a lightweight
+    extraction limited to the first entry (``playlistend=1``).  If the call
+    succeeds but the entry's ``title`` starts with ``"Private video"`` or the
+    extraction raises any exception whose string contains that phrase, the
+    result is considered a "private latest" case.
+
+    In that situation we perform a second extraction with ``ignoreerrors=True``
+    (no ``playlistend``) and walk the returned list backwards until we find a
+    non-private entry.  That entry is returned in a one-item list and ``skipped``
+    is set to ``True``.  ``skipped`` is ``False`` if no private video was
+    encountered.  The original ``info`` dict from yt-dlp is also returned so
+    that callers can derive a playlist label.
+
+    The original exception is re-raised if the playlist has no accessible
+    entries; callers may let it bubble up so the existing error-path logic can
+    apply.
+    """
+    original_exc: Exception | None = None
+    # try progressively larger tail slices rather than full scrape
+    for n in range(1, MAX_LOOKAHEAD + 1):
+        try:
+            with yt_dlp.YoutubeDL(
+                {"quiet": True, "no_warnings": True, "playlist_items": str(n)},
+            ) as ydl:
+                info = ydl.extract_info(url, download=False)
+        except Exception as exc:
+            original_exc = exc
+            if "Private video" in str(exc):
+                # try again with larger playlistend
+                continue
+            # some other error - propagate immediately
+            raise
+
+        entries = info.get("entries", [info])
+        if not entries:
+            # nothing at all; give up
+            break
+        # examine the *last* entry returned (should be the n'th-from-end)
+        cand = entries[-1]
+        title = cand.get("title", "")
+        if isinstance(title, str) and title.startswith("Private video"):
+            # private, keep looking
+            original_exc = original_exc or Exception("Private video")
+            continue
+        # found a non-private entry
+        return [cand], True if n > 1 or original_exc is not None else False, info
+
+    # exhausted lookahead window or playlist ended
+    if original_exc:
+        raise original_exc
+    # nothing special happened - return what we got from first call if any
+    raise Exception("Unable to resolve latest accessible entry")
+
+
+# end helper
 
 
 class MyWindow(QWidget):
@@ -136,6 +221,8 @@ class MyWindow(QWidget):
         self._podcast_last_statuses: list[dict] = []
         # Latest-URL cache: maps playlist_url -> {"latest_url": str, "latest_ts": int|None, "fetched_at": float}
         self._podcast_latest_url_cache: dict[str, dict] = {}
+        # track podcasts for which a Download Now request is in progress
+        self._podcasts_downloading: set[str] = set()
         # default indicator to unknown/all good
         self._set_podcast_indicator("all_good")
         self.checkIgnoreArchive = QCheckBox("Ignore Archive?")
@@ -225,9 +312,7 @@ class MyWindow(QWidget):
         self.request_detected([], source)
 
     def append_properties(self, dictionary: dict, properties: dict) -> dict:
-        """
-        Merge properties into dictionary recursively using the shared utility.
-        """
+        # Merge properties into dictionary recursively using the shared utility.
         return utils.merge_dicts_recursive(dictionary, properties)
 
     def request_detected(self, urls: list, source: str) -> None:
@@ -579,6 +664,19 @@ class MyWindow(QWidget):
                 self._set_podcast_indicator("error")
             else:
                 self._set_podcast_indicator("all_good")
+
+        # mark any podcasts that were downloading as completed
+        if self._podcasts_downloading:
+            if getattr(self, "_podcast_last_statuses", None):
+                for s in self._podcast_last_statuses:
+                    if s.get("url") in self._podcasts_downloading:
+                        s["status"] = "Downloaded"
+                # refresh table UI if visible
+                with contextlib.suppress(Exception):
+                    self._refresh_podcast_status_dialog()
+            # clear the set now that we've updated statuses
+            self._podcasts_downloading.clear()
+
         # Cleanup any stored qhook/logger refs to allow GC now that downloads finished
         if hasattr(self, "_active_qhooks"):
             self._active_qhooks.clear()
@@ -635,11 +733,9 @@ class MyWindow(QWidget):
                 to_download, pending, had_error = [], [], True
                 errors.append(f"Podcast check worker exception: {exc}")
             # Emit results back to the main thread; the main thread will perform any GUI logging.
-            try:
+            with contextlib.suppress(RuntimeError):
                 self.finished.emit(to_download, pending, had_error, errors, statuses)
-            except RuntimeError:
-                # If the main thread or receiver has gone away, swallow to avoid crashing
-                pass
+            # If the main thread or receiver has gone away, swallow to avoid crashing
 
     # --- Live queue management ---
     def make_match_filter(self, source: str):
@@ -771,13 +867,22 @@ class MyWindow(QWidget):
         self,
         urls: list,
         ydl_opts: dict,
+        bypass_sponsorblock_wait: bool = False,
     ) -> tuple[list, list, bool, list, list]:
         """
         Expand playlist URLs and return enriched objects with per-episode URL and resolved playlist label.
+
         Returns: (to_download_objs, pending_objs, had_error, messages, statuses)
         where each obj is {"url": <video_url>, "playlist": <playlist_label>}.
 
-        This inspects only the latest episode for each playlist to reduce work. pending_urls is a
+        Only the most recent item in each playlist is inspected to keep work
+        minimal.  If the latest entry is a private video, this used to cause a
+        hard error and mark the entire podcast as broken; we now detect that
+        case, skip the private entry and pretend the previous accessible video
+        is the latest.  ``messages`` will include an informational note and
+        ``had_error`` remains False when skipping a private item.
+
+        pending_urls is a
         list of video URLs for which SponsorBlock info was not yet present. had_error will be True
         if any errors occurred during expansion. messages is a list of human-readable strings to
         be logged from the main thread. statuses is a list of dicts with {podcast, latest_date, status, url}.
@@ -801,16 +906,18 @@ class MyWindow(QWidget):
             except Exception:
                 existing_ids = set()
 
-        now_ts = datetime.now().timestamp()
+        now_ts = datetime.now(tz=timezone.utc).timestamp()
         for url in urls:
             try:
-                # Only fetch the latest entry from playlists to minimize work
-                with yt_dlp.YoutubeDL(
-                    {"quiet": True, "no_warnings": True, "playlistend": 1},
-                ) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                entries = info.get("entries", [info])
-
+                # Fetch the latest accessible entry.  This helper will return a
+                # one-item list and a flag indicating whether a private video was
+                # skipped; it may re-raise if the playlist contains no
+                # accessible entries.
+                entries, skipped, info = _fetch_latest_accessible_entry(url)
+                if skipped:
+                    messages.append(
+                        f"Latest episode for podcast {url} is private - using previous accessible video",
+                    )
                 # Resolve a robust playlist label and build base status entry for this podcast
                 playlist_label = utils.resolve_playlist_label(info, url)
                 status_entry: dict = {
@@ -830,10 +937,14 @@ class MyWindow(QWidget):
                     status_entry["latest_ts"] = entry.get("timestamp")
                     if status_entry["latest_ts"] is None and entry.get("upload_date"):
                         try:
-                            status_entry["latest_ts"] = datetime.strptime(
-                                entry.get("upload_date"),
-                                "%Y%m%d",
-                            ).timestamp()
+                            status_entry["latest_ts"] = (
+                                datetime.strptime(
+                                    entry.get("upload_date"),
+                                    "%Y%m%d",
+                                )
+                                .replace(tzinfo=timezone.utc)
+                                .timestamp()
+                            )
                         except Exception:
                             status_entry["latest_ts"] = None
                     if vid in existing_ids:
@@ -844,10 +955,14 @@ class MyWindow(QWidget):
                     ts = entry.get("timestamp")
                     if not ts and entry.get("upload_date"):
                         try:
-                            ts = datetime.strptime(
-                                entry.get("upload_date"),
-                                "%Y%m%d",
-                            ).timestamp()
+                            ts = (
+                                datetime.strptime(
+                                    entry.get("upload_date"),
+                                    "%Y%m%d",
+                                )
+                                .replace(tzinfo=timezone.utc)
+                                .timestamp()
+                            )
                         except Exception:
                             ts = None
                     if ts:
@@ -857,31 +972,43 @@ class MyWindow(QWidget):
                             status_entry["recheck_ts"] = ts
                         else:
                             age_seconds = now_ts - ts
-                            if age_seconds < (24 * 60 * 60):
+                            if bypass_sponsorblock_wait:
+                                # Bypass the normal 24-hour/SponsorBlock gating entirely
+                                to_download.append(
+                                    {"url": webpage, "playlist": playlist_label},
+                                )
+                                status_entry["status"] = "Ready"
+                            elif age_seconds < (24 * 60 * 60):
                                 # New episode; check SponsorBlock (only YouTube)
                                 site = utils.detect_site_from_urls([webpage])
                                 if site == "youtube":
                                     has_sb = self._check_sponsorblock_for_video_id(vid)
                                     if has_sb:
                                         to_download.append(
-                                            {"url": webpage, "playlist": playlist_label}
+                                            {
+                                                "url": webpage,
+                                                "playlist": playlist_label,
+                                            },
                                         )
                                         status_entry["status"] = "Ready"
                                     else:
                                         pending.append(
-                                            {"url": webpage, "playlist": playlist_label}
+                                            {
+                                                "url": webpage,
+                                                "playlist": playlist_label,
+                                            },
                                         )
                                         status_entry["status"] = "Pending SponsorBlock"
                                 else:
                                     # Non-YouTube: fall back to not requiring SponsorBlock
                                     to_download.append(
-                                        {"url": webpage, "playlist": playlist_label}
+                                        {"url": webpage, "playlist": playlist_label},
                                     )
                                     status_entry["status"] = "Ready"
                             else:
                                 # Older than 24h -> download
                                 to_download.append(
-                                    {"url": webpage, "playlist": playlist_label}
+                                    {"url": webpage, "playlist": playlist_label},
                                 )
                                 status_entry["status"] = "Ready"
                     else:
@@ -894,6 +1021,7 @@ class MyWindow(QWidget):
                         try:
                             status_entry["latest_date"] = datetime.fromtimestamp(
                                 ts,
+                                tz=timezone.utc,
                             ).strftime(
                                 "%Y-%m-%d %H:%M:%S",
                             )
@@ -904,13 +1032,15 @@ class MyWindow(QWidget):
                 # Cache the latest URL if present
                 if status_entry.get("latest_url"):
                     self._cache_put(
-                        url, status_entry["latest_url"], status_entry.get("latest_ts")
+                        url,
+                        status_entry["latest_url"],
+                        status_entry.get("latest_ts"),
                     )
                 statuses.append(status_entry)
             except Exception as e:
                 # Try to detect scheduled/upcoming events and treat them as 'Upcoming' rather than errors
                 errstr = str(e)
-                now_ts = datetime.now().timestamp()
+                now_ts = datetime.now(tz=timezone.utc).timestamp()
                 scheduled_ts = None
                 # Pattern like: 'This live event will begin in 29 hours.'
                 m = re.search(
@@ -921,10 +1051,7 @@ class MyWindow(QWidget):
                 if m:
                     n = int(m.group(1))
                     unit = m.group(2).lower()
-                    if unit.startswith("hour"):
-                        delay = n * 3600
-                    else:
-                        delay = n * 86400
+                    delay = n * 3600 if unit.startswith("hour") else n * 86400
                     scheduled_ts = now_ts + delay
                 else:
                     # Pattern: 'scheduled to begin on 2026-02-03 15:00' or similar
@@ -937,10 +1064,14 @@ class MyWindow(QWidget):
                         datestr = m2.group(1)
                         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
                             try:
-                                scheduled_ts = datetime.strptime(
-                                    datestr,
-                                    fmt,
-                                ).timestamp()
+                                scheduled_ts = (
+                                    datetime.strptime(
+                                        datestr,
+                                        fmt,
+                                    )
+                                    .replace(tzinfo=timezone.utc)
+                                    .timestamp()
+                                )
                                 break
                             except Exception:
                                 scheduled_ts = None
@@ -955,7 +1086,7 @@ class MyWindow(QWidget):
                         },
                     )
                     messages.append(
-                        f"Podcast {url} scheduled; will recheck at {datetime.fromtimestamp(scheduled_ts).strftime('%Y-%m-%d %H:%M:%S')}",
+                        f"Podcast {url} scheduled; will recheck at {datetime.fromtimestamp(scheduled_ts, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}",
                     )
                 else:
                     # If extracting playlist fails, record the error and continue
@@ -992,6 +1123,7 @@ class MyWindow(QWidget):
     def _show_podcast_status(self) -> None:
         """
         Open a non-blocking dialog showing the last known podcast statuses.
+
         This uses cached data from the last background check and will NOT trigger a re-check.
         If a dialog is already open, bring it to the front instead of creating a new one.
         """
@@ -1037,7 +1169,7 @@ class MyWindow(QWidget):
             # Wire up context menu for right-click
             table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             table.customContextMenuRequested.connect(
-                self._on_podcast_status_context_menu
+                self._on_podcast_status_context_menu,
             )
 
         dialog.setLayout(layout)
@@ -1057,7 +1189,10 @@ class MyWindow(QWidget):
     CACHE_TTL_SECONDS = 6 * 60 * 60
 
     def _cache_put(
-        self, playlist_url: str, latest_url: str, latest_ts: int | None
+        self,
+        playlist_url: str,
+        latest_url: str,
+        latest_ts: int | None,
     ) -> None:
         """Store or update a cache entry for a podcast's latest URL."""
         if not playlist_url or not latest_url:
@@ -1107,7 +1242,9 @@ class MyWindow(QWidget):
                     resolved = self._resolve_latest_via_ytdlp(playlist_url)
                     if resolved:
                         self._cache_put(
-                            playlist_url, resolved["url"], resolved.get("ts")
+                            playlist_url,
+                            resolved["url"],
+                            resolved.get("ts"),
                         )
                         self._open_url_in_browser(resolved["url"], label)
                     else:
@@ -1116,11 +1253,20 @@ class MyWindow(QWidget):
                         )
 
         action_open.triggered.connect(_do_open)
+
+        # new Download Now option for bypassing SponsorBlock wait
+        def _do_download_now() -> None:
+            self._download_podcast_now_action(row)
+
+        action_download = menu.addAction("Download Now")
+        action_download.triggered.connect(_do_download_now)
+
         menu.exec(table.viewport().mapToGlobal(pos))
 
     def _resolve_latest_via_ytdlp(self, playlist_url: str) -> dict | None:
         """
         Use yt-dlp to resolve the latest episode URL from a playlist.
+
         Returns dict with {"url": webpage_url, "ts": timestamp} or None on error.
         """
         try:
@@ -1162,7 +1308,7 @@ class MyWindow(QWidget):
                 ]
                 controller = None
                 for p in brave_paths:
-                    if os.path.exists(p):
+                    if Path(p).exists():
                         webbrowser.register(
                             "windows-brave",
                             None,
@@ -1223,6 +1369,83 @@ class MyWindow(QWidget):
         table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         table.customContextMenuRequested.connect(self._on_podcast_status_context_menu)
 
+    def _download_podcast_now_action(self, row: int) -> None:
+        """
+        Initiate an immediate download of all pending episodes for the podcast at `row`.
+
+        This bypasses the usual 24-hour / SponsorBlock wait period by invoking
+        ``_filter_audio_playlist_urls`` with ``bypass_sponsorblock_wait=True`` and
+        then reusing the normal ``_on_podcast_check_finished`` handler to queue the
+        returned URLs.
+        """
+        statuses = getattr(self, "_podcast_last_statuses", [])
+        if not (0 <= row < len(statuses)):
+            return
+        st = statuses[row]
+        playlist_url = st.get("url")
+        if not playlist_url:
+            return
+
+        # register that this podcast is actively downloading
+        self._podcasts_downloading.add(playlist_url)
+
+        # build ydl options similarly to the normal request path
+        qhook = QYT.QHook()
+        qlogger = QYT.QLogger(self.downloadQueue)
+        ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
+        properties = self.get_options([playlist_url], "audio_playlists")
+        if properties:
+            ydl_opts = self.append_properties(ydl_opts, properties)
+            # attach metadata used by history/logging code
+            ydl_opts["qmeta"] = {
+                "site": utils.detect_site_from_urls([playlist_url]),
+                "type": "audio_playlists",
+            }
+
+        # perform filtering immediately on the main thread
+        to_download, pending, had_error, messages, statuses2 = (
+            self._filter_audio_playlist_urls(
+                [playlist_url],
+                ydl_opts,
+                bypass_sponsorblock_wait=True,
+            )
+        )
+
+        # merge the single returned status into the existing list so we don't wipe
+        # out the other rows in the status table
+        current = list(getattr(self, "_podcast_last_statuses", []))
+        updated = []
+        found = False
+        for s in current:
+            if s.get("url") == playlist_url:
+                found = True
+                # take the new entry if available
+                new = next((x for x in statuses2 if x.get("url") == playlist_url), None)
+                if new:
+                    new = dict(new)
+                    # mark downloading regardless of what the filter says
+                    new["status"] = "Downloading"
+                    updated.append(new)
+                else:
+                    updated.append(s)
+            else:
+                updated.append(s)
+        if not found:
+            # podcast wasn't previously in table, just append new entries
+            for new in statuses2:
+                new = dict(new)
+                new["status"] = "Downloading"
+                updated.append(new)
+        # pass merged list to handler so UI keeps all rows
+        self._on_podcast_check_finished(
+            to_download,
+            pending,
+            had_error,
+            ydl_opts,
+            messages,
+            updated,
+        )
+
     def _on_podcast_check_finished(
         self,
         to_download: list,
@@ -1259,7 +1482,9 @@ class MyWindow(QWidget):
                     if rts:
                         self._podcast_recheck_times[url] = rts
                         # schedule a one-shot timer to re-run check at the scheduled time if not already scheduled
-                        now_ts = datetime.now().timestamp()
+                        now_ts = datetime.now(
+                            tz=timezone.utc,
+                        ).timestamp()
                         if rts > now_ts and url not in self._podcast_recheck_timers:
                             delay_ms = int((rts - now_ts) * 1000)
                             t = QTimer(self)
@@ -1283,10 +1508,8 @@ class MyWindow(QWidget):
                         self._podcast_recheck_times.pop(url, None)
                         t = self._podcast_recheck_timers.pop(url, None)
                         if t:
-                            try:
+                            with contextlib.suppress(Exception):
                                 t.stop()
-                            except Exception:
-                                pass
                 except Exception:
                     pass
 
@@ -1413,7 +1636,8 @@ class MyWindow(QWidget):
 
     def _get_podcast_statuses(self) -> list[dict]:
         """
-        Return a list of podcast status dictionaries:
+        Return a list of podcast status dictionaries.
+
         {podcast, latest_date, status, url}
         """
         statuses: list[dict] = []
@@ -1443,7 +1667,7 @@ class MyWindow(QWidget):
             except Exception:
                 archived_ids = set()
 
-        now_ts = datetime.now().timestamp()
+        now_ts = datetime.now(tz=timezone.utc).timestamp()
         for url in lines:
             try:
                 # Limit to the latest episode to avoid long blocking operations
@@ -1469,14 +1693,20 @@ class MyWindow(QWidget):
                 webpage = latest.get("webpage_url") or latest.get("url")
                 if not ts and latest.get("upload_date"):
                     try:
-                        ts = datetime.strptime(
-                            latest.get("upload_date"),
-                            "%Y%m%d",
-                        ).timestamp()
+                        ts = (
+                            datetime.strptime(
+                                latest.get("upload_date"),
+                                "%Y%m%d",
+                            )
+                            .replace(tzinfo=timezone.utc)
+                            .timestamp()
+                        )
                     except Exception:
                         ts = None
                 latest_date = (
-                    datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+                    datetime.fromtimestamp(ts, tz=timezone.utc).strftime(
+                        "%Y-%m-%d %H:%M:%S",
+                    )
                     if ts
                     else "(unknown)"
                 )
@@ -1527,7 +1757,7 @@ class MyWindow(QWidget):
     # --- Hourly automated YT Podcasts checks ---
     def _schedule_hourly_podcast_checks(self) -> None:
         """Schedule the initial single-shot to fire at the next :15 past the hour, then start recurring hourly checks."""
-        now = datetime.now()
+        now = datetime.now(tz=timezone.utc)
         # Target minute is 15 past the hour
         target = now.replace(minute=15, second=0, microsecond=0)
         if now >= target:
