@@ -1,7 +1,7 @@
 """Provides PyQt-based classes for logging, progress signaling, and threaded download queue management using yt-dlp. Includes QLogger for emitting log messages, QHook for progress updates, and QYTQueue for managing and executing download tasks in a background thread with wake lock support."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from queue import Queue
 
@@ -9,6 +9,8 @@ from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from wakepy import keep
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError, ExtractorError, MaxDownloadsReached
+
+import utils
 
 # Migrate prior logfile name to the new error log if present
 try:
@@ -140,7 +142,7 @@ class HistoryLogger:
 
     @staticmethod
     def log(site: str, dtype: str, title: str, success: bool) -> None:
-        dt = datetime.datetime.now(tz=datetime.timezone.utc).strftime(
+        dt = datetime.now(tz=timezone.utc).strftime(
             "%Y-%m-%d %H:%M:%S",
         )
         result = "SUCCESS" if success else "FAIL"
@@ -326,6 +328,28 @@ class QYTQueue(QThread):
                         ydl.download(urls)
                     # Success on fallback; log and return
                     HistoryLogger.log(site, "720", title, success=True)
+                    return
+                except Exception as e2:  # noqa: BLE001
+                    # Continue with original failure path using the new exception
+                    e = e2
+                    error_str = str(e)
+
+            # If SponsorBlock is down (503 / service unavailable) retry once without it
+            if (
+                "Unable to communicate with SponsorBlock API" in error_str
+                and not options.get("_tried_without_sponsorblock")
+            ):
+                self.message_changed.emit(
+                    "SponsorBlock API unavailable; retrying download without SponsorBlock...",
+                )
+                fallback = utils.remove_sponsorblock_postprocessor(options)
+                fallback["_tried_without_sponsorblock"] = True
+                try:
+                    with YoutubeDL(fallback) as ydl:
+                        ydl.cache.remove()
+                        ydl.download(urls)
+                    # Success on retry; log and return
+                    HistoryLogger.log(site, dtype, title, success=True)
                     return
                 except Exception as e2:  # noqa: BLE001
                     # Continue with original failure path using the new exception

@@ -947,9 +947,32 @@ class MyWindow(QWidget):
                             )
                         except Exception:
                             status_entry["latest_ts"] = None
+                    # Already archived? handle that first to avoid redundant logging
                     if vid in existing_ids:
-                        # Already archived — mark and stop evaluating further entries for this podcast
                         status_entry["status"] = "Downloaded"
+                        break
+
+                    # check for special '(Update)' titles which should be skipped
+                    title = entry.get("title", "") or ""
+                    if "(Update)" in title:
+                        # Treat as archived: append to download_archive if not already present
+                        if archive_path:
+                            try:
+                                with Path(archive_path).open(
+                                    "a",
+                                    encoding="utf-8",
+                                ) as f:
+                                    # avoid duplicating if somehow existing_ids changed
+                                    if vid not in existing_ids:
+                                        f.write(f"youtube {vid}\n")
+                                        existing_ids.add(vid)
+                            except Exception:
+                                pass
+                        # log a special message and mark status
+                        messages.append(
+                            f"Video skipped because of Update exception: '{title}' (ID: {vid}) at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                        )
+                        status_entry["status"] = "Skipped (Update)"
                         break
                     # Determine upload timestamp
                     ts = entry.get("timestamp")
@@ -1853,3 +1876,5 @@ if __name__ == "__main__":
     app.exec()
 
 # TODO: add way of seeing history info in app?
+# TODO: re hook up the history_log
+# TODO: look into Android Faithful showing up in the basic misc folder

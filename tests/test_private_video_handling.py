@@ -1,4 +1,6 @@
 import importlib.util
+import os
+import queue
 import sys
 
 # helper function to import the main module even though its filename contains a space
@@ -47,6 +49,10 @@ def import_vid_module():
     sys.modules["yt_dlp.utils"] = utils_mod
 
     path = r"c:\Users\etreq\dev\vid downloader\vid downloader.pyw"
+    # Ensure the repo root is on sys.path so imports like `import QYT` succeed
+    repo_root = os.path.dirname(path)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
     spec = importlib.util.spec_from_file_location("vd", path)
     vd = importlib.util.module_from_spec(spec)
     sys.modules["vd"] = vd
@@ -72,7 +78,7 @@ def test_fetch_latest_accessible_entry_skips_private(monkeypatch):
 
         def extract_info(self, url, download=False):
             # first invocation simulates private-latest behaviour
-            if self.opts.get("playlistend") == 1:
+            if self.opts.get("playlist_items") == "1":
                 raise Exception("Private video is not available")
             # fallback returns a normal entry
             return {
@@ -110,7 +116,7 @@ def test_fetch_latest_accessible_entry_two_private_then_good(monkeypatch):
             return False
 
         def extract_info(self, url, download=False):
-            n = self.opts.get("playlistend")
+            n = int(self.opts.get("playlist_items", 0))
             if n in (1, 2):
                 # pretend the last entry is private
                 return {"entries": [{"title": "Private video foo"}]}
@@ -146,7 +152,7 @@ def test_fetch_latest_accessible_entry_private_by_title(monkeypatch):
             return False
 
         def extract_info(self, url, download=False):
-            if self.opts.get("playlistend") == 1:
+            if self.opts.get("playlist_items") == "1":
                 # return an entry whose title begins with the magic phrase
                 return {"entries": [{"title": "Private video #456"}]}
             return {
@@ -181,7 +187,7 @@ def test_filter_audio_playlist_urls_with_private(monkeypatch):
             return False
 
         def extract_info(self, url, download=False):
-            if self.opts.get("playlistend") == 1:
+            if self.opts.get("playlist_items") == "1":
                 raise Exception("Private video is not available")
             return {
                 "entries": [
@@ -247,3 +253,110 @@ def test_fetch_latest_accessible_entry_no_accessible(monkeypatch):
     # should have retried up to the lookup limit
     # the dummy is called once per lookahead attempt
     assert DummyYDL2.call_count == vd.MAX_LOOKAHEAD
+
+
+def test_filter_audio_playlist_urls_skips_update(monkeypatch, tmp_path):
+    """Entries whose title contains '(Update)' should be skipped and archived."""
+    vd = import_vid_module()
+    archive_file = tmp_path / "tfarchive.txt"
+    archive_file.write_text("", encoding="utf-8")
+
+    class DummyYDL:
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return False
+
+        def extract_info(self, url, download=False):
+            return {
+                "entries": [
+                    {
+                        "title": "Episode (Update) special",
+                        "id": "upd123",
+                        "webpage_url": "http://example.com/update",
+                        "timestamp": 1234567890,
+                    },
+                ],
+            }
+
+    monkeypatch.setattr(vd.yt_dlp, "YoutubeDL", DummyYDL)
+
+    class DummyWin:
+        def _check_sponsorblock_for_video_id(self, vid):
+            return False
+
+        def _cache_put(self, url, latest_url, ts):
+            pass
+
+    win = DummyWin()
+    to_download, pending, had_error, messages, statuses = (
+        vd.MyWindow._filter_audio_playlist_urls(
+            win,
+            ["http://fake-playlist"],
+            {"download_archive": str(archive_file)},
+        )
+    )
+    assert had_error is False
+    assert to_download == []
+    assert pending == []
+    assert any("Update exception" in m for m in messages)
+    # archive should now contain the video id
+    content = archive_file.read_text(encoding="utf-8")
+    assert "youtube upd123" in content
+
+
+def test_download_retries_without_sponsorblock(monkeypatch):
+    """Download should retry once without SponsorBlock if SponsorBlock API is down."""
+    vd = import_vid_module()
+
+    class DummyYDL:
+        inst_opts = []
+
+        def __init__(self, opts):
+            # record the options passed in so we can assert on retry behavior
+            DummyYDL.inst_opts.append(dict(opts))
+            self.opts = opts
+            self.cache = types.SimpleNamespace(remove=lambda: None)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return False
+
+        def download(self, urls):
+            # First call should raise a SponsorBlock API failure; second call should succeed
+            if len(DummyYDL.inst_opts) == 1:
+                raise vd.QYT.DownloadError(
+                    "Postprocessing: Unable to communicate with SponsorBlock API: HTTP Error 503: Service Unavailable",
+                )
+
+    # QYT.py imports YoutubeDL directly, so patch the symbol used by QYT
+    monkeypatch.setattr(vd.QYT, "YoutubeDL", DummyYDL)
+
+    download_queue = queue.Queue()
+    q = vd.QYT.QYTQueue(download_queue)
+    q.download(
+        ["http://example.com/video"],
+        {
+            "postprocessors": [{"key": "SponsorBlock"}],
+            "qmeta": {"site": "youtube", "type": "1080"},
+        },
+    )
+
+    # We expect three instantiations:
+    # 1) main download attempt
+    # 2) title extraction attempt after failure
+    # 3) retry without SponsorBlock
+    assert len(DummyYDL.inst_opts) == 3
+
+    # Verify retry options were marked and SponsorBlock was removed
+    retry_opts = DummyYDL.inst_opts[-1]
+    assert retry_opts.get("_tried_without_sponsorblock") is True
+    assert all(
+        pp.get("key") != "SponsorBlock" for pp in retry_opts.get("postprocessors", [])
+    )

@@ -94,6 +94,27 @@ def _default_postprocessors() -> list[dict]:
     ]
 
 
+def remove_sponsorblock_postprocessor(opts: dict) -> dict:
+    """
+    Return a copy of yt-dlp options with SponsorBlock postprocessing removed.
+
+    This allows downloads to succeed even when SponsorBlock is temporarily
+    unavailable (e.g., API 503).
+    """
+    # Shallow copy to avoid mutating caller's dict
+    opts_copy = dict(opts)
+    postprocs = opts_copy.get("postprocessors")
+    if not isinstance(postprocs, list):
+        return opts_copy
+
+    opts_copy["postprocessors"] = [
+        pp
+        for pp in postprocs
+        if not (isinstance(pp, dict) and pp.get("key") == "SponsorBlock")
+    ]
+    return opts_copy
+
+
 def build_base_ydl_opts(logger: Any, qhook: Any) -> dict:
     js_runtimes_config = {
         "deno": {
@@ -163,18 +184,19 @@ def get_playlist_file_for_source(source: str) -> str | None:
 # -----------------
 import hashlib
 import os
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 WINDOWS_INVALID = '<>:"/\\|?*'
 
 
 essential_whitespace_re = re.compile(r"\s+")
 
+
 def sanitize_for_path(name: str) -> str:
     """Return a Windows-safe folder/file component, or 'misc' if empty."""
     if not name:
         return "misc"
-    table = str.maketrans({c: "_" for c in WINDOWS_INVALID})
+    table = str.maketrans(dict.fromkeys(WINDOWS_INVALID, "_"))
     cleaned = name.translate(table)
     # Remove control chars
     cleaned = re.sub(r"[\x00-\x1f]", "_", cleaned)
@@ -211,7 +233,7 @@ def resolve_playlist_label(info: dict, url: str) -> str:
         try:
             u = urlparse(url)
             qs = parse_qs(u.query or "")
-            if "list" in qs and qs["list"]:
+            if qs.get("list"):
                 label = f"playlist-{qs['list'][0]}"
             else:
                 segs = [s for s in (u.path or "").split("/") if s]
