@@ -1,9 +1,30 @@
+import logging
 import re
 from pathlib import Path
 from typing import Any
 
 import requests
 import yt_dlp
+
+
+def log_exception(exc: Exception, context: str | None = None) -> None:
+    """
+    Log an exception to the global logger configured to write to error_log.txt.
+
+    This helper is used by the app to ensure all swallowed exceptions are
+    recorded with a full traceback.
+
+    If logging has not yet been configured elsewhere, configure a basic
+    handler so that errors are still written to the expected file.
+    """
+    if not logging.getLogger().hasHandlers():
+        logging.basicConfig(
+            filename="error_log.txt",
+            level=logging.ERROR,
+            format="%(asctime)s %(message)s",
+        )
+    msg = f"{context}: {exc}" if context else str(exc)
+    logging.exception(msg)
 
 
 def normalize_version(version: str) -> tuple:
@@ -164,7 +185,8 @@ def is_primitive_technology(info: dict) -> bool:
         title = (info.get("title") or "").strip().lower()
         if title.startswith("primitive technology:"):
             return True
-    except Exception:
+    except (AttributeError, TypeError) as exc:
+        utils.log_exception(exc, "Error detecting Primitive Technology channel")
         return False
     return False
 
@@ -238,6 +260,7 @@ def resolve_playlist_label(info: dict, url: str) -> str:
             else:
                 segs = [s for s in (u.path or "").split("/") if s]
                 label = segs[-1] if segs else url
-        except Exception:
+        except (ValueError, AttributeError, TypeError) as exc:
+            utils.log_exception(exc, "Failed to resolve playlist label from URL")
             label = url
     return sanitize_for_path(label)

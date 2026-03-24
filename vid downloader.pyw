@@ -67,6 +67,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from yt_dlp.utils import DownloadError, ExtractorError
 
 import QYT
 import utils
@@ -125,7 +126,7 @@ def _fetch_latest_accessible_entry(url: str) -> tuple[list, bool, dict]:
                 {"quiet": True, "no_warnings": True, "playlist_items": str(n)},
             ) as ydl:
                 info = ydl.extract_info(url, download=False)
-        except Exception as exc:
+        except (DownloadError, ExtractorError, OSError, ValueError) as exc:
             original_exc = exc
             if "Private video" in str(exc):
                 # try again with larger playlistend
@@ -430,9 +431,13 @@ class MyWindow(QWidget):
                             self.logEdit.appendPlainText(
                                 "Started podcast check (background thread).",
                             )
-                        except Exception as e:
+                        except RuntimeError as e:
                             self.logEdit.appendPlainText(
                                 f"Failed to start podcast check thread: {e}",
+                            )
+                            utils.log_exception(
+                                e,
+                                "Failed to start podcast check thread",
                             )
                             self._podcast_check_running = False
                             self._set_podcast_indicator("error")
@@ -732,6 +737,7 @@ class MyWindow(QWidget):
             except Exception as exc:  # noqa: BLE001
                 to_download, pending, had_error = [], [], True
                 errors.append(f"Podcast check worker exception: {exc}")
+                utils.log_exception(exc, "Podcast check worker exception")
             # Emit results back to the main thread; the main thread will perform any GUI logging.
             with contextlib.suppress(RuntimeError):
                 self.finished.emit(to_download, pending, had_error, errors, statuses)
@@ -766,8 +772,9 @@ class MyWindow(QWidget):
                             f"Queued live for later: {url} [{source}]",
                         )
                     return "Skipping live; queued for later"
-            except Exception:
+            except (TypeError, AttributeError) as exc:
                 # If anything goes wrong, allow download to proceed rather than crash
+                utils.log_exception(exc, "Error in match_filter")
                 return None
             return None
 
@@ -840,11 +847,12 @@ class MyWindow(QWidget):
                         self.downloadQueue.put(([url], ydl_opts))
                         qhook.info_changed.connect(self.handle_info_changed)
                         qlogger.message_changed.connect(self.handle_log_entry)
-            except Exception as e:  # noqa: BLE001
+            except (DownloadError, ExtractorError, OSError, ValueError) as e:
                 # If any error in checking, keep it for later
                 self.logEdit.appendPlainText(
                     f"Error checking live url {url}: {e}",
                 )
+                utils.log_exception(e, f"Error checking live url {url}")
                 remaining[url] = source
         self.save_live_queue(remaining)
 
@@ -858,9 +866,9 @@ class MyWindow(QWidget):
             if r.status_code == 200:
                 data = r.json()
                 return bool(data)
-        except Exception:
+        except (requests.exceptions.RequestException, ValueError) as exc:
             # Treat as not having SponsorBlock if the API fails
-            pass
+            utils.log_exception(exc, "SponsorBlock API check failed")
         return False
 
     def _filter_audio_playlist_urls(
@@ -903,8 +911,12 @@ class MyWindow(QWidget):
                             continue
                         parts = line.split()
                         existing_ids.add(parts[-1])
-            except Exception:
+            except (OSError, UnicodeDecodeError) as exc:
                 existing_ids = set()
+                utils.log_exception(
+                    exc,
+                    "Failed to read download archive for podcast filtering",
+                )
 
         now_ts = datetime.now(tz=timezone.utc).timestamp()
         for url in urls:
@@ -945,8 +957,12 @@ class MyWindow(QWidget):
                                 .replace(tzinfo=timezone.utc)
                                 .timestamp()
                             )
-                        except Exception:
+                        except (ValueError, TypeError) as exc:
                             status_entry["latest_ts"] = None
+                            utils.log_exception(
+                                exc,
+                                "Failed to parse upload_date timestamp",
+                            )
                     # Already archived? handle that first to avoid redundant logging
                     if vid in existing_ids:
                         status_entry["status"] = "Downloaded"
@@ -966,8 +982,11 @@ class MyWindow(QWidget):
                                     if vid not in existing_ids:
                                         f.write(f"youtube {vid}\n")
                                         existing_ids.add(vid)
-                            except Exception:
-                                pass
+                            except OSError as exc:
+                                utils.log_exception(
+                                    exc,
+                                    "Failed to write update marker to download archive",
+                                )
                         # log a special message and mark status
                         messages.append(
                             f"Video skipped because of Update exception: '{title}' (ID: {vid}) at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
@@ -986,8 +1005,12 @@ class MyWindow(QWidget):
                                 .replace(tzinfo=timezone.utc)
                                 .timestamp()
                             )
-                        except Exception:
+                        except ValueError as exc:
                             ts = None
+                            utils.log_exception(
+                                exc,
+                                "Failed to parse upload_date timestamp",
+                            )
                     if ts:
                         # If timestamp is in the future, treat as an upcoming scheduled episode
                         if ts > now_ts:
@@ -1048,8 +1071,9 @@ class MyWindow(QWidget):
                             ).strftime(
                                 "%Y-%m-%d %H:%M:%S",
                             )
-                        except Exception:
+                        except (OSError, ValueError, TypeError) as exc:
                             status_entry["latest_date"] = "(unknown)"
+                            utils.log_exception(exc, "Failed to format latest_date")
 
                 # Append a single status entry per podcast after evaluating its latest entry
                 # Cache the latest URL if present
@@ -1060,8 +1084,9 @@ class MyWindow(QWidget):
                         status_entry.get("latest_ts"),
                     )
                 statuses.append(status_entry)
-            except Exception as e:
-                # Try to detect scheduled/upcoming events and treat them as 'Upcoming' rather than errors
+            except (DownloadError, ExtractorError, OSError, ValueError) as e:
+                # Log unexpected extraction failures and then try to interpret common scheduled/upcoming patterns
+                utils.log_exception(e, f"Error expanding playlist/url {url}")
                 errstr = str(e)
                 now_ts = datetime.now(tz=timezone.utc).timestamp()
                 scheduled_ts = None
@@ -1096,8 +1121,12 @@ class MyWindow(QWidget):
                                     .timestamp()
                                 )
                                 break
-                            except Exception:
+                            except ValueError as exc:
                                 scheduled_ts = None
+                                utils.log_exception(
+                                    exc,
+                                    "Failed to parse scheduled date string",
+                                )
                 if scheduled_ts:
                     statuses.append(
                         {
@@ -1156,8 +1185,11 @@ class MyWindow(QWidget):
             try:
                 existing.raise_()
                 existing.activateWindow()
-            except Exception:
-                pass
+            except (RuntimeError, AttributeError) as exc:
+                utils.log_exception(
+                    exc,
+                    "Failed to focus existing podcast status dialog",
+                )
             return
 
         dialog = QDialog(self)
@@ -1306,7 +1338,11 @@ class MyWindow(QWidget):
             if webpage:
                 return {"url": webpage, "ts": ts}
             return None
-        except Exception:
+        except (DownloadError, ExtractorError, OSError) as exc:
+            utils.log_exception(
+                exc,
+                f"Failed to resolve latest episode via yt-dlp for {playlist_url}",
+            )
             return None
 
     def _open_url_in_browser(self, latest_url: str, label: str | None = None) -> None:
@@ -1318,13 +1354,17 @@ class MyWindow(QWidget):
                     f"Opened latest for {label or latest_url} in default browser",
                 )
                 return
-        except Exception:
-            pass
+        except (webbrowser.Error, OSError) as exc:
+            utils.log_exception(exc, "Failed to open URL in default browser")
         # Fallback to Brave
         try:
             try:
                 controller = webbrowser.get("brave")
-            except Exception:
+            except (webbrowser.Error, OSError) as exc:
+                utils.log_exception(
+                    exc,
+                    "Failed to get Brave controller via webbrowser.get",
+                )
                 brave_paths = [
                     r"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
                     r"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
@@ -1345,8 +1385,9 @@ class MyWindow(QWidget):
                     f"Opened latest for {label or latest_url} in Brave",
                 )
                 return
-        except Exception as e:
+        except (webbrowser.Error, OSError) as e:
             self.logEdit.appendPlainText(f"Failed to open Brave: {e}")
+            utils.log_exception(e, "Failed to open URL in Brave")
         # If all fails
         self.logEdit.appendPlainText(f"Failed to open latest for {label or latest_url}")
 
@@ -1521,9 +1562,13 @@ class MyWindow(QWidget):
                             try:
                                 t.start(delay_ms)
                                 self._podcast_recheck_timers[url] = t
-                            except Exception:
+                            except (RuntimeError, ValueError, TypeError) as exc:
                                 # If timer scheduling fails, just log and continue
                                 self.logEdit.appendPlainText(
+                                    f"Failed to schedule recheck timer for {url}",
+                                )
+                                utils.log_exception(
+                                    exc,
                                     f"Failed to schedule recheck timer for {url}",
                                 )
                     else:
@@ -1533,8 +1578,11 @@ class MyWindow(QWidget):
                         if t:
                             with contextlib.suppress(Exception):
                                 t.stop()
-                except Exception:
-                    pass
+                except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
+                    utils.log_exception(
+                        exc,
+                        "Unexpected error while processing podcast statuses",
+                    )
 
         # Update internal state
         self._last_podcast_check_error = had_error
@@ -1557,8 +1605,12 @@ class MyWindow(QWidget):
                 for obj in to_download:
                     try:
                         label = obj.get("playlist") or "misc"
-                    except Exception:
+                    except (AttributeError, TypeError) as exc:
                         label = "misc"
+                        utils.log_exception(
+                            exc,
+                            "Failed to read playlist label from podcast object",
+                        )
                     # Enforce safe/short label for Windows paths
                     safe_label = utils.slugify_if_too_long(base_dir, label)
                     url = obj.get("url") if isinstance(obj, dict) else obj
@@ -1616,9 +1668,10 @@ class MyWindow(QWidget):
         # Auto-refresh the Podcast Status dialog if it is visible so users see results immediately
         try:
             self._refresh_podcast_status_dialog()
-        except Exception as e:
+        except (RuntimeError, AttributeError) as e:
             # Don't let refresh errors interfere with normal operation; log them for debugging
             self.logEdit.appendPlainText(f"Error refreshing Podcast Status dialog: {e}")
+            utils.log_exception(e, "Error refreshing Podcast Status dialog")
 
     def _shutdown_podcast_thread(self) -> None:
         """Attempt a clean shutdown of any running podcast worker thread."""
@@ -1639,13 +1692,15 @@ class MyWindow(QWidget):
                     )
                     try:
                         thread.terminate()
-                    except Exception as e:
+                    except (RuntimeError, OSError) as e:
                         self.logEdit.appendPlainText(
                             f"Error terminating podcast thread: {e}",
                         )
+                        utils.log_exception(e, "Error terminating podcast thread")
                     thread.wait(1000)
-        except Exception as e:
+        except (RuntimeError, OSError) as e:
             self.logEdit.appendPlainText(f"Error shutting down podcast thread: {e}")
+            utils.log_exception(e, "Error shutting down podcast thread")
         finally:
             self._podcast_worker = None
             self._podcast_worker_thread = None
@@ -1674,7 +1729,8 @@ class MyWindow(QWidget):
                     for ln in f
                     if ln.strip() and not ln.strip().startswith("#")
                 ]
-        except Exception:
+        except (OSError, UnicodeDecodeError) as exc:
+            utils.log_exception(exc, "Failed to read podcast playlist file")
             return statuses
 
         # read archive ids
@@ -1687,8 +1743,9 @@ class MyWindow(QWidget):
                         parts = line.strip().split()
                         if parts:
                             archived_ids.add(parts[-1])
-            except Exception:
+            except (OSError, UnicodeDecodeError) as exc:
                 archived_ids = set()
+                utils.log_exception(exc, "Failed to read podcast archive IDs")
 
         now_ts = datetime.now(tz=timezone.utc).timestamp()
         for url in lines:
@@ -1724,8 +1781,12 @@ class MyWindow(QWidget):
                             .replace(tzinfo=timezone.utc)
                             .timestamp()
                         )
-                    except Exception:
+                    except (ValueError, TypeError) as exc:
                         ts = None
+                        utils.log_exception(
+                            exc,
+                            "Failed to parse upload_date for podcast status check",
+                        )
                 latest_date = (
                     datetime.fromtimestamp(ts, tz=timezone.utc).strftime(
                         "%Y-%m-%d %H:%M:%S",
@@ -1766,7 +1827,8 @@ class MyWindow(QWidget):
                 if webpage:
                     self._cache_put(url, webpage, ts)
                 statuses.append(entry)
-            except Exception as e:
+            except (DownloadError, ExtractorError, OSError, ValueError) as e:
+                utils.log_exception(e, f"Error fetching podcast status for {url}")
                 statuses.append(
                     {
                         "podcast": url,
@@ -1877,4 +1939,7 @@ if __name__ == "__main__":
 
 # TODO: add way of seeing history info in app?
 # TODO: re hook up the history_log
+#       tried and failed, I think mostly because I told it to only count as a success if it was added to tfarchive.txt
+#       consider getting rid of that requirement? Or... definitely stress that it needs to be careful about id's
+#       the AI gets confused with all the different things it considers IDs for a video
 # TODO: look into Android Faithful showing up in the basic misc folder

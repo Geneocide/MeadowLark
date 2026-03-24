@@ -12,19 +12,19 @@ from yt_dlp.utils import DownloadError, ExtractorError, MaxDownloadsReached
 
 import utils
 
-# Migrate prior logfile name to the new error log if present
-try:
-    if Path("logfile.txt").exists() and not Path("error_log.txt").exists():
-        Path.replace("logfile.txt", "error_log.txt")
-except Exception:
-    # Never fail on migration
-    pass
-
 logging.basicConfig(
     filename="error_log.txt",
     level=logging.ERROR,
     format="%(asctime)s %(message)s",
 )
+
+# Migrate prior logfile name to the new error log if present
+try:
+    if Path("logfile.txt").exists() and not Path("error_log.txt").exists():
+        Path.replace("logfile.txt", "error_log.txt")
+except OSError as exc:
+    # Never fail on migration, but do record the issue for later diagnosis
+    utils.log_exception(exc, "Failed to migrate logfile.txt to error_log.txt")
 
 
 class QLogger(QObject):
@@ -132,7 +132,7 @@ class QHook(QObject):
 class HistoryLogger:
     """Writes human-readable download history entries to history_log.txt."""
 
-    HISTORY_PATH = "history_log.txt"
+    HISTORY_PATH = Path("history_log.txt")
 
     @staticmethod
     def _format_entry(dt: str, site: str, dtype: str, title: str, result: str) -> str:
@@ -147,11 +147,13 @@ class HistoryLogger:
         )
         result = "SUCCESS" if success else "FAIL"
         try:
-            with Path.open(HistoryLogger.HISTORY_PATH, "a", encoding="utf-8") as f:
+            history_path = HistoryLogger.HISTORY_PATH
+            history_path.parent.mkdir(parents=True, exist_ok=True)
+            with history_path.open("a", encoding="utf-8") as f:
                 f.write(HistoryLogger._format_entry(dt, site, dtype, title, result))
-        except Exception:
-            # Never allow history logging to crash downloading
-            pass
+        except OSError as exc:
+            # Never allow history logging to crash downloading, but record it
+            utils.log_exception(exc, "HistoryLogger failed to write to history_log.txt")
 
 
 class HistoryHook:
@@ -218,9 +220,12 @@ class HistoryHook:
                 # Fallback for non-merged items (e.g., audio-only) or if no postprocessing runs
                 HistoryLogger.log(site, dtype, title, True)
                 self._seen_ids.add(vid)
-        except Exception:
-            # Never let history logging break the download
-            pass
+        except (AttributeError, TypeError, OSError) as exc:
+            # Never let history logging break the download, but capture it
+            utils.log_exception(
+                exc,
+                "HistoryHook failed while logging download history",
+            )
 
 
 class QYTQueue(QThread):
@@ -293,8 +298,8 @@ class QYTQueue(QThread):
                 with YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
                     info = ydl.extract_info(urls[0], download=False)
                     title = info.get("title", title)
-            except Exception:
-                pass
+            except (DownloadError, ExtractorError, OSError, ValueError) as exc:
+                utils.log_exception(exc, "Failed to extract title for error logging")
 
             error_str = str(e)
             meta = options.get("qmeta") or {}
@@ -329,8 +334,10 @@ class QYTQueue(QThread):
                     # Success on fallback; log and return
                     HistoryLogger.log(site, "720", title, success=True)
                     return
-                except Exception as e2:  # noqa: BLE001
-                    # Continue with original failure path using the new exception
+                except (DownloadError, ExtractorError, OSError, ValueError) as e2:
+                    # Record that the fallback attempt failed, and continue with
+                    # the original failure path using the new exception
+                    utils.log_exception(e2, "720p fallback attempt failed")
                     e = e2
                     error_str = str(e)
 
@@ -351,8 +358,10 @@ class QYTQueue(QThread):
                     # Success on retry; log and return
                     HistoryLogger.log(site, dtype, title, success=True)
                     return
-                except Exception as e2:  # noqa: BLE001
-                    # Continue with original failure path using the new exception
+                except (DownloadError, ExtractorError, OSError, ValueError) as e2:
+                    # Record that the retry without SponsorBlock failed and
+                    # continue with the original failure path using the new exception
+                    utils.log_exception(e2, "SponsorBlock removal retry failed")
                     e = e2
                     error_str = str(e)
 
