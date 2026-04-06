@@ -9,9 +9,10 @@ DropLabel is a QLabel subclass that accepts dropped URLs, emits a signal when UR
 
 from os import startfile
 from pathlib import Path
+from typing import Any
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QFont
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QFont, QMouseEvent
 from PyQt6.QtWidgets import (
     QDialog,
     QGridLayout,
@@ -85,6 +86,8 @@ class PlaylistDialog(QDialog):
 
 class DropLabel(QLabel):
     """
+    .
+
     A QLabel subclass that accepts drag-and-drop of URLs, emits a signal when URLs are dropped, and provides visual feedback by temporarily changing its text.
 
     Args:
@@ -99,7 +102,12 @@ class DropLabel(QLabel):
     ADDED_TEXT = "Added!!!"
     urls_dropped = pyqtSignal(list, str)
 
-    def __init__(self, text: str, color: str, connection: callable) -> None:
+    def __init__(
+        self,
+        text: str,
+        color: str,
+        connection: Any,  # noqa: ANN401
+    ) -> None:
         """
         Initialize the label with custom text, background color, and a connection for the URLs dropped signal.
 
@@ -160,11 +168,44 @@ class DropLabel(QLabel):
 
 
 class PlaylistButton(QPushButton):
-    def __init__(self, text, playlist_path, *args, **kwargs) -> None:
+    """
+    .
+
+    A QPushButton subclass that opens a playlist file on right-click.
+
+    Displays a button that opens the associated playlist file when right-clicked.
+    """
+
+    def __init__(
+        self,
+        text: str,
+        playlist_path: str | Path,
+        *args: Any,  # noqa: ANN401
+        **kwargs: Any,  # noqa: ANN401
+    ) -> None:
+        """
+        .
+
+        Initialize the button with text, playlist path, and optional Qt arguments.
+
+        Args:
+            text: The button label text.
+            playlist_path: Path to the playlist file.
+            *args: Additional positional arguments for QPushButton.
+            **kwargs: Additional keyword arguments for QPushButton.
+        """
         super().__init__(text, *args, **kwargs)
         self.playlist_path = Path(playlist_path)
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """
+        .
+
+        Handle mouse press events to open playlist on right-click.
+
+        Args:
+            event: The mouse press event.
+        """
         if event.button() == Qt.MouseButton.RightButton:
             if self.playlist_path.exists():
                 startfile(self.playlist_path)  # noqa: S606

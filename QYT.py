@@ -141,7 +141,18 @@ class HistoryLogger:
         )
 
     @staticmethod
-    def log(site: str, dtype: str, title: str, success: bool) -> None:
+    def log(site: str, dtype: str, title: str, *, success: bool) -> None:
+        """
+        .
+
+        Log a download result to history_log.txt with timestamp.
+
+        Args:
+            site: The source site (e.g., 'youtube', 'nebula').
+            dtype: The download type (e.g., '1080', '720', 'podcast').
+            title: The video/content title.
+            success: Whether the download succeeded.
+        """
         dt = datetime.now(tz=timezone.utc).strftime(
             "%Y-%m-%d %H:%M:%S",
         )
@@ -166,6 +177,14 @@ class HistoryHook:
     """
 
     def __init__(self, meta: dict | None) -> None:
+        """
+        .
+
+        Initialize the hook with optional metadata.
+
+        Args:
+            meta: Optional metadata dict with 'site' and 'type' keys.
+        """
         self.meta = meta or {}
         self._seen_ids: set[str] = set()
 
@@ -193,6 +212,14 @@ class HistoryHook:
         )
 
     def __call__(self, d: dict) -> None:
+        """
+        .
+
+        Process a download progress event and log to history if finished.
+
+        Args:
+            d: The progress event dict from yt-dlp.
+        """
         try:
             status = d.get("status")
             info = d.get("info_dict") or {}
@@ -214,11 +241,11 @@ class HistoryHook:
             if status == "postprocessing":
                 # Prefer logging when a merge or audio-extract postprocessor finishes
                 if "merger" in postproc or "ffmpegextractaudio" in postproc:
-                    HistoryLogger.log(site, dtype, title, True)
+                    HistoryLogger.log(site, dtype, title, success=True)
                     self._seen_ids.add(vid)
             elif status == "finished":
                 # Fallback for non-merged items (e.g., audio-only) or if no postprocessing runs
-                HistoryLogger.log(site, dtype, title, True)
+                HistoryLogger.log(site, dtype, title, success=True)
                 self._seen_ids.add(vid)
         except (AttributeError, TypeError, OSError) as exc:
             # Never let history logging break the download, but capture it
@@ -265,12 +292,125 @@ class QYTQueue(QThread):
                 if self.downloadQueue.empty():
                     self.queue_empty.emit()
 
+    def _extract_title(self, urls: list) -> str:
+        """
+        Extract video title from first URL for error logging.
+
+        Args:
+            urls: List of URLs to extract from.
+
+        Returns:
+            Video title or '(unknown)' if extraction fails.
+        """
+        title = urls[0] if urls else "(unknown)"
+        try:
+            with YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+                info = ydl.extract_info(urls[0], download=False)
+                title = info.get("title", title)
+        except (DownloadError, ExtractorError, OSError, ValueError) as exc:
+            utils.log_exception(exc, "Failed to extract title for error logging")
+        return title
+
+    def _try_720_fallback(
+        self,
+        urls: list,
+        options: dict,
+        title: str,
+        site: str,
+        error_str: str,
+    ) -> tuple[bool, str]:
+        """
+        Try downloading at 720p if 1080p format unavailable.
+
+        Args:
+            urls: URLs to download.
+            options: yt-dlp options.
+            title: Video title for logging.
+            site: Source site for logging.
+            error_str: Error message text.
+
+        Returns:
+            (success: bool, new_error_str: str)
+        """
+        if "Requested format is not available" not in error_str or options.get(
+            "_tried_720_fallback"
+        ):
+            return False, error_str
+
+        self.message_changed.emit(
+            f"Requested 1080 format not available for '{title}'; retrying at 720...",
+        )
+        fallback = options.copy()
+        fallback["_tried_720_fallback"] = True
+        fallback["format"] = (
+            "bestvideo*[height=720][ext=mp4]+bestaudio[ext=m4a]/"
+            "bestvideo*[height=720]+bestaudio/"
+            "best[height=720]/best"
+        )
+        fallback.setdefault("merge_output_format", "mp4")
+        fq = dict(fallback.get("qmeta", {}))
+        fq["type"] = "720"
+        fallback["qmeta"] = fq
+        try:
+            with YoutubeDL(fallback) as ydl:
+                ydl.cache.remove()
+                ydl.download(urls)
+            HistoryLogger.log(site, "720", title, success=True)
+            return True, error_str  # noqa: TRY300
+        except (DownloadError, ExtractorError, OSError, ValueError) as e2:
+            utils.log_exception(e2, "720p fallback attempt failed")
+            return False, str(e2)
+
+    def _try_without_sponsorblock(  # noqa: PLR0913
+        self,
+        urls: list,
+        options: dict,
+        title: str,
+        site: str,
+        dtype: str,
+        error_str: str,
+    ) -> tuple[bool, str]:
+        """
+        Try downloading without SponsorBlock if API unavailable.
+
+        Args:
+            urls: URLs to download.
+            options: yt-dlp options.
+            title: Video title for logging.
+            site: Source site for logging.
+            dtype: Download type for logging.
+            error_str: Error message text.
+
+        Returns:
+            (success: bool, new_error_str: str)
+        """
+        if (
+            "Unable to communicate with SponsorBlock API" not in error_str
+            or options.get("_tried_without_sponsorblock")
+        ):
+            return False, error_str
+
+        self.message_changed.emit(
+            "SponsorBlock API unavailable; retrying download without SponsorBlock...",
+        )
+        fallback = utils.remove_sponsorblock_postprocessor(options)
+        fallback["_tried_without_sponsorblock"] = True
+        try:
+            with YoutubeDL(fallback) as ydl:
+                ydl.cache.remove()
+                ydl.download(urls)
+            HistoryLogger.log(site, dtype, title, success=True)
+            return True, error_str  # noqa: TRY300
+        except (DownloadError, ExtractorError, OSError, ValueError) as e2:
+            utils.log_exception(e2, "SponsorBlock removal retry failed")
+            return False, str(e2)
+
     def download(self, urls: list, options: dict) -> None:
         """
-        Download videos from the provided URLs using yt-dlp with the given options.
+        Download videos from URLs using yt-dlp with fallback strategies.
 
-        Handles download errors by emitting error messages and logging exceptions via QLogger.
-        Cleans up progress hooks and ensures logger signal connections are properly managed.
+        Attempts fallbacks for 720p (if 1080p unavailable) and without
+        SponsorBlock (if API down) before reporting final failure.
 
         Args:
             urls (list): List of URLs to download.
@@ -293,78 +433,37 @@ class QYTQueue(QThread):
             ValueError,
         ) as e:
             # Extract title for error logging
-            title = urls[0] if urls else "(unknown)"
-            try:
-                with YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
-                    info = ydl.extract_info(urls[0], download=False)
-                    title = info.get("title", title)
-            except (DownloadError, ExtractorError, OSError, ValueError) as exc:
-                utils.log_exception(exc, "Failed to extract title for error logging")
-
+            title = self._extract_title(urls)
             error_str = str(e)
             meta = options.get("qmeta") or {}
             site = meta.get("site", "unknown")
             dtype = meta.get("type", meta.get("source", "unknown"))
 
-            # If requested 1080 and the format is unavailable, try 720 once before failing
-            if (
-                "Requested format is not available" in error_str
-                and dtype == "1080"
-                and not options.get("_tried_720_fallback")
-            ):
-                self.message_changed.emit(
-                    f"Requested 1080 format not available for '{title}'; retrying at 720...",
+            # Try 720p fallback if 1080p not available
+            if dtype == "1080":
+                success, error_str = self._try_720_fallback(
+                    urls,
+                    options,
+                    title,
+                    site,
+                    error_str,
                 )
-                # Prepare fallback options (shallow copy is sufficient)
-                fallback = options.copy()
-                fallback["_tried_720_fallback"] = True
-                fallback["format"] = (
-                    "bestvideo*[height=720][ext=mp4]+bestaudio[ext=m4a]/"
-                    "bestvideo*[height=720]+bestaudio/"
-                    "best[height=720]/best"
-                )
-                fallback.setdefault("merge_output_format", "mp4")
-                fq = dict(fallback.get("qmeta", {}))
-                fq["type"] = "720"
-                fallback["qmeta"] = fq
-                try:
-                    with YoutubeDL(fallback) as ydl:
-                        ydl.cache.remove()
-                        ydl.download(urls)
-                    # Success on fallback; log and return
-                    HistoryLogger.log(site, "720", title, success=True)
+                if success:
                     return
-                except (DownloadError, ExtractorError, OSError, ValueError) as e2:
-                    # Record that the fallback attempt failed, and continue with
-                    # the original failure path using the new exception
-                    utils.log_exception(e2, "720p fallback attempt failed")
-                    e = e2
-                    error_str = str(e)
 
-            # If SponsorBlock is down (503 / service unavailable) retry once without it
-            if (
-                "Unable to communicate with SponsorBlock API" in error_str
-                and not options.get("_tried_without_sponsorblock")
-            ):
-                self.message_changed.emit(
-                    "SponsorBlock API unavailable; retrying download without SponsorBlock...",
-                )
-                fallback = utils.remove_sponsorblock_postprocessor(options)
-                fallback["_tried_without_sponsorblock"] = True
-                try:
-                    with YoutubeDL(fallback) as ydl:
-                        ydl.cache.remove()
-                        ydl.download(urls)
-                    # Success on retry; log and return
-                    HistoryLogger.log(site, dtype, title, success=True)
-                    return
-                except (DownloadError, ExtractorError, OSError, ValueError) as e2:
-                    # Record that the retry without SponsorBlock failed and
-                    # continue with the original failure path using the new exception
-                    utils.log_exception(e2, "SponsorBlock removal retry failed")
-                    e = e2
-                    error_str = str(e)
+            # Try without SponsorBlock if API is down
+            success, error_str = self._try_without_sponsorblock(
+                urls,
+                options,
+                title,
+                site,
+                dtype,
+                error_str,
+            )
+            if success:
+                return
 
+            # All retries failed, log the error
             error_message = (
                 f"Error downloading '{title}' (site: {site}, type: {dtype}): {e!s}"
             )
@@ -372,7 +471,6 @@ class QYTQueue(QThread):
             logger = options.get("logger")
             if isinstance(logger, QLogger):
                 logger.exception(error_message)
-            # Attempt to record a failure entry for the batch when title is unknown
             HistoryLogger.log(site, dtype, title, success=False)
         finally:
             for hook in options.get("progress_hooks", []):
