@@ -22,6 +22,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+import utils
+
 
 class PlaylistDialog(QDialog):
     """
@@ -210,6 +212,13 @@ class PlaylistButton(QPushButton):
             if self.playlist_path.exists():
                 startfile(self.playlist_path)  # noqa: S606
             else:
-                print(f"Playlist file not found: {self.playlist_path}")
+                try:
+                    raise FileNotFoundError(
+                        f"Playlist file not found: {self.playlist_path}"
+                    )
+                except FileNotFoundError as e:
+                    utils.log_exception(
+                        e, "Failed to open playlist file on right-click"
+                    )
         else:
             super().mousePressEvent(event)
