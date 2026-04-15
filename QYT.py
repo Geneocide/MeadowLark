@@ -7,24 +7,25 @@ from queue import Queue
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from wakepy import keep
-from yt_dlp import YoutubeDL
-from yt_dlp.utils import DownloadError, ExtractorError, MaxDownloadsReached
 
 import utils
+from src.config import ERROR_LOG_PATH, HISTORY_LOG_PATH, LOGFILE_MIGRATION_ENABLED
+from src.download_executor import DownloadExecutor
 
 logging.basicConfig(
-    filename="error_log.txt",
+    filename=str(ERROR_LOG_PATH),
     level=logging.ERROR,
     format="%(asctime)s %(message)s",
 )
 
 # Migrate prior logfile name to the new error log if present
-try:
-    if Path("logfile.txt").exists() and not Path("error_log.txt").exists():
-        Path.replace("logfile.txt", "error_log.txt")
-except OSError as exc:
-    # Never fail on migration, but do record the issue for later diagnosis
-    utils.log_exception(exc, "Failed to migrate logfile.txt to error_log.txt")
+if LOGFILE_MIGRATION_ENABLED:
+    try:
+        if Path("logfile.txt").exists() and not ERROR_LOG_PATH.exists():
+            Path("logfile.txt").replace(ERROR_LOG_PATH)
+    except OSError as exc:
+        # Never fail on migration, but do record the issue for later diagnosis
+        utils.log_exception(exc, "Failed to migrate logfile.txt to error_log.txt")
 
 
 class QLogger(QObject):
@@ -132,7 +133,7 @@ class QHook(QObject):
 class HistoryLogger:
     """Writes human-readable download history entries to history_log.txt."""
 
-    HISTORY_PATH = Path("history_log.txt")
+    HISTORY_PATH = HISTORY_LOG_PATH
 
     @staticmethod
     def _format_entry(dt: str, site: str, dtype: str, title: str, result: str) -> str:
@@ -157,6 +158,30 @@ class HistoryLogger:
             "%Y-%m-%d %H:%M:%S",
         )
         result = "SUCCESS" if success else "FAIL"
+        try:
+            history_path = HistoryLogger.HISTORY_PATH
+            history_path.parent.mkdir(parents=True, exist_ok=True)
+            with history_path.open("a", encoding="utf-8") as f:
+                f.write(HistoryLogger._format_entry(dt, site, dtype, title, result))
+        except OSError as exc:
+            # Never allow history logging to crash downloading, but record it
+            utils.log_exception(exc, "HistoryLogger failed to write to history_log.txt")
+
+    @staticmethod
+    def log_skip(site: str, dtype: str, title: str, reason: str) -> None:
+        """
+        Log a skip result to history_log.txt with timestamp.
+
+        Args:
+            site: The source site (e.g., 'youtube', 'nebula').
+            dtype: The download type (e.g., 'audio_playlists').
+            title: The video/content title.
+            reason: The reason for skipping (e.g., 'Short duration (<3 min)').
+        """
+        dt = datetime.now(tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S",
+        )
+        result = f"SKIPPED ({reason})"
         try:
             history_path = HistoryLogger.HISTORY_PATH
             history_path.parent.mkdir(parents=True, exist_ok=True)
@@ -277,6 +302,7 @@ class QYTQueue(QThread):
 
         self.downloadQueue = download_queue
         self.daemon = True
+        self.executor = DownloadExecutor(message_callback=self.message_changed.emit)
 
     def run(self) -> None:
         """Continuously processes download tasks from the queue in a background thread, emitting progress and completion messages, and signals when the queue becomes empty. Keeps the system awake during execution using a wake lock."""
@@ -292,24 +318,10 @@ class QYTQueue(QThread):
                 if self.downloadQueue.empty():
                     self.queue_empty.emit()
 
+    # Backward-compatibility wrapper methods that delegate to executor
     def _extract_title(self, urls: list) -> str:
-        """
-        Extract video title from first URL for error logging.
-
-        Args:
-            urls: List of URLs to extract from.
-
-        Returns:
-            Video title or '(unknown)' if extraction fails.
-        """
-        title = urls[0] if urls else "(unknown)"
-        try:
-            with YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
-                info = ydl.extract_info(urls[0], download=False)
-                title = info.get("title", title)
-        except (DownloadError, ExtractorError, OSError, ValueError) as exc:
-            utils.log_exception(exc, "Failed to extract title for error logging")
-        return title
+        """Extract video title from first URL for error logging."""
+        return self.executor._extract_title(urls)
 
     def _try_720_fallback(
         self,
@@ -319,49 +331,10 @@ class QYTQueue(QThread):
         site: str,
         error_str: str,
     ) -> tuple[bool, str]:
-        """
-        Try downloading at 720p if 1080p format unavailable.
+        """Try downloading at 720p if 1080p format unavailable."""
+        return self.executor._try_720_fallback(urls, options, title, site, error_str)
 
-        Args:
-            urls: URLs to download.
-            options: yt-dlp options.
-            title: Video title for logging.
-            site: Source site for logging.
-            error_str: Error message text.
-
-        Returns:
-            (success: bool, new_error_str: str)
-        """
-        if "Requested format is not available" not in error_str or options.get(
-            "_tried_720_fallback"
-        ):
-            return False, error_str
-
-        self.message_changed.emit(
-            f"Requested 1080 format not available for '{title}'; retrying at 720...",
-        )
-        fallback = options.copy()
-        fallback["_tried_720_fallback"] = True
-        fallback["format"] = (
-            "bestvideo*[height=720][ext=mp4]+bestaudio[ext=m4a]/"
-            "bestvideo*[height=720]+bestaudio/"
-            "best[height=720]/best"
-        )
-        fallback.setdefault("merge_output_format", "mp4")
-        fq = dict(fallback.get("qmeta", {}))
-        fq["type"] = "720"
-        fallback["qmeta"] = fq
-        try:
-            with YoutubeDL(fallback) as ydl:
-                ydl.cache.remove()
-                ydl.download(urls)
-            HistoryLogger.log(site, "720", title, success=True)
-            return True, error_str  # noqa: TRY300
-        except (DownloadError, ExtractorError, OSError, ValueError) as e2:
-            utils.log_exception(e2, "720p fallback attempt failed")
-            return False, str(e2)
-
-    def _try_without_sponsorblock(  # noqa: PLR0913
+    def _try_without_sponsorblock(
         self,
         urls: list,
         options: dict,
@@ -370,40 +343,15 @@ class QYTQueue(QThread):
         dtype: str,
         error_str: str,
     ) -> tuple[bool, str]:
-        """
-        Try downloading without SponsorBlock if API unavailable.
-
-        Args:
-            urls: URLs to download.
-            options: yt-dlp options.
-            title: Video title for logging.
-            site: Source site for logging.
-            dtype: Download type for logging.
-            error_str: Error message text.
-
-        Returns:
-            (success: bool, new_error_str: str)
-        """
-        if (
-            "Unable to communicate with SponsorBlock API" not in error_str
-            or options.get("_tried_without_sponsorblock")
-        ):
-            return False, error_str
-
-        self.message_changed.emit(
-            "SponsorBlock API unavailable; retrying download without SponsorBlock...",
+        """Try downloading without SponsorBlock if API unavailable."""
+        return self.executor._try_without_sponsorblock(
+            urls,
+            options,
+            title,
+            site,
+            dtype,
+            error_str,
         )
-        fallback = utils.remove_sponsorblock_postprocessor(options)
-        fallback["_tried_without_sponsorblock"] = True
-        try:
-            with YoutubeDL(fallback) as ydl:
-                ydl.cache.remove()
-                ydl.download(urls)
-            HistoryLogger.log(site, dtype, title, success=True)
-            return True, error_str  # noqa: TRY300
-        except (DownloadError, ExtractorError, OSError, ValueError) as e2:
-            utils.log_exception(e2, "SponsorBlock removal retry failed")
-            return False, str(e2)
 
     def download(self, urls: list, options: dict) -> None:
         """
@@ -422,56 +370,21 @@ class QYTQueue(QThread):
             progress_hooks.append(HistoryHook(options.get("qmeta")))
             options["progress_hooks"] = progress_hooks
 
-            with YoutubeDL(options) as ydl:
-                ydl.cache.remove()
-                ydl.download(urls)
-        except (
-            DownloadError,
-            ExtractorError,
-            MaxDownloadsReached,
-            OSError,
-            ValueError,
-        ) as e:
-            # Extract title for error logging
-            title = self._extract_title(urls)
-            error_str = str(e)
-            meta = options.get("qmeta") or {}
-            site = meta.get("site", "unknown")
-            dtype = meta.get("type", meta.get("source", "unknown"))
+            # Delegate download to executor
+            success, error_message = self.executor.execute(urls, options)
 
-            # Try 720p fallback if 1080p not available
-            if dtype == "1080":
-                success, error_str = self._try_720_fallback(
-                    urls,
-                    options,
-                    title,
-                    site,
-                    error_str,
-                )
-                if success:
-                    return
-
-            # Try without SponsorBlock if API is down
-            success, error_str = self._try_without_sponsorblock(
-                urls,
-                options,
-                title,
-                site,
-                dtype,
-                error_str,
-            )
-            if success:
-                return
-
-            # All retries failed, log the error
-            error_message = (
-                f"Error downloading '{title}' (site: {site}, type: {dtype}): {e!s}"
-            )
-            self.message_changed.emit(error_message)
-            logger = options.get("logger")
-            if isinstance(logger, QLogger):
-                logger.exception(error_message)
-            HistoryLogger.log(site, dtype, title, success=False)
+            if not success:
+                # Log the error if download failed
+                self.message_changed.emit(error_message)
+                logger = options.get("logger")
+                if isinstance(logger, QLogger):
+                    logger.exception(error_message)
+                meta = options.get("qmeta") or {}
+                site = meta.get("site", "unknown")
+                dtype = meta.get("type", meta.get("source", "unknown"))
+                # Extract title for logging
+                title = self.executor._extract_title(urls)
+                HistoryLogger.log(site, dtype, title, success=False)
         finally:
             for hook in options.get("progress_hooks", []):
                 if hasattr(hook, "infoChanged"):

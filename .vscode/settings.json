@@ -1,3 +1,8 @@
 {
-    "codium.codeCompletion.enable": false
+    "codium.codeCompletion.enable": false,
+    "python.testing.pytestArgs": [
+        "."
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
 }

@@ -38,7 +38,12 @@ from src.version_utils import (
 )
 
 # Re-export yt-dlp option builders
-from src.ydl_options import build_base_ydl_opts
+from src.ydl_options import (
+    build_base_ydl_opts,
+    get_output_template,
+    get_postprocessors,
+    get_source_options,
+)
 
 __all__ = [
     "_default_postprocessors",
@@ -46,7 +51,10 @@ __all__ = [
     "detect_site_from_urls",
     "get_current_yt_dlp_version",
     "get_latest_yt_dlp_version",
+    "get_output_template",
     "get_playlist_file_for_source",
+    "get_postprocessors",
+    "get_source_options",
     "is_primitive_technology",
     "is_yt_dlp_update_available",
     "log_exception",

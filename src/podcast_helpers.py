@@ -3,7 +3,6 @@
 from typing import Any
 
 import yt_dlp
-from yt_dlp.utils import DownloadError, ExtractorError
 
 from src.exceptions import PodcastResolutionError
 
@@ -55,6 +54,7 @@ def fetch_latest_accessible_entry(
         ValueError: If yt-dlp raises a value error during extraction.
     """
     original_exc: Exception | None = None
+    private_video_case = False
     # try progressively larger tail slices rather than full scrape
     for n in range(1, MAX_LOOKAHEAD + 1):
         try:
@@ -62,9 +62,10 @@ def fetch_latest_accessible_entry(
                 {"quiet": True, "no_warnings": True, "playlist_items": str(n)},
             ) as ydl:
                 info = ydl.extract_info(url, download=False)
-        except (DownloadError, ExtractorError, OSError, ValueError) as exc:
+        except Exception as exc:
             original_exc = exc
             if "Private video" in str(exc):
+                private_video_case = True
                 # try again with larger playlistend
                 continue
             # some other error - propagate immediately
@@ -79,14 +80,14 @@ def fetch_latest_accessible_entry(
         title = cand.get("title", "")
         if isinstance(title, str) and title.startswith("Private video"):
             # private, keep looking
+            private_video_case = True
             original_exc = original_exc or Exception("Private video")
             continue
         # found a non-private entry
         return [cand], bool(n > 1 or original_exc is not None), info
 
     # exhausted lookahead window or playlist ended
-    if original_exc:
+    if original_exc and not private_video_case:
         raise original_exc
-    # nothing special happened - return what we got from first call if any
-    msg = PodcastResolutionError.MSG
-    raise PodcastResolutionError(msg)
+
+    raise PodcastResolutionError(PodcastResolutionError.MSG)

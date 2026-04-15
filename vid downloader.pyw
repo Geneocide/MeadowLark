@@ -70,7 +70,18 @@ from yt_dlp.utils import DownloadError, ExtractorError
 
 import QYT
 import utils
+from src.config import (
+    LABEL_OUTPUT_FONT_NAME,
+    LABEL_OUTPUT_FONT_SIZE,
+    LABEL_READY_TEXT,
+    LIVE_QUEUE_CHECK_INTERVAL_MINUTES,
+    LIVE_QUEUE_FILE,
+    PLAYLISTS_720_FILE,
+    PLAYLISTS_AUDIO_FILE,
+    PLAYLISTS_FILE,
+)
 from src.podcast_filtering import (
+    PODCAST_MIN_DURATION_SECONDS,
     append_to_archive_and_mark_skipped,
     check_sponsorblock_for_video_id,
     format_timestamp_readable,
@@ -139,21 +150,21 @@ class MyWindow(QWidget):
 
         self.buttonPlaylists = PlaylistButton(
             "Playlists",
-            r"Z:\misc\dev\vid downloader\resources\playlists\playlists.txt",
+            str(PLAYLISTS_FILE),
         )
         self.buttonPlaylists.clicked.connect(
             lambda: self.playlist_button_clicked("1080playlists"),
         )
         self.button720Playlists = PlaylistButton(
             "720 Playlists",
-            r"Z:\misc\dev\vid downloader\resources\playlists\720playlists.txt",
+            str(PLAYLISTS_720_FILE),
         )
         self.button720Playlists.clicked.connect(
             lambda: self.playlist_button_clicked("720playlists"),
         )
         self.buttonAudioPlaylists = PlaylistButton(
             "YT Podcasts",
-            r"Z:\misc\dev\vid downloader\resources\playlists\audio playlists.txt",
+            str(PLAYLISTS_AUDIO_FILE),
         )
         # Make the Podcasts button smaller and add an adjacent status indicator
         self.buttonAudioPlaylists.setMaximumWidth(140)
@@ -181,9 +192,9 @@ class MyWindow(QWidget):
         self.label1080 = DropLabel("1080", "#424769", self.request_detected)
         self.label720 = DropLabel("720", "#7077A1", self.request_detected)
         self.labelAudio = DropLabel("audio", "#FF9843", self.request_detected)
-        self.labelOutput = QLabel("[ Ready ]")
+        self.labelOutput = QLabel(LABEL_READY_TEXT)
         self.labelOutput.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.labelOutput.setFont(QFont("Arial", 16))
+        self.labelOutput.setFont(QFont(LABEL_OUTPUT_FONT_NAME, LABEL_OUTPUT_FONT_SIZE))
         self.barProgress = QProgressBar()
         self.logEdit = QPlainTextEdit(readOnly=True)
 
@@ -221,11 +232,11 @@ class MyWindow(QWidget):
     def _setup_timers(self) -> None:
         """Create and start timers for live queue and podcast checks."""
         # Live queue setup and periodic recheck every 30 minutes
-        self.live_queue_path = Path("resources/live_queue.txt")
+        self.live_queue_path = LIVE_QUEUE_FILE
         self.live_queue_path.parent.mkdir(parents=True, exist_ok=True)
         self.live_queue_path.touch(exist_ok=True)
         self.live_check_timer = QTimer(self)
-        self.live_check_timer.setInterval(30 * 60 * 1000)  # 30 minutes
+        self.live_check_timer.setInterval(LIVE_QUEUE_CHECK_INTERVAL_MINUTES * 60 * 1000)
         self.live_check_timer.timeout.connect(self.check_live_queue)
         self.live_check_timer.start()
         # Do an initial check on startup
@@ -310,7 +321,7 @@ class MyWindow(QWidget):
                 ),
             )
             thread.finished.connect(
-                lambda: self.labelOutput.setText("[ Ready ]"),
+                lambda: self.labelOutput.setText(LABEL_READY_TEXT),
             )
 
             # Store references to avoid GC while running
@@ -920,7 +931,34 @@ class MyWindow(QWidget):
                             messages,
                         )
                         status_entry["status"] = "Skipped (Update)"
+                        QYT.HistoryLogger.log_skip(
+                            site=utils.detect_site_from_urls([webpage]),
+                            dtype="audio_playlists",
+                            title=title,
+                            reason="Update exception",
+                        )
                         break
+
+                    # Check if episode is too short to download (under 3 minutes)
+                    duration = entry.get("duration")
+                    if duration is not None and duration < PODCAST_MIN_DURATION_SECONDS:
+                        append_to_archive_and_mark_skipped(
+                            archive_path,
+                            vid,
+                            existing_ids,
+                            title,
+                            messages,
+                            reason="Short duration (<3 min)",
+                        )
+                        status_entry["status"] = "Skipped Short"
+                        QYT.HistoryLogger.log_skip(
+                            site=utils.detect_site_from_urls([webpage]),
+                            dtype="audio_playlists",
+                            title=title,
+                            reason="Short duration (<3 min)",
+                        )
+                        break
+
                     # Determine upload timestamp
                     ts = parse_video_timestamp(entry)
                     if ts:
@@ -1802,8 +1840,8 @@ if __name__ == "__main__":
     app.exec()
 
 # TODO: add way of seeing history info in app?
-# TODO: re hook up the history_log
-#       tried and failed, I think mostly because I told it to only count as a success if it was added to tfarchive.txt
-#       consider getting rid of that requirement? Or... definitely stress that it needs to be careful about id's
-#       the AI gets confused with all the different things it considers IDs for a video
 # TODO: look into Android Faithful showing up in the basic misc folder
+# TODO: size control for error logs
+# TODO: settings for making things more general, especially folder locations
+# TODO: figure out Taskmaster 21 720 playlist problem
+# TODO: look into live queue problem. there were videos that seemed to be not deleted from there and they got downloaded a second time

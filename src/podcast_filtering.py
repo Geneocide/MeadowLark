@@ -8,8 +8,11 @@ from typing import Any
 import requests
 
 import utils
-
-HTTP_OK = 200
+from src.config import (
+    HTTP_OK,
+    HTTP_REQUEST_TIMEOUT_SECONDS,
+    PODCAST_MIN_DURATION_SECONDS,
+)
 
 
 def parse_video_timestamp(entry: dict[str, Any]) -> float | None:
@@ -100,12 +103,13 @@ def append_to_archive_and_mark_skipped(
     existing_ids: set[str],
     title: str,
     messages: list[str],
+    reason: str = "Update exception",
 ) -> None:
     """
-    Append update-marked video to archive and add skip message.
+    Append video to archive and add skip message with customizable reason.
 
-    When a video title contains "(Update)", it is skipped and marked as archived
-    to avoid re-processing it in future checks.
+    Skips videos to avoid re-processing them in future checks. Used for videos
+    with "(Update)" titles, short duration, or other skip conditions.
 
     Args:
         archive_path: Path to archive file, or None.
@@ -113,6 +117,7 @@ def append_to_archive_and_mark_skipped(
         existing_ids: Set of already-archived IDs (modified in place).
         title: Video title for logging.
         messages: List of messages to append to (modified in place).
+        reason: Reason for skipping (e.g., "Update exception", "Short duration").
     """
     if archive_path:
         try:
@@ -123,13 +128,12 @@ def append_to_archive_and_mark_skipped(
         except OSError as exc:
             utils.log_exception(
                 exc,
-                "Failed to write update marker to download archive",
+                "Failed to write skip marker to download archive",
             )
 
     timestamp_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     messages.append(
-        f"Video skipped because of Update exception: '{title}' "
-        f"(ID: {vid}) at {timestamp_str}",
+        f"Video skipped because of {reason}: '{title}' (ID: {vid}) at {timestamp_str}",
     )
 
 
@@ -204,10 +208,24 @@ def check_sponsorblock_for_video_id(video_id: str) -> bool:
     """
     try:
         url = f"https://sponsor.ajay.app/api/skipSegments?videoID={video_id}"
-        r = requests.get(url, timeout=5)
+        r = requests.get(url, timeout=HTTP_REQUEST_TIMEOUT_SECONDS)
         if r.status_code == HTTP_OK:
             data = r.json()
             return bool(data)
-    except (requests.exceptions.RequestException, ValueError) as exc:
+    except Exception as exc:  # noqa: BLE001
+        # Catch all exceptions to ensure API issues don't crash the download
         utils.log_exception(exc, "SponsorBlock API check failed")
     return False
+
+
+# Re-export configuration constants for backward compatibility
+__all__ = [
+    "HTTP_OK",
+    "PODCAST_MIN_DURATION_SECONDS",
+    "append_to_archive_and_mark_skipped",
+    "check_sponsorblock_for_video_id",
+    "format_timestamp_readable",
+    "load_downloaded_video_ids",
+    "parse_scheduled_time_from_error",
+    "parse_video_timestamp",
+]

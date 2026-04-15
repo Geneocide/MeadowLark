@@ -8,6 +8,9 @@ import types
 
 import pytest
 
+from src.exceptions import PodcastResolutionError
+from src.podcast_helpers import MAX_LOOKAHEAD
+
 
 def import_vid_module():
     # before loading the target module, provide a minimal fake yt_dlp so the
@@ -45,6 +48,9 @@ def import_vid_module():
     utils_mod.DownloadError = DownloadError
     utils_mod.ExtractorError = ExtractorError
     utils_mod.MaxDownloadsReached = MaxDownloadsReached
+
+    old_yt_dlp = sys.modules.get("yt_dlp")
+    old_yt_dlp_utils = sys.modules.get("yt_dlp.utils")
     sys.modules["yt_dlp"] = fake
     sys.modules["yt_dlp.utils"] = utils_mod
 
@@ -56,7 +62,17 @@ def import_vid_module():
     spec = importlib.util.spec_from_file_location("vd", path)
     vd = importlib.util.module_from_spec(spec)
     sys.modules["vd"] = vd
-    spec.loader.exec_module(vd)
+    try:
+        spec.loader.exec_module(vd)
+    finally:
+        if old_yt_dlp is not None:
+            sys.modules["yt_dlp"] = old_yt_dlp
+        else:
+            sys.modules.pop("yt_dlp", None)
+        if old_yt_dlp_utils is not None:
+            sys.modules["yt_dlp.utils"] = old_yt_dlp_utils
+        else:
+            sys.modules.pop("yt_dlp.utils", None)
     return vd
 
 
@@ -91,8 +107,8 @@ def test_fetch_latest_accessible_entry_skips_private(monkeypatch):
                 ],
             }
 
-    monkeypatch.setattr(vd.yt_dlp, "YoutubeDL", DummyYDL)
-    entries, skipped, info = vd._fetch_latest_accessible_entry("http://fake-playlist")
+    monkeypatch.setattr("src.podcast_helpers.yt_dlp.YoutubeDL", DummyYDL)
+    entries, skipped, info = vd.fetch_latest_accessible_entry("http://fake-playlist")
     assert skipped is True
     assert isinstance(entries, list) and len(entries) == 1
     assert entries[0]["webpage_url"] == "http://example.com/accessible"
@@ -131,8 +147,8 @@ def test_fetch_latest_accessible_entry_two_private_then_good(monkeypatch):
                 "title": "Playlist",
             }
 
-    monkeypatch.setattr(vd.yt_dlp, "YoutubeDL", DummyYDL2)
-    entries, skipped, info = vd._fetch_latest_accessible_entry("http://fake3")
+    monkeypatch.setattr("src.podcast_helpers.yt_dlp.YoutubeDL", DummyYDL2)
+    entries, skipped, info = vd.fetch_latest_accessible_entry("http://fake3")
     assert skipped is True
     assert entries[0]["webpage_url"] == "http://example.com/good3"
     assert info.get("title") == "Playlist"
@@ -165,8 +181,8 @@ def test_fetch_latest_accessible_entry_private_by_title(monkeypatch):
                 ],
             }
 
-    monkeypatch.setattr(vd.yt_dlp, "YoutubeDL", DummyYDL)
-    entries, skipped, info = vd._fetch_latest_accessible_entry("http://fake2")
+    monkeypatch.setattr("src.podcast_helpers.yt_dlp.YoutubeDL", DummyYDL)
+    entries, skipped, info = vd.fetch_latest_accessible_entry("http://fake2")
     assert skipped is True
     assert entries[0]["webpage_url"] == "http://example.com/other"
 
@@ -199,7 +215,7 @@ def test_filter_audio_playlist_urls_with_private(monkeypatch):
                 ],
             }
 
-    monkeypatch.setattr(vd.yt_dlp, "YoutubeDL", DummyYDL)
+    monkeypatch.setattr("src.podcast_helpers.yt_dlp.YoutubeDL", DummyYDL)
 
     # use dummy window-like object
     class DummyWin:
@@ -240,19 +256,18 @@ def test_fetch_latest_accessible_entry_no_accessible(monkeypatch):
 
         def extract_info(self, url, download=False):
             # always claim private
-            if self.opts.get("playlistend") == 1:
+            if self.opts.get("playlist_items") == "1":
                 raise Exception("Private video")
             return {
                 "entries": [{"title": "Private video 1"}, {"title": "Private video 2"}],
             }
 
-    monkeypatch.setattr(vd.yt_dlp, "YoutubeDL", DummyYDL2)
-    with pytest.raises(Exception) as excinfo:
-        vd._fetch_latest_accessible_entry("http://nothing")
-    assert "Private video" in str(excinfo.value)
+    monkeypatch.setattr("src.podcast_helpers.yt_dlp.YoutubeDL", DummyYDL2)
+    with pytest.raises(PodcastResolutionError):
+        vd.fetch_latest_accessible_entry("http://nothing")
     # should have retried up to the lookup limit
     # the dummy is called once per lookahead attempt
-    assert DummyYDL2.call_count == vd.MAX_LOOKAHEAD
+    assert DummyYDL2.call_count == MAX_LOOKAHEAD
 
 
 def test_filter_audio_playlist_urls_skips_update(monkeypatch, tmp_path):
@@ -283,7 +298,7 @@ def test_filter_audio_playlist_urls_skips_update(monkeypatch, tmp_path):
                 ],
             }
 
-    monkeypatch.setattr(vd.yt_dlp, "YoutubeDL", DummyYDL)
+    monkeypatch.setattr("src.podcast_helpers.yt_dlp.YoutubeDL", DummyYDL)
 
     class DummyWin:
         def _check_sponsorblock_for_video_id(self, vid):
@@ -312,6 +327,8 @@ def test_filter_audio_playlist_urls_skips_update(monkeypatch, tmp_path):
 def test_download_retries_without_sponsorblock(monkeypatch):
     """Download should retry once without SponsorBlock if SponsorBlock API is down."""
     vd = import_vid_module()
+    # Get DownloadError from the fake yt_dlp.utils that was set up by import_vid_module
+    from yt_dlp.utils import DownloadError
 
     class DummyYDL:
         inst_opts = []
@@ -328,15 +345,22 @@ def test_download_retries_without_sponsorblock(monkeypatch):
         def __exit__(self, exc_type, exc_val, exc_tb):
             return False
 
+        def extract_info(self, url, download=False):
+            return {"title": "Test Video"}
+
         def download(self, urls):
             # First call should raise a SponsorBlock API failure; second call should succeed
             if len(DummyYDL.inst_opts) == 1:
-                raise vd.QYT.DownloadError(
+                raise DownloadError(
                     "Postprocessing: Unable to communicate with SponsorBlock API: HTTP Error 503: Service Unavailable",
                 )
 
-    # QYT.py imports YoutubeDL directly, so patch the symbol used by QYT
-    monkeypatch.setattr(vd.QYT, "YoutubeDL", DummyYDL)
+    # Patch YoutubeDL in download_executor module (where it's actually used)
+    import src.download_executor
+
+    monkeypatch.setattr(src.download_executor, "YoutubeDL", DummyYDL)
+    # Also patch DownloadError so DummyYDL can raise it correctly
+    monkeypatch.setattr(src.download_executor, "DownloadError", DownloadError)
 
     download_queue = queue.Queue()
     q = vd.QYT.QYTQueue(download_queue)

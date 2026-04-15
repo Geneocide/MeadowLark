@@ -1,6 +1,7 @@
 """Unit tests for UIClasses module."""
 # ruff: noqa: S101
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from PyQt6.QtCore import Qt
@@ -88,7 +89,8 @@ class TestDropLabel:
         """Test dropEvent emits urls_dropped signal."""
         connection = MagicMock()
         label = DropLabel("Original", "#FFF", connection)
-        label.urls_dropped.emit = MagicMock()
+        captured = []
+        label.urls_dropped.connect(lambda urls, text: captured.append((urls, text)))
 
         # Create mock URL objects
         url_mock = MagicMock()
@@ -100,16 +102,14 @@ class TestDropLabel:
         label.dropEvent(event)
 
         # Verify signal was emitted with correct data
-        label.urls_dropped.emit.assert_called_once()
-        args = label.urls_dropped.emit.call_args[0]
-        assert args[0] == ["https://example.com/video"]
-        assert args[1] == "Original"
+        assert captured == [(["https://example.com/video"], "Original")]
 
     def test_drop_event_changes_text_temporarily(self) -> None:
         """Test dropEvent changes text to ADDED_TEXT then reverts."""
         connection = MagicMock()
         label = DropLabel("Original", "#FFF", connection)
-        label.urls_dropped.emit = MagicMock()
+        mock_signal = MagicMock()
+        label.urls_dropped.connect(mock_signal)
 
         url_mock = MagicMock()
         url_mock.toString.return_value = "https://example.com"
@@ -132,7 +132,7 @@ class TestPlaylistButton:
         """Test PlaylistButton initializes with text and path."""
         button = PlaylistButton("My Playlist", "/path/to/playlist.txt")
         assert button.text() == "My Playlist"
-        assert str(button.playlist_path) == "/path/to/playlist.txt"
+        assert button.playlist_path == Path("/path/to/playlist.txt")
 
     def test_playlist_button_mouse_press_non_right_click(self) -> None:
         """Test non-right-click mouse press uses default handling."""

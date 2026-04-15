@@ -26,37 +26,39 @@ class TestQLogger:
         queue = Queue()
         logger = QLogger(queue)
 
-        # Mock the signal emit
-        logger.message_changed.emit = MagicMock()
+        mock_signal = MagicMock()
+        logger.message_changed.connect(mock_signal)
 
         logger.debug("Normal message")
-        logger.message_changed.emit.assert_called_with("Normal message")
+        mock_signal.assert_called_with("Normal message")
 
-        logger.message_changed.emit.reset_mock()
+        mock_signal.reset_mock()
         logger.debug("Message with ETA time")
-        logger.message_changed.emit.assert_not_called()
+        mock_signal.assert_not_called()
 
-        logger.message_changed.emit.reset_mock()
+        mock_signal.reset_mock()
         logger.debug("Download speed: 100 iB/s")
-        logger.message_changed.emit.assert_not_called()
+        mock_signal.assert_not_called()
 
     def test_qlogger_warning(self) -> None:
         """Test warning messages are emitted."""
         queue = Queue()
         logger = QLogger(queue)
-        logger.message_changed.emit = MagicMock()
+        mock_signal = MagicMock()
+        logger.message_changed.connect(mock_signal)
 
         logger.warning("Warning message")
-        logger.message_changed.emit.assert_called_with("Warning message")
+        mock_signal.assert_called_with("Warning message")
 
     def test_qlogger_error(self) -> None:
         """Test error messages are emitted."""
         queue = Queue()
         logger = QLogger(queue)
-        logger.message_changed.emit = MagicMock()
+        mock_signal = MagicMock()
+        logger.message_changed.connect(mock_signal)
 
         logger.error("Error message")
-        logger.message_changed.emit.assert_called_with("Error message")
+        mock_signal.assert_called_with("Error message")
 
 
 class TestQHook:
@@ -71,14 +73,15 @@ class TestQHook:
     def test_qhook_call(self) -> None:
         """Test QHook emits info_changed signal with copied dict."""
         hook = QHook()
-        hook.info_changed.emit = MagicMock()
+        mock_signal = MagicMock()
+        hook.info_changed.connect(mock_signal)
 
         test_dict = {"id": "123", "title": "Test Video"}
         hook(test_dict)
 
         # Verify emit was called with a dict containing the same data
-        hook.info_changed.emit.assert_called_once()
-        emitted_dict = hook.info_changed.emit.call_args[0][0]
+        mock_signal.assert_called_once()
+        emitted_dict = mock_signal.call_args[0][0]
         assert emitted_dict == test_dict
         # Verify it's a copy, not the same object
         assert emitted_dict is not test_dict
@@ -118,7 +121,18 @@ class TestHistoryLogger:
         )
         assert "Result: FAIL" in result
 
-    @patch("HistoryLogger.HISTORY_PATH")
+    def test_format_entry_skipped(self) -> None:
+        """Test HistoryLogger._format_entry with skipped result."""
+        result = HistoryLogger._format_entry(
+            "2026-03-24 10:30:45",
+            "youtube",
+            "audio_playlists",
+            "Short Episode",
+            "SKIPPED (Short duration (<3 min))",
+        )
+        assert "Result: SKIPPED (Short duration (<3 min))" in result
+
+    @patch("QYT.HistoryLogger.HISTORY_PATH")
     def test_log_success(self, mock_path: MagicMock) -> None:
         """Test HistoryLogger.log writes success entry."""
         mock_file = MagicMock()
@@ -133,6 +147,27 @@ class TestHistoryLogger:
         mock_file.write.assert_called_once()
         written_content = mock_file.write.call_args[0][0]
         assert "SUCCESS" in written_content
+
+    @patch("QYT.HistoryLogger.HISTORY_PATH")
+    def test_log_skip(self, mock_path: MagicMock) -> None:
+        """Test HistoryLogger.log_skip writes skip entry."""
+        mock_file = MagicMock()
+        mock_path.parent.mkdir = MagicMock()
+        mock_path.open = MagicMock(return_value=mock_file.__enter__.return_value)
+        mock_path.open.return_value.__enter__ = MagicMock(return_value=mock_file)
+        mock_path.open.return_value.__exit__ = MagicMock(return_value=None)
+
+        HistoryLogger.log_skip(
+            "youtube",
+            "audio_playlists",
+            "Short Episode",
+            "Short duration (<3 min)",
+        )
+
+        # Verify write was called
+        mock_file.write.assert_called_once()
+        written_content = mock_file.write.call_args[0][0]
+        assert "SKIPPED (Short duration (<3 min))" in written_content
 
 
 class TestHistoryHook:
@@ -177,7 +212,7 @@ class TestHistoryHook:
         assert hook_unknown._infer_site({"extractor": "nebula"}) == "nebula"
         assert hook_unknown._infer_site({}) == "unknown"
 
-    @patch("HistoryLogger.log")
+    @patch("QYT.HistoryLogger.log")
     def test_history_hook_call_finished(self, mock_log: MagicMock) -> None:
         """Test HistoryHook.__call__ logs on 'finished' status."""
         meta = {"site": "youtube", "type": "1080"}
@@ -194,7 +229,7 @@ class TestHistoryHook:
         args = mock_log.call_args
         assert args[1]["success"] is True
 
-    @patch("HistoryLogger.log")
+    @patch("QYT.HistoryLogger.log")
     def test_history_hook_call_deduplication(
         self,
         mock_log: MagicMock,

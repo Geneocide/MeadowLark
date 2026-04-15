@@ -6,6 +6,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from src.podcast_filtering import (
+    PODCAST_MIN_DURATION_SECONDS,
+    append_to_archive_and_mark_skipped,
     check_sponsorblock_for_video_id,
     format_timestamp_readable,
     load_downloaded_video_ids,
@@ -97,3 +99,104 @@ def test_check_sponsorblock_for_video_id_no_segments(mock_get: Mock) -> None:
 def test_check_sponsorblock_for_video_id_api_error(mock_get: Mock) -> None:
     mock_get.side_effect = Exception("Network error")
     assert check_sponsorblock_for_video_id("abc123") is False
+
+
+def test_append_to_archive_and_mark_skipped_default_reason(tmp_path: Path) -> None:
+    """Test that default reason is 'Update exception'."""
+    archive_file = tmp_path / "archive.txt"
+    existing_ids: set[str] = set()
+    messages: list[str] = []
+
+    append_to_archive_and_mark_skipped(
+        str(archive_file),
+        "vid123",
+        existing_ids,
+        "Test Video (Update)",
+        messages,
+    )
+
+    # Check video was archived
+    assert "vid123" in existing_ids
+    content = archive_file.read_text()
+    assert "youtube vid123" in content
+
+    # Check message contains default reason
+    assert len(messages) == 1
+    assert "Update exception" in messages[0]
+    assert "Test Video (Update)" in messages[0]
+
+
+def test_append_to_archive_and_mark_skipped_custom_reason(tmp_path: Path) -> None:
+    """Test that custom reason is used in log message."""
+    archive_file = tmp_path / "archive.txt"
+    existing_ids: set[str] = set()
+    messages: list[str] = []
+
+    append_to_archive_and_mark_skipped(
+        str(archive_file),
+        "vid456",
+        existing_ids,
+        "Short Episode",
+        messages,
+        reason="Short duration (<3 min)",
+    )
+
+    # Check video was archived
+    assert "vid456" in existing_ids
+    content = archive_file.read_text()
+    assert "youtube vid456" in content
+
+    # Check message contains custom reason
+    assert len(messages) == 1
+    assert "Short duration (<3 min)" in messages[0]
+    assert "Short Episode" in messages[0]
+
+
+def test_append_to_archive_and_mark_skipped_none_archive() -> None:
+    """Test that it works without an archive path."""
+    existing_ids: set[str] = set()
+    messages: list[str] = []
+
+    append_to_archive_and_mark_skipped(
+        None,
+        "vid789",
+        existing_ids,
+        "Test Video",
+        messages,
+        reason="Test reason",
+    )
+
+    # Check video was NOT added to existing_ids (since no archive)
+    assert "vid789" not in existing_ids
+
+    # Check message was still logged
+    assert len(messages) == 1
+    assert "Test reason" in messages[0]
+
+
+def test_append_to_archive_and_mark_skipped_deduplication(tmp_path: Path) -> None:
+    """Test that duplicates are not re-archived."""
+    archive_file = tmp_path / "archive.txt"
+    existing_ids = {"vid999"}
+    messages: list[str] = []
+
+    append_to_archive_and_mark_skipped(
+        str(archive_file),
+        "vid999",
+        existing_ids,
+        "Duplicate Video",
+        messages,
+        reason="Test",
+    )
+
+    # Check message was logged
+    assert len(messages) == 1
+
+    # Check archive is empty (deduplication worked)
+    content = archive_file.read_text()
+    assert content == ""  # File should not be written to
+
+
+def test_podcast_min_duration_seconds_constant() -> None:
+    """Test that the duration threshold constant is set correctly."""
+    assert PODCAST_MIN_DURATION_SECONDS == 180

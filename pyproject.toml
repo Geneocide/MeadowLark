@@ -14,6 +14,10 @@ dependencies = [
     "yt-dlp>=2025.7.21",
 ]
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
