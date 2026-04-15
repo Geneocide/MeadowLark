@@ -101,9 +101,10 @@ class DownloadService:
             return ("update", [], {})
 
         # Load playlist URLs if applicable
-        playlist_urls = self._load_playlist_urls(source)
-        if playlist_urls is not None:
-            urls = playlist_urls
+        if not urls:  # Only load from file if no URLs provided
+            playlist_urls = self._load_playlist_urls(source)
+            if playlist_urls is not None:
+                urls = playlist_urls
 
         properties = self.get_options(urls, source)
         if properties is None:

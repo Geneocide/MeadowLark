@@ -44,6 +44,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from os import startfile
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 from hurry.filesize import size
@@ -80,6 +81,7 @@ from src.config import (
     PLAYLISTS_AUDIO_FILE,
     PLAYLISTS_FILE,
 )
+from src.path_utils import sanitize_for_path
 from src.podcast_filtering import (
     PODCAST_MIN_DURATION_SECONDS,
     append_to_archive_and_mark_skipped,
@@ -140,6 +142,8 @@ class MyWindow(QWidget):
         self._setup_queue_and_downloader()
         self._setup_timers()
         self._setup_podcast_state()
+
+        self.playlist_comments = {}
 
         update_available, _, _ = utils.is_yt_dlp_update_available()
         self.buttonUpdate.setVisible(update_available)
@@ -267,23 +271,28 @@ class MyWindow(QWidget):
         if app:
             app.aboutToQuit.connect(self._shutdown_podcast_thread)
 
-    def _load_playlist_urls(self, source: str) -> list[str] | None:
-        """Load URLs from playlist file for the given source, or return None."""
+    def _load_playlist_urls(self, source: str) -> list[dict[str, str]] | None:
+        """Load URLs and associated comments from playlist file for the given source, or return None."""
         playlists_path = utils.get_playlist_file_for_source(source)
         if playlists_path:
             try:
+                playlist_data = []
+                last_comment = None
                 with Path(playlists_path).open("r", encoding="utf-8") as file:
-                    # Skip blank lines and comments safely
-                    urls = [
-                        line.strip()
-                        for line in file
-                        if line.strip() and not line.strip().startswith("#")
-                    ]
+                    for line in file:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        if line.startswith("#"):
+                            last_comment = line[1:].strip()
+                        else:
+                            playlist_data.append({"url": line, "comment": last_comment})
+                            last_comment = None  # Reset for next URL
             except FileNotFoundError:
                 print("File not found.")
                 return None
             else:
-                return urls
+                return playlist_data
         return None
 
     def _setup_podcast_check(self, urls: list, ydl_opts: dict) -> None:
@@ -500,9 +509,18 @@ class MyWindow(QWidget):
             return
 
         # Load playlist URLs if applicable
-        playlist_urls = self._load_playlist_urls(source)
-        if playlist_urls is not None:
-            urls = playlist_urls
+        if not urls:  # Only load from file if no URLs provided (e.g., button press)
+            playlist_data = self._load_playlist_urls(source)
+            if playlist_data is not None:
+                urls = [item["url"] for item in playlist_data]
+                self.playlist_comments.clear()
+                for item in playlist_data:
+                    if item["comment"]:
+                        parsed = urlparse(item["url"])
+                        query = parse_qs(parsed.query)
+                        if "list" in query:
+                            pl_id = query["list"][0]
+                            self.playlist_comments[pl_id] = item["comment"]
 
         # options constant for all downloads
         ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
@@ -510,6 +528,15 @@ class MyWindow(QWidget):
         properties = self.get_options(urls, source)
         if properties:
             ydl_opts = self.append_properties(ydl_opts, properties)
+            if source in ["720playlists", "1080playlists"] and self.playlist_comments:
+
+                def outtmpl_func(d):
+                    pl = d.get("playlist", "NA")
+                    if pl == "NA" and d.get("playlist_id") in self.playlist_comments:
+                        pl = sanitize_for_path(self.playlist_comments[d["playlist_id"]])
+                    return f"E:/vid storage/{pl}/%(playlist_index)s - %(title)s.%(ext)s"
+
+                ydl_opts["outtmpl"] = outtmpl_func
             if ydl_opts:
                 # Provide metadata for history logging
                 ydl_opts["qmeta"] = {
@@ -1843,5 +1870,4 @@ if __name__ == "__main__":
 # TODO: look into Android Faithful showing up in the basic misc folder
 # TODO: size control for error logs
 # TODO: settings for making things more general, especially folder locations
-# TODO: figure out Taskmaster 21 720 playlist problem
 # TODO: look into live queue problem. there were videos that seemed to be not deleted from there and they got downloaded a second time
