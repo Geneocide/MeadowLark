@@ -1,8 +1,18 @@
 """Logging utilities for exception handling and diagnostics."""
 
 import logging
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
+
+
+def get_utc_timestamp() -> str:
+    """
+    Return current UTC timestamp as formatted string 'YYYY-MM-DD HH:MM:SS'.
+
+    Used for consistent timestamp formatting across logging and archive operations.
+    """
+    return datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def log_exception(exc: Exception, context: str | None = None) -> None:

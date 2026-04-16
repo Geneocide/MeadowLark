@@ -5,6 +5,23 @@ from pathlib import Path
 from typing import Final
 
 # ============================================================================
+# Exception Constants
+# ============================================================================
+# Import yt-dlp exceptions for consistent error handling
+from yt_dlp.utils import DownloadError, ExtractorError, MaxDownloadsReached
+
+# Exception tuples for consistent error handling across the application
+YDL_COMMON_ERRORS: Final = (DownloadError, ExtractorError, OSError)
+YDL_EXTRACTION_ERRORS: Final = (DownloadError, ExtractorError, OSError, ValueError)
+YDL_DOWNLOAD_ERRORS: Final = (
+    DownloadError,
+    ExtractorError,
+    MaxDownloadsReached,
+    OSError,
+    ValueError,
+)
+
+# ============================================================================
 # Path Configuration
 # ============================================================================
 

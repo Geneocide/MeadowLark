@@ -94,3 +94,62 @@ def resolve_playlist_label(info: dict, url: str) -> str:
             log_exception(exc, "Failed to resolve playlist label from URL")
             label = url
     return sanitize_for_path(label)
+
+
+def rename_playlist_folders_from_comments(
+    base_output_dir: str,
+    urls: list[str],
+    playlist_comments: dict[str, str] | None = None,
+) -> None:
+    """
+    Rename 'NA' playlist folders to use comment-based names if available.
+
+    After yt-dlp download, if %(playlist)s resolves to 'NA' (fallback when YouTube
+    doesn't provide a name), this function renames the folder to the corresponding
+    comment from the playlist text files (if available).
+
+    Args:
+        base_output_dir: Base directory where playlists are downloaded (e.g., "E:/vid storage").
+        urls: List of playlist URLs that were downloaded.
+        playlist_comments: Dict mapping playlist_id -> comment_text. If None or empty, no renaming.
+    """
+    if not playlist_comments:
+        return
+
+    try:
+        base_path = Path(base_output_dir)
+        if not base_path.exists():
+            return
+
+        # Build a mapping of playlist_ids we care about
+        playlist_ids = {}
+        for url in urls:
+            try:
+                parsed = urlparse(url)
+                qs = parse_qs(parsed.query or "")
+                if qs.get("list"):
+                    pl_id = qs["list"][0]
+                    playlist_ids[pl_id] = pl_id
+            except (ValueError, AttributeError, TypeError):
+                continue
+
+        # Check for 'NA' folder and rename it if we have a matching comment
+        na_folder = base_path / "NA"
+        if na_folder.exists() and na_folder.is_dir():
+            # Try to find which playlist_id this corresponds to
+            for pl_id in playlist_ids:
+                if pl_id in playlist_comments:
+                    new_name = sanitize_for_path(playlist_comments[pl_id])
+                    new_folder = base_path / new_name
+                    try:
+                        # Avoid collision if target already exists
+                        if not new_folder.exists():
+                            na_folder.rename(new_folder)
+                            return
+                    except (OSError, PermissionError) as exc:
+                        log_exception(
+                            exc,
+                            f"Failed to rename NA folder to {new_name}",
+                        )
+    except Exception as exc:  # noqa: BLE001
+        log_exception(exc, "Error during playlist folder renaming from comments")

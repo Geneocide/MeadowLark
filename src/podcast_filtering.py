@@ -13,6 +13,7 @@ from src.config import (
     HTTP_REQUEST_TIMEOUT_SECONDS,
     PODCAST_MIN_DURATION_SECONDS,
 )
+from src.logging_utils import get_utc_timestamp
 
 
 def parse_video_timestamp(entry: dict[str, Any]) -> float | None:
@@ -131,7 +132,7 @@ def append_to_archive_and_mark_skipped(
                 "Failed to write skip marker to download archive",
             )
 
-    timestamp_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    timestamp_str = get_utc_timestamp()
     messages.append(
         f"Video skipped because of {reason}: '{title}' (ID: {vid}) at {timestamp_str}",
     )

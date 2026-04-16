@@ -214,11 +214,12 @@ class PlaylistButton(QPushButton):
             else:
                 try:
                     raise FileNotFoundError(
-                        f"Playlist file not found: {self.playlist_path}"
+                        f"Playlist file not found: {self.playlist_path}",
                     )
                 except FileNotFoundError as e:
                     utils.log_exception(
-                        e, "Failed to open playlist file on right-click"
+                        e,
+                        "Failed to open playlist file on right-click",
                     )
         else:
             super().mousePressEvent(event)

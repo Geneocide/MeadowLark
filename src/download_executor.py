@@ -2,10 +2,16 @@
 
 from collections.abc import Callable
 
-from yt_dlp import YoutubeDL
+import yt_dlp
 from yt_dlp.utils import DownloadError, ExtractorError, MaxDownloadsReached
 
 import utils
+
+from .config import YDL_EXTRACTION_ERRORS
+from .path_utils import rename_playlist_folders_from_comments
+from .ydl_utils import extract_playlist_info
+
+YoutubeDL = yt_dlp.YoutubeDL
 
 
 class DownloadExecutor:
@@ -48,10 +54,9 @@ class DownloadExecutor:
 
         title = urls[0]
         try:
-            with YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
-                info = ydl.extract_info(urls[0], download=False)
-                title = info.get("title", title)
-        except (DownloadError, ExtractorError, OSError, ValueError) as exc:
+            info = extract_playlist_info(urls[0], ydl_class=YoutubeDL)
+            title = info.get("title", title)
+        except YDL_EXTRACTION_ERRORS as exc:
             utils.log_exception(exc, "Failed to extract title for error logging")
         return title
 
@@ -100,7 +105,7 @@ class DownloadExecutor:
                 ydl.cache.remove()
                 ydl.download(urls)
             return True, error_str  # noqa: TRY300
-        except (DownloadError, ExtractorError, OSError, ValueError) as e2:
+        except YDL_EXTRACTION_ERRORS as e2:
             utils.log_exception(e2, "720p fallback attempt failed")
             return False, str(e2)
 
@@ -143,7 +148,7 @@ class DownloadExecutor:
                 ydl.cache.remove()
                 ydl.download(urls)
             return True, error_str  # noqa: TRY300
-        except (DownloadError, ExtractorError, OSError, ValueError) as e2:
+        except YDL_EXTRACTION_ERRORS as e2:
             utils.log_exception(e2, "SponsorBlock removal retry failed")
             return False, str(e2)
 
@@ -167,6 +172,40 @@ class DownloadExecutor:
             with YoutubeDL(options) as ydl:
                 ydl.cache.remove()
                 ydl.download(urls)
+
+            # After successful download, try to rename 'NA' folders using comments
+            meta = options.get("qmeta") or {}
+            playlist_comments = meta.get("playlist_comments")
+            if playlist_comments:
+                # Extract base output directory from outtmpl
+                # outtmpl can be a string or dict (yt-dlp supports both)
+                outtmpl = options.get("outtmpl", "")
+                outtmpl_str = None
+
+                if isinstance(outtmpl, str):
+                    outtmpl_str = outtmpl
+                elif isinstance(outtmpl, dict):
+                    # Try to extract a string path from dict
+                    # Prefer 'default' key, then any string value
+                    outtmpl_str = outtmpl.get("default")
+                    if not isinstance(outtmpl_str, str):
+                        for key, value in outtmpl.items():
+                            if isinstance(value, str):
+                                outtmpl_str = value
+                                break
+
+                if outtmpl_str:
+                    # outtmpl is like "E:/vid storage/%(playlist)s/..."
+                    # Extract the base directory (first part before %(...)s)
+                    parts = outtmpl_str.split("/")
+                    if len(parts) >= 2:
+                        base_output_dir = "/".join(parts[:-1])
+                        rename_playlist_folders_from_comments(
+                            base_output_dir,
+                            urls,
+                            playlist_comments,
+                        )
+
             return True, ""
         except (
             DownloadError,

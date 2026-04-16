@@ -51,8 +51,12 @@ def import_vid_module():
 
     old_yt_dlp = sys.modules.get("yt_dlp")
     old_yt_dlp_utils = sys.modules.get("yt_dlp.utils")
+    old_src_download_executor = sys.modules.get("src.download_executor")
+    old_src_ydl_utils = sys.modules.get("src.ydl_utils")
     sys.modules["yt_dlp"] = fake
     sys.modules["yt_dlp.utils"] = utils_mod
+    sys.modules.pop("src.download_executor", None)
+    sys.modules.pop("src.ydl_utils", None)
 
     path = r"c:\Users\etreq\dev\vid downloader\vid downloader.pyw"
     # Ensure the repo root is on sys.path so imports like `import QYT` succeed
@@ -73,6 +77,10 @@ def import_vid_module():
             sys.modules["yt_dlp.utils"] = old_yt_dlp_utils
         else:
             sys.modules.pop("yt_dlp.utils", None)
+        if old_src_download_executor is not None:
+            sys.modules["src.download_executor"] = old_src_download_executor
+        if old_src_ydl_utils is not None:
+            sys.modules["src.ydl_utils"] = old_src_ydl_utils
     return vd
 
 

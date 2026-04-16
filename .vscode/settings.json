@@ -10,6 +10,7 @@
             "approve": true,
             "matchCommandLine": true
         },
-        "&": true
+        "&": true,
+        "pytest": true
     }
 }

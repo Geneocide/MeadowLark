@@ -67,7 +67,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from yt_dlp.utils import DownloadError, ExtractorError
 
 import QYT
 import utils
@@ -80,8 +79,9 @@ from src.config import (
     PLAYLISTS_720_FILE,
     PLAYLISTS_AUDIO_FILE,
     PLAYLISTS_FILE,
+    YDL_COMMON_ERRORS,
+    YDL_EXTRACTION_ERRORS,
 )
-from src.path_utils import sanitize_for_path
 from src.podcast_filtering import (
     PODCAST_MIN_DURATION_SECONDS,
     append_to_archive_and_mark_skipped,
@@ -528,21 +528,18 @@ class MyWindow(QWidget):
         properties = self.get_options(urls, source)
         if properties:
             ydl_opts = self.append_properties(ydl_opts, properties)
-            if source in ["720playlists", "1080playlists"] and self.playlist_comments:
-
-                def outtmpl_func(d):
-                    pl = d.get("playlist", "NA")
-                    if pl == "NA" and d.get("playlist_id") in self.playlist_comments:
-                        pl = sanitize_for_path(self.playlist_comments[d["playlist_id"]])
-                    return f"E:/vid storage/{pl}/%(playlist_index)s - %(title)s.%(ext)s"
-
-                ydl_opts["outtmpl"] = outtmpl_func
             if ydl_opts:
                 # Provide metadata for history logging
                 ydl_opts["qmeta"] = {
                     "site": utils.detect_site_from_urls(urls),
                     "type": source,
                 }
+                # Pass playlist comments for fallback folder naming
+                if (
+                    source in ["720playlists", "1080playlists"]
+                    and self.playlist_comments
+                ):
+                    ydl_opts["qmeta"]["playlist_comments"] = self.playlist_comments
 
                 # Special handling for YT Podcasts: filter new episodes <24h without SponsorBlock
                 if source == "audio_playlists":
@@ -560,14 +557,8 @@ class MyWindow(QWidget):
         qlogger = QYT.QLogger(self.downloadQueue)
         total_added = 0
         archive_path = Path("C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt")
-        # Read existing IDs into a set
-        if archive_path.exists():
-            with archive_path.open("r", encoding="utf-8") as archive:
-                existing_ids = {
-                    line.strip().split()[-1] for line in archive if line.strip()
-                }
-        else:
-            existing_ids = set()
+        # Read existing IDs using centralized function
+        existing_ids = load_downloaded_video_ids(str(archive_path))
         for url in urls:
             # Use extract_flat="in_playlist" for playlists, True for single videos
             ydl_opts = {
@@ -872,7 +863,7 @@ class MyWindow(QWidget):
                         self.downloadQueue.put(([url], ydl_opts))
                         qhook.info_changed.connect(self.handle_info_changed)
                         qlogger.message_changed.connect(self.handle_log_entry)
-            except (DownloadError, ExtractorError, OSError, ValueError) as e:
+            except YDL_EXTRACTION_ERRORS as e:
                 # If any error in checking, keep it for later
                 self.logEdit.appendPlainText(
                     f"Error checking live url {url}: {e}",
@@ -1051,7 +1042,7 @@ class MyWindow(QWidget):
                         status_entry.get("latest_ts"),
                     )
                 statuses.append(status_entry)
-            except (DownloadError, ExtractorError, OSError, ValueError) as e:
+            except YDL_EXTRACTION_ERRORS as e:
                 # Log unexpected extraction failures and then try to interpret common scheduled/upcoming patterns
                 utils.log_exception(e, f"Error expanding playlist/url {url}")
                 errstr = str(e)
@@ -1101,6 +1092,29 @@ class MyWindow(QWidget):
         self.podcastIndicator.setText(symbol)
         self.podcastIndicator.setToolTip(tip)
 
+    def _create_podcast_status_table(self, statuses: list[dict]) -> QTableWidget:
+        """Create and populate a podcast status table widget."""
+        table = QTableWidget()
+        table.setColumnCount(3)
+        table.setHorizontalHeaderLabels(["Podcast", "Latest Episode", "Status"])
+        table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch,
+        )
+        table.setRowCount(len(statuses))
+        for i, s in enumerate(statuses):
+            table.setItem(i, 0, QTableWidgetItem(s.get("podcast") or "(unknown)"))
+            table.setItem(
+                i,
+                1,
+                QTableWidgetItem(s.get("latest_date") or "(unknown)"),
+            )
+            table.setItem(i, 2, QTableWidgetItem(s.get("status") or "(unknown)"))
+        table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        table.customContextMenuRequested.connect(
+            self._on_podcast_status_context_menu,
+        )
+        return table
+
     def _show_podcast_status(self) -> None:
         """
         Open a non-blocking dialog showing the last known podcast statuses.
@@ -1132,29 +1146,9 @@ class MyWindow(QWidget):
             layout.addWidget(lbl)
             self._podcast_status_table = None
         else:
-            table = QTableWidget()
-            statuses = self._podcast_last_statuses
-            table.setColumnCount(3)
-            table.setHorizontalHeaderLabels(["Podcast", "Latest Episode", "Status"])
-            table.horizontalHeader().setSectionResizeMode(
-                QHeaderView.ResizeMode.Stretch,
-            )
-            table.setRowCount(len(statuses))
-            for i, s in enumerate(statuses):
-                table.setItem(i, 0, QTableWidgetItem(s.get("podcast") or "(unknown)"))
-                table.setItem(
-                    i,
-                    1,
-                    QTableWidgetItem(s.get("latest_date") or "(unknown)"),
-                )
-                table.setItem(i, 2, QTableWidgetItem(s.get("status") or "(unknown)"))
+            table = self._create_podcast_status_table(self._podcast_last_statuses)
             layout.addWidget(table)
             self._podcast_status_table = table
-            # Wire up context menu for right-click
-            table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            table.customContextMenuRequested.connect(
-                self._on_podcast_status_context_menu,
-            )
 
         dialog.setLayout(layout)
         dialog.setModal(False)  # non-blocking
@@ -1254,10 +1248,7 @@ class MyWindow(QWidget):
         Returns dict with {"url": webpage_url, "ts": timestamp} or None on error.
         """
         try:
-            with yt_dlp.YoutubeDL(
-                {"quiet": True, "no_warnings": True, "playlistend": 1},
-            ) as ydl:
-                info = ydl.extract_info(playlist_url, download=False)
+            info = utils.extract_playlist_info(playlist_url, playlistend=1)
             entries = info.get("entries", [info])
             if not entries:
                 return None
@@ -1267,7 +1258,7 @@ class MyWindow(QWidget):
             if webpage:
                 return {"url": webpage, "ts": ts}
             return None
-        except (DownloadError, ExtractorError, OSError) as exc:
+        except YDL_COMMON_ERRORS as exc:
             utils.log_exception(
                 exc,
                 f"Failed to resolve latest episode via yt-dlp for {playlist_url}",
@@ -1340,27 +1331,9 @@ class MyWindow(QWidget):
             )
             self._podcast_status_table = None
             return
-        statuses = self._podcast_last_statuses
-        table = QTableWidget()
-        table.setColumnCount(3)
-        table.setHorizontalHeaderLabels(["Podcast", "Latest Episode", "Status"])
-        table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch,
-        )
-        table.setRowCount(len(statuses))
-        for i, s in enumerate(statuses):
-            table.setItem(i, 0, QTableWidgetItem(s.get("podcast") or "(unknown)"))
-            table.setItem(
-                i,
-                1,
-                QTableWidgetItem(s.get("latest_date") or "(unknown)"),
-            )
-            table.setItem(i, 2, QTableWidgetItem(s.get("status") or "(unknown)"))
+        table = self._create_podcast_status_table(self._podcast_last_statuses)
         layout.addWidget(table)
         self._podcast_status_table = table
-        # Wire up context menu for right-click
-        table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        table.customContextMenuRequested.connect(self._on_podcast_status_context_menu)
 
     def _download_podcast_now_action(self, row: int) -> None:
         """
@@ -1680,10 +1653,7 @@ class MyWindow(QWidget):
         for url in lines:
             try:
                 # Limit to the latest episode to avoid long blocking operations
-                with yt_dlp.YoutubeDL(
-                    {"quiet": True, "no_warnings": True, "playlistend": 1},
-                ) as ydl:
-                    info = ydl.extract_info(url, download=False)
+                info = utils.extract_playlist_info(url, playlistend=1)
                 title = info.get("title") or info.get("uploader") or url
                 entries = info.get("entries", [info])
                 if not entries:
@@ -1756,7 +1726,7 @@ class MyWindow(QWidget):
                 if webpage:
                     self._cache_put(url, webpage, ts)
                 statuses.append(entry)
-            except (DownloadError, ExtractorError, OSError, ValueError) as e:
+            except YDL_EXTRACTION_ERRORS as e:
                 utils.log_exception(e, f"Error fetching podcast status for {url}")
                 statuses.append(
                     {
@@ -1869,5 +1839,5 @@ if __name__ == "__main__":
 # TODO: add way of seeing history info in app?
 # TODO: look into Android Faithful showing up in the basic misc folder
 # TODO: size control for error logs
-# TODO: settings for making things more general, especially folder locations
+# TODO: settings for making things more general, especially folder locations. Also, make sure no paths are hardcoded that should be config
 # TODO: look into live queue problem. there were videos that seemed to be not deleted from there and they got downloaded a second time

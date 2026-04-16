@@ -12,7 +12,6 @@ from queue import Queue
 from typing import Any
 
 import yt_dlp
-from yt_dlp.utils import DownloadError, ExtractorError
 
 import QYT
 import utils
@@ -21,6 +20,7 @@ from src.config import (
     PLAYLISTS_720_FILE,
     PLAYLISTS_AUDIO_FILE,
     PLAYLISTS_FILE,
+    YDL_EXTRACTION_ERRORS,
 )
 
 
@@ -343,7 +343,7 @@ class DownloadService:
                         qhook.info_changed.connect(self.handle_info_changed_callback)
                         qlogger.message_changed.connect(self.handle_log_entry_callback)
                         self.bar_progress_set_range_callback(0, 1)
-            except (DownloadError, ExtractorError, OSError, ValueError) as e:
+            except YDL_EXTRACTION_ERRORS as e:
                 # If any error in checking, keep it for later
                 remaining[url] = source
                 self.log_edit_append_callback(

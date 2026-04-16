@@ -32,35 +32,33 @@ class TestExtractTitle:
         title = executor._extract_title([])
         assert title == "(unknown)"
 
-    @patch("src.download_executor.YoutubeDL")
-    def test_extract_title_success(self, mock_ydl_class: Mock) -> None:
+    @patch("src.download_executor.extract_playlist_info")
+    def test_extract_title_success(self, mock_extract_func: Mock) -> None:
         """Test successful title extraction from first URL."""
-        mock_ydl_instance = MagicMock()
-        mock_ydl_instance.extract_info.return_value = {
+        mock_extract_func.return_value = {
             "title": "Test Video Title",
         }
-        mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
 
         executor = DownloadExecutor()
         title = executor._extract_title(["https://example.com/video"])
         assert title == "Test Video Title"
 
-    @patch("src.download_executor.YoutubeDL")
-    def test_extract_title_fallback_to_url(self, mock_ydl_class: Mock) -> None:
+    @patch("src.download_executor.extract_playlist_info")
+    def test_extract_title_fallback_to_url(self, mock_extract_func: Mock) -> None:
         """Test title extraction falls back to URL if title not found."""
-        mock_ydl_instance = MagicMock()
-        mock_ydl_instance.extract_info.return_value = {}
-        mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+        mock_extract_func.return_value = {}
 
         executor = DownloadExecutor()
         url = "https://example.com/video"
         title = executor._extract_title([url])
         assert title == url
 
-    @patch("src.download_executor.YoutubeDL")
-    def test_extract_title_handles_download_error(self, mock_ydl_class: Mock) -> None:
+    @patch("src.download_executor.extract_playlist_info")
+    def test_extract_title_handles_download_error(
+        self, mock_extract_func: Mock
+    ) -> None:
         """Test title extraction handles DownloadError gracefully."""
-        mock_ydl_class.return_value.__enter__.side_effect = DownloadError(
+        mock_extract_func.side_effect = DownloadError(
             "Invalid URL",
         )
 

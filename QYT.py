@@ -1,7 +1,6 @@
 """Provides PyQt-based classes for logging, progress signaling, and threaded download queue management using yt-dlp. Includes QLogger for emitting log messages, QHook for progress updates, and QYTQueue for managing and executing download tasks in a background thread with wake lock support."""
 
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from queue import Queue
 
@@ -11,6 +10,7 @@ from wakepy import keep
 import utils
 from src.config import ERROR_LOG_PATH, HISTORY_LOG_PATH, LOGFILE_MIGRATION_ENABLED
 from src.download_executor import DownloadExecutor
+from src.logging_utils import get_utc_timestamp
 
 logging.basicConfig(
     filename=str(ERROR_LOG_PATH),
@@ -142,22 +142,23 @@ class HistoryLogger:
         )
 
     @staticmethod
-    def log(site: str, dtype: str, title: str, *, success: bool) -> None:
+    def _write_history_entry(
+        dt: str,
+        site: str,
+        dtype: str,
+        title: str,
+        result: str,
+    ) -> None:
         """
-        .
-
-        Log a download result to history_log.txt with timestamp.
+        Write a formatted entry to history_log.txt.
 
         Args:
+            dt: Formatted datetime string.
             site: The source site (e.g., 'youtube', 'nebula').
             dtype: The download type (e.g., '1080', '720', 'podcast').
             title: The video/content title.
-            success: Whether the download succeeded.
+            result: The result string (e.g., 'SUCCESS', 'FAIL', 'SKIPPED (reason)').
         """
-        dt = datetime.now(tz=timezone.utc).strftime(
-            "%Y-%m-%d %H:%M:%S",
-        )
-        result = "SUCCESS" if success else "FAIL"
         try:
             history_path = HistoryLogger.HISTORY_PATH
             history_path.parent.mkdir(parents=True, exist_ok=True)
@@ -166,6 +167,21 @@ class HistoryLogger:
         except OSError as exc:
             # Never allow history logging to crash downloading, but record it
             utils.log_exception(exc, "HistoryLogger failed to write to history_log.txt")
+
+    @staticmethod
+    def log(site: str, dtype: str, title: str, *, success: bool) -> None:
+        """
+        Log a download result to history_log.txt with timestamp.
+
+        Args:
+            site: The source site (e.g., 'youtube', 'nebula').
+            dtype: The download type (e.g., '1080', '720', 'podcast').
+            title: The video/content title.
+            success: Whether the download succeeded.
+        """
+        dt = get_utc_timestamp()
+        result = "SUCCESS" if success else "FAIL"
+        HistoryLogger._write_history_entry(dt, site, dtype, title, result)
 
     @staticmethod
     def log_skip(site: str, dtype: str, title: str, reason: str) -> None:
@@ -178,18 +194,9 @@ class HistoryLogger:
             title: The video/content title.
             reason: The reason for skipping (e.g., 'Short duration (<3 min)').
         """
-        dt = datetime.now(tz=timezone.utc).strftime(
-            "%Y-%m-%d %H:%M:%S",
-        )
+        dt = get_utc_timestamp()
         result = f"SKIPPED ({reason})"
-        try:
-            history_path = HistoryLogger.HISTORY_PATH
-            history_path.parent.mkdir(parents=True, exist_ok=True)
-            with history_path.open("a", encoding="utf-8") as f:
-                f.write(HistoryLogger._format_entry(dt, site, dtype, title, result))
-        except OSError as exc:
-            # Never allow history logging to crash downloading, but record it
-            utils.log_exception(exc, "HistoryLogger failed to write to history_log.txt")
+        HistoryLogger._write_history_entry(dt, site, dtype, title, result)
 
 
 class HistoryHook:
