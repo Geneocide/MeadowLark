@@ -100,18 +100,15 @@ def rename_playlist_folders_from_comments(
     base_output_dir: str,
     urls: list[str],
     playlist_comments: dict[str, str] | None = None,
+    direct_playlist_id: str | None = None,
 ) -> None:
-    """
-    Rename 'NA' playlist folders to use comment-based names if available.
-
-    After yt-dlp download, if %(playlist)s resolves to 'NA' (fallback when YouTube
-    doesn't provide a name), this function renames the folder to the corresponding
-    comment from the playlist text files (if available).
+    """Rename 'NA' playlist folders using comment-based names when available.
 
     Args:
         base_output_dir: Base directory where playlists are downloaded (e.g., "E:/vid storage").
         urls: List of playlist URLs that were downloaded.
         playlist_comments: Dict mapping playlist_id -> comment_text. If None or empty, no renaming.
+        direct_playlist_id: Fallback playlist ID to use when urls contain no list= param.
     """
     if not playlist_comments:
         return
@@ -121,8 +118,8 @@ def rename_playlist_folders_from_comments(
         if not base_path.exists():
             return
 
-        # Build a mapping of playlist_ids we care about
-        playlist_ids = {}
+        # Build a mapping of playlist_ids from URLs
+        playlist_ids: dict[str, str] = {}
         for url in urls:
             try:
                 parsed = urlparse(url)
@@ -133,16 +130,18 @@ def rename_playlist_folders_from_comments(
             except (ValueError, AttributeError, TypeError):
                 continue
 
+        # Fall back to direct_playlist_id when no list= param found in URLs
+        if not playlist_ids and direct_playlist_id:
+            playlist_ids[direct_playlist_id] = direct_playlist_id
+
         # Check for 'NA' folder and rename it if we have a matching comment
         na_folder = base_path / "NA"
         if na_folder.exists() and na_folder.is_dir():
-            # Try to find which playlist_id this corresponds to
             for pl_id in playlist_ids:
                 if pl_id in playlist_comments:
                     new_name = sanitize_for_path(playlist_comments[pl_id])
                     new_folder = base_path / new_name
                     try:
-                        # Avoid collision if target already exists
                         if not new_folder.exists():
                             na_folder.rename(new_folder)
                             return

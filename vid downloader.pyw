@@ -781,7 +781,8 @@ class MyWindow(QWidget):
                         or info.get("url")
                     )
                     if url:
-                        self.add_to_live_queue(url, source)
+                        playlist_id = info.get("playlist_id")
+                        self.add_to_live_queue(url, source, playlist_id)
                         self.logEdit.appendPlainText(
                             f"Queued live for later: {url} [{source}]",
                         )
@@ -794,40 +795,47 @@ class MyWindow(QWidget):
 
         return _mf
 
-    def load_live_queue(self) -> dict[str, str]:
-        """Load the live queue entries from file."""
-        entries: dict[str, str] = {}
+    def load_live_queue(self) -> dict[str, tuple[str, str | None]]:
+        """Load live queue entries; returns {url: (source, playlist_id)}."""
+        entries: dict[str, tuple[str, str | None]] = {}
         if self.live_queue_path.exists():
             with self.live_queue_path.open("r", encoding="utf-8") as f:
                 for raw_line in f:
                     line = raw_line.strip()
                     if not line:
                         continue
-                    # stored as: source|url
-                    parts = line.split("|", 1)
-                    if len(parts) == 2 and parts[1]:  # noqa: PLR2004
-                        entries[parts[1]] = parts[0]
+                    # stored as: source|url  or  source|url|playlist_id
+                    parts = line.split("|", 2)
+                    if len(parts) >= 2 and parts[1]:  # noqa: PLR2004
+                        playlist_id = parts[2] if len(parts) == 3 and parts[2] else None  # noqa: PLR2004
+                        entries[parts[1]] = (parts[0], playlist_id)
         return entries
 
-    def save_live_queue(self, entries: dict[str, str]) -> None:
+    def save_live_queue(self, entries: dict[str, tuple[str, str | None]]) -> None:
         """Save the live queue entries to file."""
         with self.live_queue_path.open("w", encoding="utf-8") as f:
-            for url, source in entries.items():
-                f.write(f"{source}|{url}\n")
+            for url, (source, playlist_id) in entries.items():
+                if playlist_id:
+                    f.write(f"{source}|{url}|{playlist_id}\n")
+                else:
+                    f.write(f"{source}|{url}\n")
 
-    def add_to_live_queue(self, url: str, source: str) -> None:
+    def add_to_live_queue(
+        self, url: str, source: str, playlist_id: str | None = None
+    ) -> None:
         """Add a URL to the live queue."""
         entries = self.load_live_queue()
         # Avoid duplicates
-        entries[url] = source
+        entries[url] = (source, playlist_id)
         self.save_live_queue(entries)
 
     def check_live_queue(self) -> None:
+        """Check the live queue for ended streams and queue them for download."""
         entries = self.load_live_queue()
         if not entries:
             return
-        remaining: dict[str, str] = {}
-        for url, source in entries.items():
+        remaining: dict[str, tuple[str, str | None]] = {}
+        for url, (source, playlist_id) in entries.items():
             try:
                 with yt_dlp.YoutubeDL(
                     {
@@ -842,7 +850,7 @@ class MyWindow(QWidget):
                 live_status = info.get("live_status")
                 if is_live or live_status in ("is_live", "is_upcoming"):
                     # Still live; keep it in the queue
-                    remaining[url] = source
+                    remaining[url] = (source, playlist_id)
                 else:
                     self.logEdit.appendPlainText(
                         f"Live ended, queued: {url} [{source}]",
@@ -852,13 +860,21 @@ class MyWindow(QWidget):
                     ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
                     properties = self.get_options([url], source)
                     if properties:
-                        properties["match_filter"] = self.make_match_filter(source)
+                        # Don't re-apply match_filter: stream already confirmed ended
+                        properties.pop("match_filter", None)
                         ydl_opts = self.append_properties(ydl_opts, properties)
-                        # Provide metadata for history logging on requeued lives
-                        ydl_opts["qmeta"] = {
+                        qmeta: dict = {
                             "site": utils.detect_site_from_urls([url]),
                             "type": source,
                         }
+                        if playlist_id:
+                            playlist_comments = utils.load_playlist_comments_for_source(
+                                source
+                            )
+                            if playlist_comments:
+                                qmeta["playlist_comments"] = playlist_comments
+                                qmeta["playlist_id"] = playlist_id
+                        ydl_opts["qmeta"] = qmeta
 
                         self.downloadQueue.put(([url], ydl_opts))
                         qhook.info_changed.connect(self.handle_info_changed)
@@ -869,7 +885,8 @@ class MyWindow(QWidget):
                     f"Error checking live url {url}: {e}",
                 )
                 utils.log_exception(e, f"Error checking live url {url}")
-                remaining[url] = source
+                remaining[url] = (source, playlist_id)
+        self.save_live_queue(remaining)
 
     def _filter_audio_playlist_urls(  # noqa: C901,PLR0912,PLR0915
         self,
@@ -1840,4 +1857,3 @@ if __name__ == "__main__":
 # TODO: look into Android Faithful showing up in the basic misc folder
 # TODO: size control for error logs
 # TODO: settings for making things more general, especially folder locations. Also, make sure no paths are hardcoded that should be config
-# TODO: look into live queue problem. there were videos that seemed to be not deleted from there and they got downloaded a second time

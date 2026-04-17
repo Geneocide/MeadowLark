@@ -189,7 +189,7 @@ class DownloadExecutor:
                     # Prefer 'default' key, then any string value
                     outtmpl_str = outtmpl.get("default")
                     if not isinstance(outtmpl_str, str):
-                        for key, value in outtmpl.items():
+                        for value in outtmpl.values():
                             if isinstance(value, str):
                                 outtmpl_str = value
                                 break
@@ -204,6 +204,7 @@ class DownloadExecutor:
                             base_output_dir,
                             urls,
                             playlist_comments,
+                            direct_playlist_id=meta.get("playlist_id"),
                         )
 
             return True, ""

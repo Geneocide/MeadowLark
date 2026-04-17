@@ -45,7 +45,7 @@ class DownloadService:
         handle_log_entry_callback: Callable[[str], None],
         handle_queue_empty_callback: Callable[[], None],
         do_updates_callback: Callable[[], None],
-        add_to_live_queue_callback: Callable[[str, str], None],
+        add_to_live_queue_callback: Callable[[str, str, str | None], None],
         qhook_factory: Callable[[], QYT.QHook],
         qlogger_factory: Callable[[], QYT.QLogger],
     ) -> None:
@@ -64,7 +64,7 @@ class DownloadService:
             handle_log_entry_callback: Callback to handle log entry.
             handle_queue_empty_callback: Callback to handle queue empty.
             do_updates_callback: Callback to perform updates.
-            add_to_live_queue_callback: Callback to add to live queue.
+            add_to_live_queue_callback: Callback to add to live queue (url, source, playlist_id).
             qhook_factory: Factory for QHook.
             qlogger_factory: Factory for QLogger.
         """
@@ -140,7 +140,7 @@ class DownloadService:
             playlist_file = Path(playlist_files[source])
             if playlist_file.exists():
                 with playlist_file.open("r", encoding="utf-8") as f:
-                    urls = [line.strip() for line in f if line.strip()]
+                    urls = [line.strip() for line in f if line.strip() and not line.startswith("#")]
                 return urls
         return None
 
@@ -259,7 +259,8 @@ class DownloadService:
                         or info.get("url")
                     )
                     if url:
-                        self.add_to_live_queue_callback(url, source)
+                        playlist_id = info.get("playlist_id")
+                        self.add_to_live_queue_callback(url, source, playlist_id)
                         self.log_edit_append_callback(
                             f"Queued live for later: {url} [{source}]",
                         )
@@ -272,32 +273,36 @@ class DownloadService:
 
         return _mf
 
-    def load_live_queue(self) -> dict[str, str]:
-        """Load the live queue entries from file."""
-        entries: dict[str, str] = {}
+    def load_live_queue(self) -> dict[str, tuple[str, str | None]]:
+        """Load live queue entries; returns {url: (source, playlist_id)}."""
+        entries: dict[str, tuple[str, str | None]] = {}
         if self.live_queue_path.exists():
             with self.live_queue_path.open("r", encoding="utf-8") as f:
                 for raw_line in f:
                     line = raw_line.strip()
                     if not line:
                         continue
-                    # stored as: source|url
-                    parts = line.split("|", 1)
-                    if len(parts) == 2 and parts[1]:  # noqa: PLR2004
-                        entries[parts[1]] = parts[0]
+                    # stored as: source|url  or  source|url|playlist_id
+                    parts = line.split("|", 2)
+                    if len(parts) >= 2 and parts[1]:  # noqa: PLR2004
+                        playlist_id = parts[2] if len(parts) == 3 and parts[2] else None  # noqa: PLR2004
+                        entries[parts[1]] = (parts[0], playlist_id)
         return entries
 
-    def save_live_queue(self, entries: dict[str, str]) -> None:
+    def save_live_queue(self, entries: dict[str, tuple[str, str | None]]) -> None:
         """Save the live queue entries to file."""
         with self.live_queue_path.open("w", encoding="utf-8") as f:
-            for url, source in entries.items():
-                f.write(f"{source}|{url}\n")
+            for url, (source, playlist_id) in entries.items():
+                if playlist_id:
+                    f.write(f"{source}|{url}|{playlist_id}\n")
+                else:
+                    f.write(f"{source}|{url}\n")
 
-    def add_to_live_queue(self, url: str, source: str) -> None:
+    def add_to_live_queue(self, url: str, source: str, playlist_id: str | None = None) -> None:
         """Add a URL to the live queue."""
         entries = self.load_live_queue()
         # Avoid duplicates
-        entries[url] = source
+        entries[url] = (source, playlist_id)
         self.save_live_queue(entries)
 
     def check_live_queue(self) -> None:
@@ -305,8 +310,8 @@ class DownloadService:
         entries = self.load_live_queue()
         if not entries:
             return
-        remaining: dict[str, str] = {}
-        for url, source in entries.items():
+        remaining: dict[str, tuple[str, str | None]] = {}
+        for url, (source, playlist_id) in entries.items():
             try:
                 with yt_dlp.YoutubeDL(
                     {
@@ -321,7 +326,7 @@ class DownloadService:
                 live_status = info.get("live_status")
                 if is_live or live_status in ("is_live", "is_upcoming"):
                     # Still live; keep it in the queue
-                    remaining[url] = source
+                    remaining[url] = (source, playlist_id)
                 else:
                     self.log_edit_append_callback(
                         f"Live ended, queued: {url} [{source}]",
@@ -331,13 +336,19 @@ class DownloadService:
                     ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
                     properties = self.get_options([url], source)
                     if properties:
-                        properties["match_filter"] = self.make_match_filter(source)
+                        # Don't re-apply match_filter: stream already confirmed ended
+                        properties.pop("match_filter", None)
                         ydl_opts = self.append_properties(ydl_opts, properties)
-                        # Provide metadata for history logging on requeued lives
-                        ydl_opts["qmeta"] = {
+                        qmeta: dict = {
                             "site": utils.detect_site_from_urls([url]),
                             "type": source,
                         }
+                        if playlist_id:
+                            playlist_comments = utils.load_playlist_comments_for_source(source)
+                            if playlist_comments:
+                                qmeta["playlist_comments"] = playlist_comments
+                                qmeta["playlist_id"] = playlist_id
+                        ydl_opts["qmeta"] = qmeta
 
                         self.download_queue.put(([url], ydl_opts))
                         qhook.info_changed.connect(self.handle_info_changed_callback)
@@ -345,7 +356,7 @@ class DownloadService:
                         self.bar_progress_set_range_callback(0, 1)
             except YDL_EXTRACTION_ERRORS as e:
                 # If any error in checking, keep it for later
-                remaining[url] = source
+                remaining[url] = (source, playlist_id)
                 self.log_edit_append_callback(
                     f"Error checking live queue: {e}",
                 )

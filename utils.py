@@ -27,6 +27,7 @@ from src.playlist_utils import (
     detect_site_from_urls,
     get_playlist_file_for_source,
     is_primitive_technology,
+    load_playlist_comments_for_source,
 )
 
 # Re-export version utilities
@@ -54,6 +55,7 @@ __all__ = [
     "get_output_template",
     "get_playlist_file_for_source",
     "get_postprocessors",
+    "load_playlist_comments_for_source",
     "get_source_options",
     "is_primitive_technology",
     "is_yt_dlp_update_available",

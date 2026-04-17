@@ -1,5 +1,8 @@
 """Playlist and URL detection utilities."""
 
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
 from .config import PLAYLISTS_720_FILE, PLAYLISTS_AUDIO_FILE, PLAYLISTS_FILE
 from .logging_utils import log_exception
 
@@ -67,3 +70,50 @@ def get_playlist_file_for_source(source: str) -> str | None:
         "audio_playlists": str(PLAYLISTS_AUDIO_FILE),
     }
     return mapping.get(source)
+
+
+def load_playlist_comments_for_source(source: str) -> dict[str, str]:
+    """Return {playlist_id: comment} for all commented entries in the source playlist file.
+
+    Parses lines of the form:
+        #Some Comment
+        https://www.youtube.com/playlist?list=PLxxx
+    and maps each playlist ID to its preceding comment.
+
+    Args:
+        source: Source identifier ('1080playlists', '720playlists', 'audio_playlists').
+
+    Returns:
+        Dict mapping playlist_id -> comment text. Empty if file missing or no comments.
+    """
+    playlist_file = get_playlist_file_for_source(source)
+    if not playlist_file:
+        return {}
+    path = Path(playlist_file)
+    if not path.exists():
+        return {}
+
+    comments: dict[str, str] = {}
+    last_comment: str | None = None
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                if line.startswith("#"):
+                    last_comment = line[1:].strip()
+                else:
+                    if last_comment:
+                        try:
+                            parsed = urlparse(line)
+                            qs = parse_qs(parsed.query or "")
+                            if qs.get("list"):
+                                pl_id = qs["list"][0]
+                                comments[pl_id] = last_comment
+                        except (ValueError, AttributeError, TypeError) as exc:
+                            log_exception(exc, f"Failed to parse playlist URL: {line}")
+                    last_comment = None
+    except OSError as exc:
+        log_exception(exc, f"Failed to read playlist file: {playlist_file}")
+    return comments
