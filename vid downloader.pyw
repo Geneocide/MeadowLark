@@ -861,7 +861,103 @@ class MyWindow(QWidget):
                 remaining[url] = (source, playlist_id)
         self.save_live_queue(remaining)
 
-    def _filter_audio_playlist_urls(  # noqa: C901,PLR0912,PLR0915
+    def _episode_already_archived(
+        self,
+        vid: str,
+        existing_ids: set[str],
+        status_entry: dict,
+    ) -> bool:
+        if vid in existing_ids:
+            status_entry["status"] = "Downloaded"
+            return True
+        return False
+
+    def _skip_if_update_episode(  # noqa: PLR0913
+        self,
+        entry: dict,
+        vid: str,
+        webpage: str,
+        archive_path: str | None,
+        existing_ids: set[str],
+        messages: list[str],
+        status_entry: dict,
+    ) -> bool:
+        title = entry.get("title", "") or ""
+        if "(Update)" not in title:
+            return False
+        append_to_archive_and_mark_skipped(archive_path, vid, existing_ids, title, messages)
+        status_entry["status"] = "Skipped (Update)"
+        QYT.HistoryLogger.log_skip(
+            site=utils.detect_site_from_urls([webpage]),
+            dtype="audio_playlists",
+            title=title,
+            reason="Update exception",
+        )
+        return True
+
+    def _skip_if_short_duration(  # noqa: PLR0913
+        self,
+        entry: dict,
+        vid: str,
+        webpage: str,
+        archive_path: str | None,
+        existing_ids: set[str],
+        messages: list[str],
+        status_entry: dict,
+    ) -> bool:
+        duration = entry.get("duration")
+        title = entry.get("title", "") or ""
+        if duration is None or duration >= PODCAST_MIN_DURATION_SECONDS:
+            return False
+        append_to_archive_and_mark_skipped(
+            archive_path, vid, existing_ids, title, messages, reason="Short duration (<3 min)",
+        )
+        status_entry["status"] = "Skipped Short"
+        QYT.HistoryLogger.log_skip(
+            site=utils.detect_site_from_urls([webpage]),
+            dtype="audio_playlists",
+            title=title,
+            reason="Short duration (<3 min)",
+        )
+        return True
+
+    def _classify_episode_by_age(  # noqa: PLR0913
+        self,
+        vid: str,
+        webpage: str,
+        ts: float | None,
+        now_ts: float,
+        playlist_label: str,
+        to_download: list,
+        pending: list,
+        status_entry: dict,
+        *,
+        bypass_sponsorblock_wait: bool = False,
+    ) -> None:
+        obj = {"url": webpage, "playlist": playlist_label}
+        if ts is None:
+            to_download.append(obj)
+            status_entry["status"] = "Ready"
+            return
+        status_entry["latest_date"] = format_timestamp_readable(ts)
+        if ts > now_ts:
+            status_entry["status"] = "Upcoming"
+            status_entry["recheck_ts"] = ts
+            return
+        age_seconds = now_ts - ts
+        if bypass_sponsorblock_wait or age_seconds >= 24 * 60 * 60:
+            to_download.append(obj)
+            status_entry["status"] = "Ready"
+            return
+        site = utils.detect_site_from_urls([webpage])
+        if site != "youtube" or check_sponsorblock_for_video_id(vid):
+            to_download.append(obj)
+            status_entry["status"] = "Ready"
+        else:
+            pending.append(obj)
+            status_entry["status"] = "Pending SponsorBlock"
+
+    def _filter_audio_playlist_urls(
         self,
         urls: list,
         ydl_opts: dict,
@@ -886,27 +982,22 @@ class MyWindow(QWidget):
         if any errors occurred during expansion. messages is a list of human-readable strings to
         be logged from the main thread. statuses is a list of dicts with {podcast, latest_date, status, url}.
         """
-        to_download: list[str] = []
-        pending: list[str] = []
+        to_download: list[dict] = []
+        pending: list[dict] = []
         had_error = False
         messages: list[str] = []
         statuses: list[dict] = []
         archive_path = ydl_opts.get("download_archive")
         existing_ids: set[str] = load_downloaded_video_ids(archive_path)
-
         now_ts = datetime.now(tz=timezone.utc).timestamp()
+
         for url in urls:
             try:
-                # Fetch the latest accessible entry.  This helper will return a
-                # one-item list and a flag indicating whether a private video was
-                # skipped; it may re-raise if the playlist contains no
-                # accessible entries.
                 entries, skipped, info = fetch_latest_accessible_entry(url)
                 if skipped:
                     messages.append(
                         f"Latest episode for podcast {url} is private - using previous accessible video",
                     )
-                # Resolve a robust playlist label and build base status entry for this podcast
                 playlist_label = utils.resolve_playlist_label(info, url)
                 status_entry = _make_podcast_status_entry(playlist_label, url)
 
@@ -915,120 +1006,31 @@ class MyWindow(QWidget):
                     webpage = entry.get("webpage_url") or entry.get("url")
                     if not vid or not webpage:
                         continue
-                    # Store for status_entry later
                     status_entry["latest_url"] = webpage
                     status_entry["latest_ts"] = parse_video_timestamp(entry)
-                    # Already archived? handle that first to avoid redundant logging
-                    if vid in existing_ids:
-                        status_entry["status"] = "Downloaded"
+
+                    if self._episode_already_archived(vid, existing_ids, status_entry):
+                        break
+                    if self._skip_if_update_episode(
+                        entry, vid, webpage, archive_path, existing_ids, messages, status_entry,
+                    ):
+                        break
+                    if self._skip_if_short_duration(
+                        entry, vid, webpage, archive_path, existing_ids, messages, status_entry,
+                    ):
                         break
 
-                    # check for special '(Update)' titles which should be skipped
-                    title = entry.get("title", "") or ""
-                    if "(Update)" in title:
-                        append_to_archive_and_mark_skipped(
-                            archive_path,
-                            vid,
-                            existing_ids,
-                            title,
-                            messages,
-                        )
-                        status_entry["status"] = "Skipped (Update)"
-                        QYT.HistoryLogger.log_skip(
-                            site=utils.detect_site_from_urls([webpage]),
-                            dtype="audio_playlists",
-                            title=title,
-                            reason="Update exception",
-                        )
-                        break
-
-                    # Check if episode is too short to download (under 3 minutes)
-                    duration = entry.get("duration")
-                    if duration is not None and duration < PODCAST_MIN_DURATION_SECONDS:
-                        append_to_archive_and_mark_skipped(
-                            archive_path,
-                            vid,
-                            existing_ids,
-                            title,
-                            messages,
-                            reason="Short duration (<3 min)",
-                        )
-                        status_entry["status"] = "Skipped Short"
-                        QYT.HistoryLogger.log_skip(
-                            site=utils.detect_site_from_urls([webpage]),
-                            dtype="audio_playlists",
-                            title=title,
-                            reason="Short duration (<3 min)",
-                        )
-                        break
-
-                    # Determine upload timestamp
                     ts = parse_video_timestamp(entry)
-                    if ts:
-                        # If timestamp is in the future, treat as an upcoming scheduled episode
-                        if ts > now_ts:
-                            status_entry["status"] = "Upcoming"
-                            status_entry["recheck_ts"] = ts
-                        else:
-                            age_seconds = now_ts - ts
-                            if bypass_sponsorblock_wait:
-                                # Bypass the normal 24-hour/SponsorBlock gating entirely
-                                to_download.append(
-                                    {"url": webpage, "playlist": playlist_label},
-                                )
-                                status_entry["status"] = "Ready"
-                            elif age_seconds < (24 * 60 * 60):
-                                # New episode; check SponsorBlock (only YouTube)
-                                site = utils.detect_site_from_urls([webpage])
-                                if site == "youtube":
-                                    has_sb = check_sponsorblock_for_video_id(vid)
-                                    if has_sb:
-                                        to_download.append(
-                                            {
-                                                "url": webpage,
-                                                "playlist": playlist_label,
-                                            },
-                                        )
-                                        status_entry["status"] = "Ready"
-                                    else:
-                                        pending.append(
-                                            {
-                                                "url": webpage,
-                                                "playlist": playlist_label,
-                                            },
-                                        )
-                                        status_entry["status"] = "Pending SponsorBlock"
-                                else:
-                                    # Non-YouTube: fall back to not requiring SponsorBlock
-                                    to_download.append(
-                                        {"url": webpage, "playlist": playlist_label},
-                                    )
-                                    status_entry["status"] = "Ready"
-                            else:
-                                # Older than 24h -> download
-                                to_download.append(
-                                    {"url": webpage, "playlist": playlist_label},
-                                )
-                                status_entry["status"] = "Ready"
-                    else:
-                        # No timestamp -> be permissive and download
-                        to_download.append({"url": webpage, "playlist": playlist_label})
-                        status_entry["status"] = "Ready"
-
-                    # latest_date formatting
-                    status_entry["latest_date"] = format_timestamp_readable(ts)
-
-                # Append a single status entry per podcast after evaluating its latest entry
-                # Cache the latest URL if present
-                if status_entry.get("latest_url"):
-                    self._cache_put(
-                        url,
-                        status_entry["latest_url"],
-                        status_entry.get("latest_ts"),
+                    self._classify_episode_by_age(
+                        vid, webpage, ts, now_ts, playlist_label,
+                        to_download, pending, status_entry,
+                        bypass_sponsorblock_wait=bypass_sponsorblock_wait,
                     )
+                    break
+
+                self._cache_put(url, status_entry.get("latest_url"), status_entry.get("latest_ts"))
                 statuses.append(status_entry)
             except YDL_EXTRACTION_ERRORS as e:
-                # Log unexpected extraction failures and then try to interpret common scheduled/upcoming patterns
                 utils.log_exception(e, f"Error expanding playlist/url {url}")
                 errstr = str(e)
                 scheduled_ts = parse_scheduled_time_from_error(errstr)
@@ -1042,7 +1044,6 @@ class MyWindow(QWidget):
                         f"Podcast {url} scheduled; will recheck at {datetime.fromtimestamp(scheduled_ts, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}",
                     )
                 else:
-                    # If extracting playlist fails, record the error and continue
                     had_error = True
                     messages.append(f"Error expanding playlist/url {url}: {e}")
                     statuses.append(
@@ -1145,7 +1146,7 @@ class MyWindow(QWidget):
     def _cache_put(
         self,
         playlist_url: str,
-        latest_url: str,
+        latest_url: str | None,
         latest_ts: int | None,
     ) -> None:
         """Store or update a cache entry for a podcast's latest URL."""

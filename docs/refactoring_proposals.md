@@ -56,16 +56,10 @@ Extracted to `src/live_queue.py` as standalone functions with `LiveQueueEntries`
 
 ---
 
-### [R07] `_filter_audio_playlist_urls()` is 203 lines — noqa'd for complexity
+### ~~[R07] `_filter_audio_playlist_urls()` is 203 lines — noqa'd for complexity~~ ✅ DONE
 **Effort:** High | **File:** `vid downloader.pyw:894–1096`
 
-Suppresses `C901`, `PLR0912`, `PLR0915`. The function does archive checking, title filtering, duration gating, SponsorBlock timestamp logic, and status dict construction all in one loop.
-
-**Action:** Extract four helpers:
-- `_check_video_archived(vid_id, existing_ids) -> bool`
-- `_skip_update_episode(title) -> bool`
-- `_skip_short_duration(entry, min_seconds) -> bool`
-- `_evaluate_episode_download_status(entry, ...) -> tuple[bool, str, str | None]`
+Extracted 4 helpers on `MyWindow`: `_episode_already_archived`, `_skip_if_update_episode` (noqa PLR0913), `_skip_if_short_duration` (noqa PLR0913), `_classify_episode_by_age` (keyword-only bool, noqa PLR0913). Removed `# noqa: C901,PLR0912,PLR0915` from `_filter_audio_playlist_urls`. `_cache_put` signature widened to `str | None`. Updated `DummyWin` in `tests/test_private_video_handling.py` to borrow new methods from `MyWindow`. 243 tests pass.
 
 ---
 
@@ -233,7 +227,7 @@ Validates skip callback, builds base properties, conditionally adds archive path
 | ~~R04~~ | 9        | Low    | Duplicate logic ✅     |
 | R05 | 9        | Medium | Repeated init pattern  |
 | ~~R06~~ | 8        | Medium | Structural ✅          |
-| R07 | 8        | High   | Long function          |
+| ~~R07~~ | 8        | High   | Long function ✅       |
 | R08 | 8        | High   | Long function          |
 | R09 | 7        | Medium | Duplicate structure    |
 | ~~R10~~ | 7        | Low    | Duplicate pattern ✅   |

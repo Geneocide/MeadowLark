@@ -233,6 +233,11 @@ def test_filter_audio_playlist_urls_with_private(monkeypatch):
         def _cache_put(self, url, latest_url, ts):
             pass
 
+        _episode_already_archived = vd.MyWindow._episode_already_archived
+        _skip_if_update_episode = vd.MyWindow._skip_if_update_episode
+        _skip_if_short_duration = vd.MyWindow._skip_if_short_duration
+        _classify_episode_by_age = vd.MyWindow._classify_episode_by_age
+
     win = DummyWin()
     to_download, pending, had_error, messages, statuses = (
         vd.MyWindow._filter_audio_playlist_urls(
@@ -314,6 +319,11 @@ def test_filter_audio_playlist_urls_skips_update(monkeypatch, tmp_path):
 
         def _cache_put(self, url, latest_url, ts):
             pass
+
+        _episode_already_archived = vd.MyWindow._episode_already_archived
+        _skip_if_update_episode = vd.MyWindow._skip_if_update_episode
+        _skip_if_short_duration = vd.MyWindow._skip_if_short_duration
+        _classify_episode_by_age = vd.MyWindow._classify_episode_by_age
 
     win = DummyWin()
     to_download, pending, had_error, messages, statuses = (
