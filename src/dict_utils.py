@@ -38,19 +38,13 @@ def merge_dicts_recursive(
     return _merge(base, overrides)
 
 
-def _default_postprocessors() -> list[dict[str, Any]]:
-    """
-    Return default postprocessor configuration for yt-dlp.
-
-    Returns SponsorBlock and ModifyChapters postprocessors with sponsor/selfpromo removal.
-    """
-    return [
-        {"key": "SponsorBlock"},
-        {
-            "key": "ModifyChapters",
-            "remove_sponsor_segments": ["sponsor", "selfpromo"],
-        },
-    ]
+DEFAULT_POSTPROCESSORS: list[dict[str, Any]] = [
+    {"key": "SponsorBlock"},
+    {
+        "key": "ModifyChapters",
+        "remove_sponsor_segments": ["sponsor", "selfpromo"],
+    },
+]
 
 
 def remove_sponsorblock_postprocessor(opts: dict[str, Any]) -> dict[str, Any]:

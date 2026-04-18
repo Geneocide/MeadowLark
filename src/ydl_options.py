@@ -10,7 +10,7 @@ from .config import (
     VENV_SCRIPTS_DIR,
     VIDEO_STORAGE_DIR,
 )
-from .dict_utils import _default_postprocessors
+from .dict_utils import DEFAULT_POSTPROCESSORS
 
 # JavaScript runtimes configuration
 JS_RUNTIMES_CONFIG = {
@@ -40,7 +40,7 @@ def build_base_ydl_opts(logger: Any, qhook: Any) -> dict[str, Any]:  # noqa: ANN
         "mtime": True,
         # Custom match_filter will be set per-source by callers
         "cookiefile": str(COOKIES_FILE),
-        "postprocessors": _default_postprocessors(),
+        "postprocessors": list(DEFAULT_POSTPROCESSORS),
         "js_runtimes": JS_RUNTIMES_CONFIG,
         "remote_components": ["ejs:github"],
     }
@@ -115,7 +115,7 @@ def get_source_options(source: str) -> dict[str, Any]:
         "format": format_string,
         "merge_output_format": "mp4",
         "outtmpl": (VIDEO_STORAGE_DIR / "%(title)s.%(ext)s").as_posix(),
-        "postprocessors": _default_postprocessors(),
+        "postprocessors": list(DEFAULT_POSTPROCESSORS),
     }
 
 
@@ -142,4 +142,4 @@ def get_postprocessors(source: str) -> list[dict[str, Any]]:
     Returns:
         A list of yt-dlp postprocessor dictionaries.
     """
-    return get_source_options(source).get("postprocessors", _default_postprocessors())
+    return get_source_options(source).get("postprocessors", list(DEFAULT_POSTPROCESSORS))

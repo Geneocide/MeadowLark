@@ -39,6 +39,12 @@ class DownloadExecutor:
         """Emit a status message via callback."""
         self.message_callback(message)
 
+    def _download_with_cache_clear(self, opts: dict, urls: list) -> None:
+        """Run yt-dlp download after clearing cache to avoid stale format data."""
+        with YoutubeDL(opts) as ydl:
+            ydl.cache.remove()
+            ydl.download(urls)
+
     def _extract_title(self, urls: list) -> str:
         """
         Extract video title from first URL for error logging.
@@ -101,9 +107,7 @@ class DownloadExecutor:
         fq["type"] = "720"
         fallback["qmeta"] = fq
         try:
-            with YoutubeDL(fallback) as ydl:
-                ydl.cache.remove()
-                ydl.download(urls)
+            self._download_with_cache_clear(fallback, urls)
             return True, error_str  # noqa: TRY300
         except YDL_EXTRACTION_ERRORS as e2:
             utils.log_exception(e2, "720p fallback attempt failed")
@@ -144,9 +148,7 @@ class DownloadExecutor:
         fallback = utils.remove_sponsorblock_postprocessor(options)
         fallback["_tried_without_sponsorblock"] = True
         try:
-            with YoutubeDL(fallback) as ydl:
-                ydl.cache.remove()
-                ydl.download(urls)
+            self._download_with_cache_clear(fallback, urls)
             return True, error_str  # noqa: TRY300
         except YDL_EXTRACTION_ERRORS as e2:
             utils.log_exception(e2, "SponsorBlock removal retry failed")
@@ -169,9 +171,7 @@ class DownloadExecutor:
             - If success is False, error_message contains the error details
         """
         try:
-            with YoutubeDL(options) as ydl:
-                ydl.cache.remove()
-                ydl.download(urls)
+            self._download_with_cache_clear(options, urls)
 
             # After successful download, try to rename 'NA' folders using comments
             meta = options.get("qmeta") or {}

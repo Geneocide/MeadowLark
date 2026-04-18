@@ -14,7 +14,7 @@ def fetch_latest_accessible_entry(
     url: str,
 ) -> tuple[list[dict[str, Any]], bool, dict[str, Any]]:
     """
-    .
+    Fetch the latest accessible (non-private) entry from a playlist URL.
 
     Return a tuple suitable for podcast filtering operations.
 

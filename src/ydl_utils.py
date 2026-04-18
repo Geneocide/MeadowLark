@@ -2,6 +2,8 @@
 
 import yt_dlp
 
+_QUIET_YDL_OPTS: dict[str, bool] = {"quiet": True, "no_warnings": True}
+
 
 def extract_playlist_info(
     url: str,
@@ -21,7 +23,7 @@ def extract_playlist_info(
     """
     if ydl_class is None:
         ydl_class = yt_dlp.YoutubeDL
-    opts = {"quiet": True, "no_warnings": True}
+    opts: dict = {**_QUIET_YDL_OPTS}
     if playlistend:
         opts["playlistend"] = playlistend
     with ydl_class(opts) as ydl:
@@ -46,7 +48,7 @@ def extract_video_entries(
     """
     if ydl_class is None:
         ydl_class = yt_dlp.YoutubeDL
-    opts = {"quiet": True, "no_warnings": True, "extract_flat": extract_flat}
+    opts = {**_QUIET_YDL_OPTS, "extract_flat": extract_flat}
     with ydl_class(opts) as ydl:
         info = ydl.extract_info(url, download=False)
         return info.get("entries", [info])

@@ -22,7 +22,7 @@ class TestVersionUtils:
 
     def test_normalize_version_invalid(self) -> None:
         """Test normalize_version with invalid inputs."""
-        assert normalize_version(None) == ()  # type: ignore
+        assert normalize_version(None) == ()
         assert normalize_version("") == ()
         assert normalize_version("abc") == ()
 

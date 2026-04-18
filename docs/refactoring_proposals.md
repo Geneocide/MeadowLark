@@ -93,21 +93,17 @@ Suppresses `C901`, `PLR0912`, `PLR0913`, `PLR0915`. Signal connections (`qhook.i
 
 ---
 
-### [R10] Cache clearing before download repeated 4×
+### ~~[R10] Cache clearing before download repeated 4×~~ ✅ DONE
 **Effort:** Low | **File:** `src/download_executor.py:105,106,148,173`
 
-`ydl.cache.remove()` is called immediately before every `ydl.download()` call across three code paths.
-
-**Action:** Extract `_clear_cache_and_download(ydl, urls) -> None` helper; call from all four sites.
+Added `_download_with_cache_clear(opts, urls)` to `DownloadExecutor`; collapsed the 3-line `with YoutubeDL / cache.remove / download` pattern in `_try_720_fallback`, `_try_without_sponsorblock`, and `execute` to single-line calls. 243 tests pass.
 
 ---
 
-### [R11] YoutubeDL quiet opts dict repeated twice in `ydl_utils.py`
+### ~~[R11] YoutubeDL quiet opts dict repeated twice in `ydl_utils.py`~~ ✅ DONE
 **Effort:** Low | **File:** `src/ydl_utils.py:24,49`
 
-`{"quiet": True, "no_warnings": True}` is constructed inline in two functions in the same module.
-
-**Action:** Add `_QUIET_YDL_OPTS: dict[str, bool] = {"quiet": True, "no_warnings": True}` as a module constant; reference it in both functions.
+Added `_QUIET_YDL_OPTS: dict[str, bool] = {"quiet": True, "no_warnings": True}` as a module constant; updated both `extract_playlist_info` and `extract_video_entries` to spread it. 243 tests pass.
 
 ---
 
@@ -120,12 +116,10 @@ Suppresses `C901`, `PLR0912`, `PLR0913`, `PLR0915`. Signal connections (`qhook.i
 
 ---
 
-### [R13] Podcast status dict constructed inline 6+ times
+### ~~[R13] Podcast status dict constructed inline 6+ times~~ ✅ DONE
 **Effort:** Low | **File:** `vid downloader.pyw:942–945, 1073–1076, 1089–1092, 1682–1685, 1736–1742, 1753–1756`
 
-The same four-key dict (`podcast`, `latest_date`, `status`, `url`) is built from scratch each time with varying default values, making it easy to miss a key when adding new fields.
-
-**Action:** Add `_make_podcast_status_entry(podcast, url, status="(unknown)", latest_date="(unknown)", **kwargs) -> dict` helper method.
+Added `_make_podcast_status_entry(podcast, url, status, latest_date, **kwargs)` as a module-level function (not a method — tests use `DummyWin` mocks that don't inherit `MyWindow`). All 6 inline dict literals replaced. 243 tests pass.
 
 ---
 
@@ -149,32 +143,26 @@ Download execution, post-download folder renaming, and error-based fallback sele
 
 ---
 
-### [R16] `_open_url_in_browser()` has 3-level nested try/except
+### ~~[R16] `_open_url_in_browser()` has 3-level nested try/except~~ ✅ DONE
 **Effort:** Low | **File:** `vid downloader.pyw:1288–1332`
 
-45 lines of nested exception handling for default browser → Brave fallback → manual Brave path registration.
-
-**Action:** Extract `_try_open_in_default_browser(url) -> bool` and `_get_brave_browser_controller() -> BaseBrowser | None`; top-level method becomes a clean 10-line orchestrator.
+Extracted `_try_open_default_browser(url, label) -> bool` and `_get_brave_controller() -> BaseBrowser | None`. Added `_BRAVE_PATHS: ClassVar[list[str]]` class constant; added `ClassVar` import. `_open_url_in_browser` reduced from 45 lines / 3 nesting levels to 12 lines / 1 level. 243 tests pass.
 
 ---
 
 ## Priority 5 — Ruff / Type Hint Issues
 
-### [R17] Bare `except Exception` without suppression in `podcast_helpers.py`
+### ~~[R17] Bare `except Exception` without suppression in `podcast_helpers.py`~~ ✅ DONE
 **Effort:** Low | **File:** `src/podcast_helpers.py:65`
 
-Unlike other broad exception catches that have `# noqa: BLE001`, this one is undecorated and will be flagged by Ruff.
-
-**Action:** Replace with `except (DownloadError, ExtractorError, OSError) as exc:` (or add `# noqa: BLE001` with a comment explaining why broad catch is needed).
+No change needed: Ruff's BLE001 does not fire because the except block unconditionally re-raises non-private-video errors — the exception is never swallowed. Adding a noqa produced RUF100 (unused). File is Ruff-clean. 243 tests pass.
 
 ---
 
-### [R18] `_default_postprocessors()` is a function that always returns the same constant
+### ~~[R18] `_default_postprocessors()` is a function that always returns the same constant~~ ✅ DONE
 **Effort:** Low | **File:** `src/dict_utils.py:41–53`
 
-The function constructs and returns the same list every time with no parameters.
-
-**Action:** Replace with `DEFAULT_POSTPROCESSORS: list[dict[str, Any]] = [{"key": "SponsorBlock"}, {"key": "ModifyChapters", ...}]` at module level; update call sites.
+Replaced function with `DEFAULT_POSTPROCESSORS: list[dict[str, Any]]` constant. Updated import and 3 call sites in `src/ydl_options.py` to use `list(DEFAULT_POSTPROCESSORS)`; updated `utils.py` import and `__all__`. Also sorted `__all__` to fix a surfaced RUF022. 243 tests pass.
 
 ---
 
@@ -187,58 +175,42 @@ The function constructs and returns the same list every time with no parameters.
 
 ---
 
-### [R20] Unused `# type: ignore` comment in test
+### ~~[R20] Unused `# type: ignore` comment in test~~ ✅ DONE
 **Effort:** Low | **File:** `tests/test_utils.py:25`
 
-```python
-assert normalize_version(None) == ()  # type: ignore
-```
-
-**Action:** Either add a `@overload` for `normalize_version(None)` returning `tuple[()]`, or remove the comment if the type checker no longer requires it.
+Widened `normalize_version` signature to `str | None` in `src/version_utils.py` (body already handled non-strings). Removed `# type: ignore` from the test. 243 tests pass.
 
 ---
 
 ## Priority 4 — Dead Code
 
-### [R21] Commented-out `is_firefox_running()` and Firefox launch block
+### ~~[R21] Commented-out `is_firefox_running()` and Firefox launch block~~ ✅ DONE
 **Effort:** Low | **File:** `vid downloader.pyw:1830–1847`
 
-References `psutil` which is not imported — would fail immediately if uncommented. Has clearly been superseded.
-
-**Action:** Delete lines 1830–1847 entirely.
+Deleted the commented-out `is_firefox_running()` function definition and Firefox `subprocess.Popen` launch block. 243 tests pass.
 
 ---
 
-### [R22] Commented-out duplicate signal connection
+### ~~[R22] Commented-out duplicate signal connection~~ ✅ DONE
 **Effort:** Low | **File:** `vid downloader.pyw:550`
 
-```python
-# qlogger.message_changed.connect(self.logEdit.appendPlainText)
-```
-
-The active line immediately below does the same thing.
-
-**Action:** Delete line 550.
+Deleted the commented-out duplicate `qlogger.message_changed.connect(self.logEdit.appendPlainText)` line. 243 tests pass.
 
 ---
 
 ## Priority 3 — Minor Quality Issues
 
-### [R23] Magic numbers in `version_utils.py`
+### ~~[R23] Magic numbers in `version_utils.py`~~ ✅ DONE
 **Effort:** Low | **File:** `src/version_utils.py:50–51`
 
-`timeout=3` and `status_code == 200` are bare literals with no explanation.
-
-**Action:** Add `_PYPI_API_TIMEOUT: int = 3` and use `http.HTTPStatus.OK` (or `200`) with a named constant.
+Added `_PYPI_API_TIMEOUT: int = 3` constant and replaced `timeout=3` / `status_code == 200` with `timeout=_PYPI_API_TIMEOUT` / `http.HTTPStatus.OK`. Also removed pre-existing `# noqa: PLR2004` that was suppressing the magic-number warning. 243 tests pass.
 
 ---
 
-### [R24] Broken docstring in `podcast_helpers.py`
+### ~~[R24] Broken docstring in `podcast_helpers.py`~~ ✅ DONE
 **Effort:** Low | **File:** `src/podcast_helpers.py:13–19`
 
-The docstring for `fetch_latest_accessible_entry()` has an orphan `"."` as its summary line.
-
-**Action:** Replace with a real one-line summary.
+Replaced orphan `"."` summary line with `"Fetch the latest accessible (non-private) entry from a playlist URL."` Done alongside R17. 243 tests pass.
 
 ---
 
@@ -264,19 +236,19 @@ Validates skip callback, builds base properties, conditionally adds archive path
 | R07 | 8        | High   | Long function          |
 | R08 | 8        | High   | Long function          |
 | R09 | 7        | Medium | Duplicate structure    |
-| R10 | 7        | Low    | Duplicate pattern      |
-| R11 | 7        | Low    | Duplicate literal      |
+| ~~R10~~ | 7        | Low    | Duplicate pattern ✅   |
+| ~~R11~~ | 7        | Low    | Duplicate literal ✅   |
 | R12 | 7        | Medium | Inconsistent loading   |
-| R13 | 7        | Low    | Duplicate construction |
+| ~~R13~~ | 7        | Low    | Duplicate construction ✅ |
 | R14 | 6        | Medium | Long function          |
 | R15 | 6        | High   | Long / possibly dead   |
-| R16 | 6        | Low    | Long function          |
-| R17 | 5        | Low    | Ruff violation         |
-| R18 | 5        | Low    | Type / style           |
+| ~~R16~~ | 6        | Low    | Long function ✅       |
+| ~~R17~~ | 5        | Low    | Ruff violation ✅      |
+| ~~R18~~ | 5        | Low    | Type / style ✅        |
 | R19 | 5        | Medium | Type hints             |
-| R20 | 5        | Low    | Unused annotation      |
-| R21 | 4        | Low    | Dead code              |
-| R22 | 4        | Low    | Dead code              |
-| R23 | 3        | Low    | Magic numbers          |
-| R24 | 3        | Low    | Docstring              |
+| ~~R20~~ | 5        | Low    | Unused annotation ✅   |
+| ~~R21~~ | 4        | Low    | Dead code ✅           |
+| ~~R22~~ | 4        | Low    | Dead code ✅           |
+| ~~R23~~ | 3        | Low    | Magic numbers ✅       |
+| ~~R24~~ | 3        | Low    | Docstring ✅           |
 | R25 | 3        | Medium | Long function          |

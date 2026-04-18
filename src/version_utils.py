@@ -1,12 +1,15 @@
 """Version checking and comparison utilities for yt-dlp."""
 
+import http
 import re
 
 import requests
 import yt_dlp
 
+_PYPI_API_TIMEOUT: int = 3
 
-def normalize_version(version: str) -> tuple[int, ...]:
+
+def normalize_version(version: str | None) -> tuple[int, ...]:
     """
     Normalize a version string like '2025.08.27' or '2025.8.27' to a tuple of ints.
 
@@ -47,8 +50,8 @@ def get_latest_yt_dlp_version() -> str | None:
         Latest version string or None if unable to fetch.
     """
     try:
-        r = requests.get("https://pypi.org/pypi/yt-dlp/json", timeout=3)
-        if r.status_code == 200:  # noqa: PLR2004
+        r = requests.get("https://pypi.org/pypi/yt-dlp/json", timeout=_PYPI_API_TIMEOUT)
+        if r.status_code == http.HTTPStatus.OK:
             return r.json()["info"]["version"]
         return None  # noqa: TRY300
     except requests.exceptions.RequestException:

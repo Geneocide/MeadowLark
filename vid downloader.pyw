@@ -44,6 +44,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from os import startfile
 from pathlib import Path
+from typing import ClassVar
 from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
@@ -124,12 +125,28 @@ THREAD_QUIT_TIMEOUT_MS = 2000
 THREAD_TERMINATE_TIMEOUT_MS = 1000
 
 
+def _make_podcast_status_entry(
+    podcast: str,
+    url: str,
+    status: str = "(unknown)",
+    latest_date: str = "(unknown)",
+    **kwargs: object,
+) -> dict:
+    """Create a podcast status entry dict with standard keys and optional extensions."""
+    return {"podcast": podcast, "latest_date": latest_date, "status": status, "url": url, **kwargs}
+
+
 class MyWindow(QWidget):
     """
     MyWindow - A PyQt6-based main window for the Vid Downloader application, providing a GUI for downloading and managing video and audio content from YouTube and other platforms.
 
     Features include playlist and audio download options, drag-and-drop support, progress tracking, log display, update checking, and integration with custom download queue and processing logic.
     """
+
+    _BRAVE_PATHS: ClassVar[list[str]] = [
+        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+        r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+    ]
 
     def __init__(self) -> None:
         """
@@ -552,7 +569,6 @@ class MyWindow(QWidget):
                 else:
                     self.downloadQueue.put((urls, ydl_opts))
                     qhook.info_changed.connect(self.handle_info_changed)
-                    # qlogger.message_changed.connect(self.logEdit.appendPlainText)
                     qlogger.message_changed.connect(self.handle_log_entry)
                     self.barProgress.setRange(0, 1)
 
@@ -892,12 +908,7 @@ class MyWindow(QWidget):
                     )
                 # Resolve a robust playlist label and build base status entry for this podcast
                 playlist_label = utils.resolve_playlist_label(info, url)
-                status_entry: dict = {
-                    "podcast": playlist_label,
-                    "latest_date": "(unknown)",
-                    "status": "(unknown)",
-                    "url": url,
-                }
+                status_entry = _make_podcast_status_entry(playlist_label, url)
 
                 for entry in entries:
                     vid = entry.get("id") or entry.get("url")
@@ -1023,13 +1034,9 @@ class MyWindow(QWidget):
                 scheduled_ts = parse_scheduled_time_from_error(errstr)
                 if scheduled_ts:
                     statuses.append(
-                        {
-                            "podcast": url,
-                            "latest_date": "(scheduled)",
-                            "status": "Upcoming",
-                            "url": url,
-                            "recheck_ts": scheduled_ts,
-                        },
+                        _make_podcast_status_entry(
+                            url, url, status="Upcoming", latest_date="(scheduled)", recheck_ts=scheduled_ts,
+                        ),
                     )
                     messages.append(
                         f"Podcast {url} scheduled; will recheck at {datetime.fromtimestamp(scheduled_ts, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}",
@@ -1039,12 +1046,7 @@ class MyWindow(QWidget):
                     had_error = True
                     messages.append(f"Error expanding playlist/url {url}: {e}")
                     statuses.append(
-                        {
-                            "podcast": url,
-                            "latest_date": "(error)",
-                            "status": f"Error: {e}",
-                            "url": url,
-                        },
+                        _make_podcast_status_entry(url, url, status=f"Error: {e}", latest_date="(error)"),
                     )
 
         return to_download, pending, had_error, messages, statuses
@@ -1239,40 +1241,37 @@ class MyWindow(QWidget):
             )
             return None
 
-    def _open_url_in_browser(self, latest_url: str, label: str | None = None) -> None:
-        """Open a URL in the default browser, with fallback to Brave."""
-        # Try default browser first
+    def _try_open_default_browser(self, url: str, label: str | None) -> bool:
+        """Try to open URL in the system default browser. Returns True on success."""
         try:
-            if webbrowser.open_new_tab(latest_url):
+            if webbrowser.open_new_tab(url):
                 self.logEdit.appendPlainText(
-                    f"Opened latest for {label or latest_url} in default browser",
+                    f"Opened latest for {label or url} in default browser",
                 )
-                return
+                return True
         except (webbrowser.Error, OSError) as exc:
             utils.log_exception(exc, "Failed to open URL in default browser")
-        # Fallback to Brave
+        return False
+
+    def _get_brave_controller(self) -> webbrowser.BaseBrowser | None:
+        """Return a Brave browser controller, registering it from disk if needed."""
         try:
-            try:
-                controller = webbrowser.get("brave")
-            except (webbrowser.Error, OSError) as exc:
-                utils.log_exception(
-                    exc,
-                    "Failed to get Brave controller via webbrowser.get",
-                )
-                brave_paths = [
-                    r"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
-                    r"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
-                ]
-                controller = None
-                for p in brave_paths:
-                    if Path(p).exists():
-                        webbrowser.register(
-                            "windows-brave",
-                            None,
-                            webbrowser.BackgroundBrowser(p),
-                        )
-                        controller = webbrowser.get("windows-brave")
-                        break
+            return webbrowser.get("brave")
+        except (webbrowser.Error, OSError) as exc:
+            utils.log_exception(exc, "Failed to get Brave controller via webbrowser.get")
+        for p in self._BRAVE_PATHS:
+            if Path(p).exists():
+                webbrowser.register("windows-brave", None, webbrowser.BackgroundBrowser(p))
+                with contextlib.suppress(webbrowser.Error, OSError):
+                    return webbrowser.get("windows-brave")
+        return None
+
+    def _open_url_in_browser(self, latest_url: str, label: str | None = None) -> None:
+        """Open a URL in the default browser, with fallback to Brave."""
+        if self._try_open_default_browser(latest_url, label):
+            return
+        try:
+            controller = self._get_brave_controller()
             if controller:
                 controller.open_new_tab(latest_url)
                 self.logEdit.appendPlainText(
@@ -1282,7 +1281,6 @@ class MyWindow(QWidget):
         except (webbrowser.Error, OSError) as e:
             self.logEdit.appendPlainText(f"Failed to open Brave: {e}")
             utils.log_exception(e, "Failed to open URL in Brave")
-        # If all fails
         self.logEdit.appendPlainText(f"Failed to open latest for {label or latest_url}")
 
     def _refresh_podcast_status_dialog(self) -> None:
@@ -1632,12 +1630,7 @@ class MyWindow(QWidget):
                 entries = info.get("entries", [info])
                 if not entries:
                     statuses.append(
-                        {
-                            "podcast": title,
-                            "latest_date": "(none)",
-                            "status": "No episodes",
-                            "url": url,
-                        },
+                        _make_podcast_status_entry(title, url, status="No episodes", latest_date="(none)"),
                     )
                     continue
                 latest = entries[0]
@@ -1686,14 +1679,9 @@ class MyWindow(QWidget):
                 else:
                     status = "Ready"
 
-                entry = {
-                    "podcast": title,
-                    "latest_date": latest_date,
-                    "status": status,
-                    "url": url,
-                    "latest_url": webpage,
-                    "latest_ts": ts,
-                }
+                entry = _make_podcast_status_entry(
+                    title, url, status=status, latest_date=latest_date, latest_url=webpage, latest_ts=ts,
+                )
                 if ts and ts > now_ts:
                     entry["recheck_ts"] = ts
                 # Update cache immediately
@@ -1703,12 +1691,7 @@ class MyWindow(QWidget):
             except YDL_EXTRACTION_ERRORS as e:
                 utils.log_exception(e, f"Error fetching podcast status for {url}")
                 statuses.append(
-                    {
-                        "podcast": url,
-                        "latest_date": "(error)",
-                        "status": f"Error: {e}",
-                        "url": url,
-                    },
+                    _make_podcast_status_entry(url, url, status=f"Error: {e}", latest_date="(error)"),
                 )
         return statuses
 
@@ -1781,24 +1764,10 @@ class MyWindow(QWidget):
             self.buttonUpdate.setStyleSheet("color: red;")
 
 
-# def is_firefox_running():
-#     """Check if Firefox is already running."""
-#     for process in psutil.process_iter(["name"]):
-#         if process.info["name"] == "firefox.exe":
-#             return True
-#     return False
-
-
 if __name__ == "__main__":
     startfile(r"E:\vid storage")  # noqa: S606
     dirname = Path(__file__).parent
     QDir.addSearchPath("icons", str(dirname / "resources" / "icons"))
-
-    # Open Firefox
-    # if not is_firefox_running():
-    #     subprocess.Popen(
-    #         [r"C:/Program Files/Mozilla Firefox/firefox.exe", "https://www.youtube.com"]
-    #     )
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")

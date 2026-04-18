@@ -9,7 +9,7 @@ with existing code without requiring import changes.
 # Re-export logging utilities
 # Re-export dictionary utilities
 from src.dict_utils import (
-    _default_postprocessors,
+    DEFAULT_POSTPROCESSORS,
     merge_dicts_recursive,
     remove_sponsorblock_postprocessor,
 )
@@ -47,7 +47,7 @@ from src.ydl_options import (
 )
 
 __all__ = [
-    "_default_postprocessors",
+    "DEFAULT_POSTPROCESSORS",
     "build_base_ydl_opts",
     "detect_site_from_urls",
     "get_current_yt_dlp_version",
@@ -55,10 +55,10 @@ __all__ = [
     "get_output_template",
     "get_playlist_file_for_source",
     "get_postprocessors",
-    "load_playlist_comments_for_source",
     "get_source_options",
     "is_primitive_technology",
     "is_yt_dlp_update_available",
+    "load_playlist_comments_for_source",
     "log_exception",
     "merge_dicts_recursive",
     "normalize_version",
