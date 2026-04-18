@@ -1,9 +1,60 @@
-"""Unit tests for live queue management in DownloadService."""
+"""Unit tests for live queue management — both standalone module and DownloadService wrappers."""
 
+from pathlib import Path
 from queue import Queue
 from unittest.mock import MagicMock, Mock, call, patch
 
+import pytest
+
 from src.download_service import DownloadService
+from src.live_queue import add_to_live_queue, load_live_queue, save_live_queue
+
+
+# --- Standalone src/live_queue module tests ---
+
+
+@pytest.fixture
+def queue_file(tmp_path: Path) -> Path:
+    return tmp_path / "live_queue.txt"
+
+
+def test_load_missing_file_returns_empty(queue_file: Path) -> None:
+    assert load_live_queue(queue_file) == {}
+
+
+def test_round_trip_without_playlist_id(queue_file: Path) -> None:
+    entries = {"https://yt.com/watch?v=abc": ("youtube", None)}
+    save_live_queue(queue_file, entries)
+    assert load_live_queue(queue_file) == entries
+
+
+def test_round_trip_with_playlist_id(queue_file: Path) -> None:
+    entries = {"https://yt.com/watch?v=abc": ("youtube", "PLxyz")}
+    save_live_queue(queue_file, entries)
+    assert load_live_queue(queue_file) == entries
+
+
+def test_add_creates_entry(queue_file: Path) -> None:
+    add_to_live_queue(queue_file, "https://yt.com/watch?v=xyz", "youtube")
+    result = load_live_queue(queue_file)
+    assert result["https://yt.com/watch?v=xyz"] == ("youtube", None)
+
+
+def test_add_deduplicates(queue_file: Path) -> None:
+    add_to_live_queue(queue_file, "https://yt.com/watch?v=xyz", "youtube")
+    add_to_live_queue(queue_file, "https://yt.com/watch?v=xyz", "youtube", "PLabc")
+    result = load_live_queue(queue_file)
+    assert len(result) == 1
+    assert result["https://yt.com/watch?v=xyz"] == ("youtube", "PLabc")
+
+
+def test_load_skips_blank_lines(queue_file: Path) -> None:
+    queue_file.write_text("\nyoutube|https://yt.com/watch?v=abc\n\n", encoding="utf-8")
+    result = load_live_queue(queue_file)
+    assert len(result) == 1
+
+
+# --- DownloadService wrapper tests ---
 
 
 def make_service(**kwargs):

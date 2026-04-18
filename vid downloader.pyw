@@ -70,6 +70,7 @@ from PyQt6.QtWidgets import (
 
 import QYT
 import utils
+from src import live_queue
 from src.config import (
     LABEL_OUTPUT_FONT_NAME,
     LABEL_OUTPUT_FONT_SIZE,
@@ -795,39 +796,22 @@ class MyWindow(QWidget):
 
         return _mf
 
-    def load_live_queue(self) -> dict[str, tuple[str, str | None]]:
+    def load_live_queue(self) -> live_queue.LiveQueueEntries:
         """Load live queue entries; returns {url: (source, playlist_id)}."""
-        entries: dict[str, tuple[str, str | None]] = {}
-        if self.live_queue_path.exists():
-            with self.live_queue_path.open("r", encoding="utf-8") as f:
-                for raw_line in f:
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-                    # stored as: source|url  or  source|url|playlist_id
-                    parts = line.split("|", 2)
-                    if len(parts) >= 2 and parts[1]:  # noqa: PLR2004
-                        playlist_id = parts[2] if len(parts) == 3 and parts[2] else None  # noqa: PLR2004
-                        entries[parts[1]] = (parts[0], playlist_id)
-        return entries
+        return live_queue.load_live_queue(self.live_queue_path)
 
-    def save_live_queue(self, entries: dict[str, tuple[str, str | None]]) -> None:
+    def save_live_queue(self, entries: live_queue.LiveQueueEntries) -> None:
         """Save the live queue entries to file."""
-        with self.live_queue_path.open("w", encoding="utf-8") as f:
-            for url, (source, playlist_id) in entries.items():
-                if playlist_id:
-                    f.write(f"{source}|{url}|{playlist_id}\n")
-                else:
-                    f.write(f"{source}|{url}\n")
+        live_queue.save_live_queue(self.live_queue_path, entries)
 
     def add_to_live_queue(
-        self, url: str, source: str, playlist_id: str | None = None
+        self,
+        url: str,
+        source: str,
+        playlist_id: str | None = None,
     ) -> None:
         """Add a URL to the live queue."""
-        entries = self.load_live_queue()
-        # Avoid duplicates
-        entries[url] = (source, playlist_id)
-        self.save_live_queue(entries)
+        live_queue.add_to_live_queue(self.live_queue_path, url, source, playlist_id)
 
     def check_live_queue(self) -> None:
         """Check the live queue for ended streams and queue them for download."""
@@ -869,7 +853,7 @@ class MyWindow(QWidget):
                         }
                         if playlist_id:
                             playlist_comments = utils.load_playlist_comments_for_source(
-                                source
+                                source,
                             )
                             if playlist_comments:
                                 qmeta["playlist_comments"] = playlist_comments
@@ -1857,3 +1841,4 @@ if __name__ == "__main__":
 # TODO: look into Android Faithful showing up in the basic misc folder
 # TODO: size control for error logs
 # TODO: settings for making things more general, especially folder locations. Also, make sure no paths are hardcoded that should be config
+# TODO: make sure tfarchive.txt is checked first, always, for efficiency

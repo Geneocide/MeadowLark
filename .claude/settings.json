@@ -1,7 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Read(//c/Users/etreq/dev/vid downloader/**)",
+      "Read(//c/**/vid downloader/**)",
       "Bash(ls( .*)?)",
       "Bash(pwd)",
       "Bash(git( status| diff| log| show| branch).*)",
@@ -9,9 +9,14 @@
       "Bash(python(3)?( -m (pytest|venv|ruff))?.*)",
       "Bash(pip(3)? (list|show).*)",
       "Bash(cat .*)",
-      "Bash(grep .*)",
+      "Bash(grep .*)?",
       "Bash(type .*)",
-      "Bash(which .*)"
+      "Bash(which .*)",
+      "Bash(awk( .*)?)",
+      "Bash(head( .*)?)",
+      "Bash(tail( .*)?)",
+      "Bash(sed( .*)?)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_live_queue.py -v)"
     ],
     "deny": [
       "Bash(rm -rf *)",
@@ -22,6 +27,9 @@
       "Read(./.env.*)",
       "Read(./secrets/**)",
       "Read(~/.ssh/*)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\etreq\\dev\\vid downloader\\docs"
     ]
   }
 }
