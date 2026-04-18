@@ -30,7 +30,8 @@
       "Bash(python -m ruff check \"vid downloader.pyw\" --select C901,PLR0912,PLR0915)",
       "Bash(python -m pytest tests/ -q)",
       "Bash(git stash *)",
-      "Bash(grep -v \"^$\")"
+      "Bash(grep -v \"^$\")",
+      "Bash(python -m ruff check src/download_executor.py)"
     ],
     "deny": [
       "Bash(rm -rf *)",

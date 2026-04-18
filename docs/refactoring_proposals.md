@@ -70,12 +70,10 @@ Extracted 4 helpers: `_schedule_podcast_rechecks`, `_queue_podcast_downloads_gro
 
 ## Priority 7 — Moderate Duplication
 
-### [R09] Two fallback retry methods share identical structure
+### ~~[R09] Two fallback retry methods share identical structure~~ ✅ DONE
 **Effort:** Medium | **File:** `src/download_executor.py:63–154`
 
-`_try_720_fallback()` (lines 63–110) and `_try_without_sponsorblock()` (lines 112–154) both check a "tried" flag, modify options, execute download, and call `utils.log_exception()` on failure. ~90 lines collapse to ~50.
-
-**Action:** Extract `_try_fallback(flag_attr, options_modifier, urls, options, title, error_str) -> tuple[bool, str]`; delegate both methods to it.
+Added `_try_fallback` (~15 lines, `# noqa: PLR0913`) accepting `tried_flag`, `trigger_phrase`, `message`, `options_modifier`, `log_context`. `_try_720_fallback` delegates via a nested `_modify()` closure; `_try_without_sponsorblock` passes `utils.remove_sponsorblock_postprocessor` directly. Both public signatures unchanged. ~90 lines → ~55 lines. 243 tests pass.
 
 ---
 
@@ -221,7 +219,7 @@ Validates skip callback, builds base properties, conditionally adds archive path
 | ~~R06~~ | 8        | Medium | Structural ✅          |
 | ~~R07~~ | 8        | High   | Long function ✅       |
 | ~~R08~~ | 8        | High   | Long function ✅       |
-| R09 | 7        | Medium | Duplicate structure    |
+| ~~R09~~ | 7        | Medium | Duplicate structure ✅ |
 | ~~R10~~ | 7        | Low    | Duplicate pattern ✅   |
 | ~~R11~~ | 7        | Low    | Duplicate literal ✅   |
 | R12 | 7        | Medium | Inconsistent loading   |

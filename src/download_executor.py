@@ -66,6 +66,30 @@ class DownloadExecutor:
             utils.log_exception(exc, "Failed to extract title for error logging")
         return title
 
+    def _try_fallback(  # noqa: PLR0913
+        self,
+        urls: list,
+        options: dict,
+        tried_flag: str,
+        trigger_phrase: str,
+        error_str: str,
+        message: str,
+        options_modifier: Callable[[dict], dict],
+        log_context: str,
+    ) -> tuple[bool, str]:
+        """Attempt a generic fallback download if trigger phrase present and not yet tried."""
+        if trigger_phrase not in error_str or options.get(tried_flag):
+            return False, error_str
+        self._emit_message(message)
+        fallback = options_modifier(options)
+        fallback[tried_flag] = True
+        try:
+            self._download_with_cache_clear(fallback, urls)
+            return True, error_str  # noqa: TRY300
+        except YDL_EXTRACTION_ERRORS as e2:
+            utils.log_exception(e2, log_context)
+            return False, str(e2)
+
     def _try_720_fallback(
         self,
         urls: list,
@@ -74,44 +98,30 @@ class DownloadExecutor:
         site: str,
         error_str: str,
     ) -> tuple[bool, str]:
-        """
-        Try downloading at 720p if 1080p format unavailable.
+        """Try downloading at 720p if 1080p format unavailable."""
+        def _modify(opts: dict) -> dict:
+            fallback = opts.copy()
+            fallback["format"] = (
+                "bestvideo*[height=720][ext=mp4]+bestaudio[ext=m4a]/"
+                "bestvideo*[height=720]+bestaudio/"
+                "best[height=720]/best"
+            )
+            fallback.setdefault("merge_output_format", "mp4")
+            fq = dict(fallback.get("qmeta", {}))
+            fq["type"] = "720"
+            fallback["qmeta"] = fq
+            return fallback
 
-        Args:
-            urls: URLs to download.
-            options: yt-dlp options.
-            title: Video title for logging.
-            site: Source site for logging.
-            error_str: Error message text.
-
-        Returns:
-            (success: bool, new_error_str: str)
-        """
-        if "Requested format is not available" not in error_str or options.get(
-            "_tried_720_fallback",
-        ):
-            return False, error_str
-
-        self._emit_message(
-            f"Requested 1080 format not available for '{title}'; retrying at 720...",
+        return self._try_fallback(
+            urls=urls,
+            options=options,
+            tried_flag="_tried_720_fallback",
+            trigger_phrase="Requested format is not available",
+            error_str=error_str,
+            message=f"Requested 1080 format not available for '{title}'; retrying at 720...",
+            options_modifier=_modify,
+            log_context="720p fallback attempt failed",
         )
-        fallback = options.copy()
-        fallback["_tried_720_fallback"] = True
-        fallback["format"] = (
-            "bestvideo*[height=720][ext=mp4]+bestaudio[ext=m4a]/"
-            "bestvideo*[height=720]+bestaudio/"
-            "best[height=720]/best"
-        )
-        fallback.setdefault("merge_output_format", "mp4")
-        fq = dict(fallback.get("qmeta", {}))
-        fq["type"] = "720"
-        fallback["qmeta"] = fq
-        try:
-            self._download_with_cache_clear(fallback, urls)
-            return True, error_str  # noqa: TRY300
-        except YDL_EXTRACTION_ERRORS as e2:
-            utils.log_exception(e2, "720p fallback attempt failed")
-            return False, str(e2)
 
     def _try_without_sponsorblock(  # noqa: PLR0913
         self,
@@ -122,37 +132,17 @@ class DownloadExecutor:
         dtype: str,
         error_str: str,
     ) -> tuple[bool, str]:
-        """
-        Try downloading without SponsorBlock if API unavailable.
-
-        Args:
-            urls: URLs to download.
-            options: yt-dlp options.
-            title: Video title for logging.
-            site: Source site for logging.
-            dtype: Download type for logging.
-            error_str: Error message text.
-
-        Returns:
-            (success: bool, new_error_str: str)
-        """
-        if (
-            "Unable to communicate with SponsorBlock API" not in error_str
-            or options.get("_tried_without_sponsorblock")
-        ):
-            return False, error_str
-
-        self._emit_message(
-            "SponsorBlock API unavailable; retrying download without SponsorBlock...",
+        """Try downloading without SponsorBlock if API unavailable."""
+        return self._try_fallback(
+            urls=urls,
+            options=options,
+            tried_flag="_tried_without_sponsorblock",
+            trigger_phrase="Unable to communicate with SponsorBlock API",
+            error_str=error_str,
+            message="SponsorBlock API unavailable; retrying download without SponsorBlock...",
+            options_modifier=utils.remove_sponsorblock_postprocessor,
+            log_context="SponsorBlock removal retry failed",
         )
-        fallback = utils.remove_sponsorblock_postprocessor(options)
-        fallback["_tried_without_sponsorblock"] = True
-        try:
-            self._download_with_cache_clear(fallback, urls)
-            return True, error_str  # noqa: TRY300
-        except YDL_EXTRACTION_ERRORS as e2:
-            utils.log_exception(e2, "SponsorBlock removal retry failed")
-            return False, str(e2)
 
     def execute(self, urls: list, options: dict) -> tuple[bool, str]:
         """
