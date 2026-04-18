@@ -1462,7 +1462,122 @@ class MyWindow(QWidget):
             updated,
         )
 
-    def _on_podcast_check_finished(  # noqa: C901,PLR0912,PLR0913,PLR0915
+    def _schedule_podcast_rechecks(self, statuses: list[dict]) -> None:
+        """Store podcast statuses and schedule QTimer rechecks for upcoming episodes."""
+        self._podcast_last_statuses = statuses
+        if not hasattr(self, "_podcast_recheck_times"):
+            self._podcast_recheck_times = {}
+        if not hasattr(self, "_podcast_recheck_timers"):
+            self._podcast_recheck_timers = {}
+        for s in statuses:
+            try:
+                url = s.get("url")
+                lu = s.get("latest_url")
+                lts = s.get("latest_ts")
+                if url and lu:
+                    self._cache_put(url, lu, lts)
+                rts = s.get("recheck_ts")
+                if rts and url:
+                    self._podcast_recheck_times[url] = rts
+                    now_ts = datetime.now(tz=timezone.utc).timestamp()
+                    if rts > now_ts and url not in self._podcast_recheck_timers:
+                        delay_ms = int((rts - now_ts) * 1000)
+                        t = QTimer(self)
+                        t.setSingleShot(True)
+                        t.timeout.connect(
+                            lambda u=url: self.request_detected([u], "audio_playlists"),
+                        )
+                        try:
+                            t.start(delay_ms)
+                            self._podcast_recheck_timers[url] = t
+                        except (RuntimeError, ValueError, TypeError) as exc:
+                            self.logEdit.appendPlainText(
+                                f"Failed to schedule recheck timer for {url}",
+                            )
+                            utils.log_exception(
+                                exc,
+                                f"Failed to schedule recheck timer for {url}",
+                            )
+                else:
+                    self._podcast_recheck_times.pop(url, None)
+                    t = self._podcast_recheck_timers.pop(url, None)
+                    if t:
+                        with contextlib.suppress(Exception):
+                            t.stop()
+            except (AttributeError, TypeError, KeyError, RuntimeError) as exc:  # noqa: PERF203
+                utils.log_exception(
+                    exc,
+                    "Unexpected error while processing podcast statuses",
+                )
+
+    def _queue_podcast_downloads_grouped(
+        self,
+        to_download: list[dict],
+        ydl_opts: dict,
+    ) -> None:
+        """Queue podcast downloads grouped by playlist label, one batch per label."""
+        base_dir = str(PODCAST_MISC_OUTPUT_DIR.parent)
+        groups: dict[str, list[str]] = {}
+        for obj in to_download:
+            try:
+                label = obj.get("playlist") or "misc"
+            except (AttributeError, TypeError) as exc:
+                label = "misc"
+                utils.log_exception(
+                    exc,
+                    "Failed to read playlist label from podcast object",
+                )
+            safe_label = utils.slugify_if_too_long(base_dir, label)
+            url = obj.get("url") if isinstance(obj, dict) else obj
+            if url:
+                groups.setdefault(safe_label, []).append(url)
+        if not groups:
+            return
+        for label, urls in groups.items():
+            qhook, qlogger, batch_opts = self._fork_download_context(
+                ydl_opts if isinstance(ydl_opts, dict) else {},
+            )
+            batch_opts["outtmpl"] = f"{base_dir}/{label}/%(title)s.%(ext)s"
+            self.downloadQueue.put((urls, batch_opts))
+            self._wire_download_signals(qhook, qlogger)
+            if not hasattr(self, "_active_qhooks"):
+                self._active_qhooks = []
+            self._active_qhooks.append((qhook, qlogger))
+        self.barProgress.setRange(0, 1)
+
+    def _queue_podcast_downloads_flat(
+        self,
+        to_download: list[str],
+        ydl_opts: dict,
+    ) -> None:
+        """Queue all podcast download URLs as a single batch."""
+        qhook, qlogger, download_opts = self._fork_download_context(
+            ydl_opts if isinstance(ydl_opts, dict) else {},
+        )
+        self.downloadQueue.put((to_download, download_opts))
+        self._wire_download_signals(qhook, qlogger)
+        if not hasattr(self, "_active_qhooks"):
+            self._active_qhooks = []
+        self._active_qhooks.append((qhook, qlogger))
+        self.barProgress.setRange(0, 1)
+
+    def _update_podcast_indicator(
+        self,
+        had_error: bool,  # noqa: FBT001
+        to_download: list,
+        pending_urls: set[str],
+    ) -> None:
+        """Set the podcast status indicator based on current results."""
+        if had_error:
+            self._set_podcast_indicator("error")
+        elif to_download:
+            self._set_podcast_indicator("busy")
+        elif pending_urls:
+            self._set_podcast_indicator("pending")
+        else:
+            self._set_podcast_indicator("all_good")
+
+    def _on_podcast_check_finished(  # noqa: PLR0913
         self,
         to_download: list,
         pending: list,
@@ -1472,150 +1587,42 @@ class MyWindow(QWidget):
         statuses: list | None = None,
     ) -> None:
         """Handle results of a background podcast check (runs in main thread)."""
-        # Log any messages returned from the worker (avoid GUI calls in the worker)
-        if messages:
-            for m in messages:
-                self.logEdit.appendPlainText(m)
+        for m in messages or []:
+            self.logEdit.appendPlainText(m)
 
-        # Cache last known statuses for non-blocking status dialog display
         if statuses:
-            self._podcast_last_statuses = statuses
-            # Record any per-podcast recheck timestamps so we can skip checks until scheduled time,
-            # and schedule a precise recheck for feeds with known scheduled times.
-            if not hasattr(self, "_podcast_recheck_times"):
-                self._podcast_recheck_times = {}
-            if not hasattr(self, "_podcast_recheck_timers"):
-                self._podcast_recheck_timers = {}
-            for s in statuses:
-                try:
-                    url = s.get("url")
-                    # Sync cache with latest_url and latest_ts from status
-                    lu = s.get("latest_url")
-                    lts = s.get("latest_ts")
-                    if url and lu:
-                        self._cache_put(url, lu, lts)
-                    rts = s.get("recheck_ts")
-                    if rts:
-                        self._podcast_recheck_times[url] = rts
-                        # schedule a one-shot timer to re-run check at the scheduled time if not already scheduled
-                        now_ts = datetime.now(
-                            tz=timezone.utc,
-                        ).timestamp()
-                        if rts > now_ts and url not in self._podcast_recheck_timers:
-                            delay_ms = int((rts - now_ts) * 1000)
-                            t = QTimer(self)
-                            t.setSingleShot(True)
-                            t.timeout.connect(
-                                lambda u=url: self.request_detected(
-                                    [u],
-                                    "audio_playlists",
-                                ),
-                            )
-                            try:
-                                t.start(delay_ms)
-                                self._podcast_recheck_timers[url] = t
-                            except (RuntimeError, ValueError, TypeError) as exc:
-                                # If timer scheduling fails, just log and continue
-                                self.logEdit.appendPlainText(
-                                    f"Failed to schedule recheck timer for {url}",
-                                )
-                                utils.log_exception(
-                                    exc,
-                                    f"Failed to schedule recheck timer for {url}",
-                                )
-                    else:
-                        # Remove any stale scheduled time and cancel any timer
-                        self._podcast_recheck_times.pop(url, None)
-                        t = self._podcast_recheck_timers.pop(url, None)
-                        if t:
-                            with contextlib.suppress(Exception):
-                                t.stop()
-                except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
-                    utils.log_exception(
-                        exc,
-                        "Unexpected error while processing podcast statuses",
-                    )
+            self._schedule_podcast_rechecks(statuses)
 
-        # Update internal state
         self._last_podcast_check_error = had_error
         self._podcast_pending_urls.clear()
         for v in pending:
-            self._podcast_pending_urls.add(v.get("url") if isinstance(v, dict) else v)
+            url = v.get("url") if isinstance(v, dict) else v
+            if url:
+                self._podcast_pending_urls.add(url)
 
-        # Queue downloads if present
         if to_download:
-            # Determine if we received enriched objects or plain URLs
-            is_obj_list = (
-                isinstance(to_download, list)
-                and len(to_download) > 0
-                and isinstance(to_download[0], dict)
-            )
-            if is_obj_list:
-                # Group per playlist label and set per-group outtmpl
-                base_dir = str(PODCAST_MISC_OUTPUT_DIR.parent)
-                groups: dict[str, list[str]] = {}
-                for obj in to_download:
-                    try:
-                        label = obj.get("playlist") or "misc"
-                    except (AttributeError, TypeError) as exc:
-                        label = "misc"
-                        utils.log_exception(
-                            exc,
-                            "Failed to read playlist label from podcast object",
-                        )
-                    # Enforce safe/short label for Windows paths
-                    safe_label = utils.slugify_if_too_long(base_dir, label)
-                    url = obj.get("url") if isinstance(obj, dict) else obj
-                    if url:
-                        groups.setdefault(safe_label, []).append(url)
-                for label, urls in groups.items():
-                    qhook, qlogger, batch_opts = self._fork_download_context(
-                        ydl_opts if isinstance(ydl_opts, dict) else {},
-                    )
-                    batch_opts["outtmpl"] = f"{base_dir}/{label}/%(title)s.%(ext)s"
-                    self.downloadQueue.put((urls, batch_opts))
-                    self._wire_download_signals(qhook, qlogger)
-                    if not hasattr(self, "_active_qhooks"):
-                        self._active_qhooks = []
-                    self._active_qhooks.append((qhook, qlogger))
-                self.barProgress.setRange(0, 1)
+            if isinstance(to_download[0], dict):
+                self._queue_podcast_downloads_grouped(to_download, ydl_opts)
             else:
-                qhook, qlogger, download_opts = self._fork_download_context(
-                    ydl_opts if isinstance(ydl_opts, dict) else {},
-                )
-                self.downloadQueue.put((to_download, download_opts))
-                self._wire_download_signals(qhook, qlogger)
-                if not hasattr(self, "_active_qhooks"):
-                    self._active_qhooks = []
-                self._active_qhooks.append((qhook, qlogger))
-                self.barProgress.setRange(0, 1)
+                self._queue_podcast_downloads_flat(to_download, ydl_opts)
 
-        # Update indicator according to results
-        if had_error:
-            self._set_podcast_indicator("error")
-        elif to_download:
-            self._set_podcast_indicator("busy")
-        elif self._podcast_pending_urls:
-            self._set_podcast_indicator("pending")
-        else:
-            self._set_podcast_indicator("all_good")
-
-        # Reset running flag
+        self._update_podcast_indicator(
+            had_error,
+            to_download,
+            self._podcast_pending_urls,
+        )
         self._podcast_check_running = False
 
-        if not to_download and not self._podcast_pending_urls:
+        if not had_error and not to_download and not self._podcast_pending_urls:
             self.logEdit.appendPlainText(
                 "No eligible podcast episodes found for immediate download. Pending items will be rechecked at the next scheduled YT Podcasts check.",
             )
-        # Summarize results in the UI log
         self.logEdit.appendPlainText(
             f"Podcast check complete: {len(to_download)} queued, {len(self._podcast_pending_urls)} pending, error={had_error}",
         )
-        # Auto-refresh the Podcast Status dialog if it is visible so users see results immediately
         try:
             self._refresh_podcast_status_dialog()
         except (RuntimeError, AttributeError) as e:
-            # Don't let refresh errors interfere with normal operation; log them for debugging
             self.logEdit.appendPlainText(f"Error refreshing Podcast Status dialog: {e}")
             utils.log_exception(e, "Error refreshing Podcast Status dialog")
 
@@ -1871,3 +1878,4 @@ if __name__ == "__main__":
 # TODO: size control for error logs
 # TODO: settings for making things more general, especially folder locations. Also, make sure no paths are hardcoded that should be config
 # TODO: make sure tfarchive.txt is checked first, always, for efficiency
+# TODO: fix the error/history log times to be local time

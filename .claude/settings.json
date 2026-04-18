@@ -28,7 +28,9 @@
       "Bash(python -m pytest tests/)",
       "Bash(python -m pytest tests/test_private_video_handling.py::test_filter_audio_playlist_urls_with_private -v)",
       "Bash(python -m ruff check \"vid downloader.pyw\" --select C901,PLR0912,PLR0915)",
-      "Bash(python -m pytest tests/ -q)"
+      "Bash(python -m pytest tests/ -q)",
+      "Bash(git stash *)",
+      "Bash(grep -v \"^$\")"
     ],
     "deny": [
       "Bash(rm -rf *)",

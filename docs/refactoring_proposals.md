@@ -61,16 +61,10 @@ Extracted 4 helpers on `MyWindow`: `_episode_already_archived`, `_skip_if_update
 
 ---
 
-### [R08] `_on_podcast_check_finished()` is 163 lines — noqa'd for complexity
+### ~~[R08] `_on_podcast_check_finished()` is 163 lines — noqa'd for complexity~~ ✅ DONE
 **Effort:** High | **File:** `vid downloader.pyw:1435–1597`
 
-Suppresses `C901`, `PLR0912`, `PLR0913`, `PLR0915`. Signal connections (`qhook.info_changed.connect`, `qlogger.message_changed.connect`) are duplicated at lines 1549 and 1562 inside separate branches.
-
-**Action:** Extract:
-- `_process_podcast_statuses(statuses) -> None`
-- `_queue_podcast_downloads_grouped(to_download, ydl_opts) -> None`
-- `_queue_podcast_downloads_flat(to_download, ydl_opts) -> None`
-- `_update_podcast_indicator_from_results(had_error, to_download, pending) -> None`
+Extracted 4 helpers: `_schedule_podcast_rechecks`, `_queue_podcast_downloads_grouped`, `_queue_podcast_downloads_flat`, `_update_podcast_indicator`. Main method reduced from 163 lines to ~35 lines. Removed `C901`, `PLR0912`, `PLR0915` suppressions; `PLR0913` retained (6 params). Also fixed 4 latent bugs found during QA: `url=None` written to recheck dicts, `None` added to pending URLs set, "no eligible episodes" message emitting on error path, and `barProgress.setRange` firing with empty groups. 243 tests pass.
 
 ---
 
@@ -226,7 +220,7 @@ Validates skip callback, builds base properties, conditionally adds archive path
 | ~~R05~~ | 9        | Medium | Repeated init pattern ✅ |
 | ~~R06~~ | 8        | Medium | Structural ✅          |
 | ~~R07~~ | 8        | High   | Long function ✅       |
-| R08 | 8        | High   | Long function          |
+| ~~R08~~ | 8        | High   | Long function ✅       |
 | R09 | 7        | Medium | Duplicate structure    |
 | ~~R10~~ | 7        | Low    | Duplicate pattern ✅   |
 | ~~R11~~ | 7        | Low    | Duplicate literal ✅   |
