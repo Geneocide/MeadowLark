@@ -16,7 +16,11 @@
       "Bash(head( .*)?)",
       "Bash(tail( .*)?)",
       "Bash(sed( .*)?)",
-      "Bash(.venv/Scripts/python -m pytest tests/test_live_queue.py -v)"
+      "Bash(.venv/Scripts/python -m pytest tests/test_live_queue.py -v)",
+      "Bash(python -m ruff check src/match_filter.py)",
+      "Bash(python -m pytest tests/ -v --tb=short -q)",
+      "Bash(ruff check *)",
+      "Bash(pytest tests/ -q --tb=short)"
     ],
     "deny": [
       "Bash(rm -rf *)",

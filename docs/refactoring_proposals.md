@@ -8,12 +8,10 @@ Pick items by ID and ask Claude to implement them one at a time.
 
 ## Priority 10 — Critical Duplicates
 
-### [R01] `make_match_filter()` defined identically in two modules
-**Effort:** Low | **Files:** `vid downloader.pyw:761–796`, `src/download_service.py:237–274`
+### ~~[R01] `make_match_filter()` defined identically in two modules~~ ✅ DONE
+**Effort:** Low | **Files:** `src/match_filter.py` (new), `vid downloader.pyw`, `src/download_service.py`
 
-The entire function — including the inner closure, all live/upcoming skip logic, and exception handling — is copy-pasted between the main file and the service. Any bug fix must be applied twice.
-
-**Action:** Extract to `src/match_filter.py` as a standalone factory function; import and call it in both modules.
+Extracted to `src/match_filter.py` as `build_match_filter()` factory accepting `add_to_queue_fn` and `log_fn` callbacks. Both classes are now 5-line wrappers. 238 tests pass.
 
 ---
 
@@ -263,7 +261,7 @@ Validates skip callback, builds base properties, conditionally adds archive path
 
 | ID  | Priority | Effort | Category               |
 |-----|----------|--------|------------------------|
-| R01 | 10       | Low    | Critical duplicate     |
+| ~~R01~~ | 10       | Low    | Critical duplicate ✅  |
 | R02 | 10       | Low    | Hardcoded paths        |
 | R03 | 9        | Low    | Duplicate logic        |
 | R04 | 9        | Low    | Duplicate logic        |

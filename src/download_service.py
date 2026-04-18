@@ -16,6 +16,7 @@ import yt_dlp
 import QYT
 import utils
 from src import live_queue
+from src.match_filter import build_match_filter
 from src.config import (
     LIVE_QUEUE_FILE,
     PLAYLISTS_720_FILE,
@@ -236,43 +237,12 @@ class DownloadService:
         self.handle_queue_empty_callback()
 
     def make_match_filter(self, source: str) -> Callable:
-        """
-        Build a custom match_filter that skips live/upcoming videos and records them for later.
-
-        Args:
-            source (str): The source type.
-
-        Returns:
-            Callable: The match_filter function.
-        """
-
-        def _mf(info: dict, incomplete: bool) -> str | None:  # noqa: ARG001,FBT001
-            try:
-                is_live = info.get("is_live")
-                live_status = info.get("live_status")
-                availability = info.get("availability")
-                if availability in ("needs_auth", "scheduled"):
-                    return f"Skipping: {availability}"
-                if is_live or live_status in ("is_live", "is_upcoming"):
-                    url = (
-                        info.get("webpage_url")
-                        or info.get("original_url")
-                        or info.get("url")
-                    )
-                    if url:
-                        playlist_id = info.get("playlist_id")
-                        self.add_to_live_queue_callback(url, source, playlist_id)
-                        self.log_edit_append_callback(
-                            f"Queued live for later: {url} [{source}]",
-                        )
-                    return "Skipping live; queued for later"
-            except (TypeError, AttributeError) as exc:
-                # If anything goes wrong, allow download to proceed rather than crash
-                utils.log_exception(exc, "Error in match_filter")
-                return None
-            return None
-
-        return _mf
+        """Build a match_filter that skips live/upcoming videos and queues them."""
+        return build_match_filter(
+            source,
+            add_to_queue_fn=self.add_to_live_queue_callback,
+            log_fn=self.log_edit_append_callback,
+        )
 
     def load_live_queue(self) -> live_queue.LiveQueueEntries:
         """Load live queue entries; returns {url: (source, playlist_id)}."""
