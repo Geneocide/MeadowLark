@@ -5,8 +5,10 @@ from typing import Any
 from .config import (
     COOKIES_FILE,
     MAX_FRAGMENT_RETRIES,
+    PODCAST_MISC_OUTPUT_DIR,
     SOCKET_TIMEOUT_SECONDS,
     VENV_SCRIPTS_DIR,
+    VIDEO_STORAGE_DIR,
 )
 from .dict_utils import _default_postprocessors
 
@@ -60,18 +62,14 @@ def get_source_options(source: str) -> dict[str, Any]:
             "postprocessors": [
                 {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
             ],
-            "outtmpl": (
-                "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/misc/%(title)s.%(ext)s"
-            ),
+            "outtmpl": (PODCAST_MISC_OUTPUT_DIR / "%(title)s.%(ext)s").as_posix(),
         },
         "audio_playlists": {
             "format": "m4a/bestaudio/best",
             "postprocessors": [
                 {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
             ],
-            "outtmpl": (
-                "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/misc/%(title)s.%(ext)s"
-            ),
+            "outtmpl": (PODCAST_MISC_OUTPUT_DIR / "%(title)s.%(ext)s").as_posix(),
             "ignoreerrors": "only_download",
         },
         "720playlists": {
@@ -81,9 +79,7 @@ def get_source_options(source: str) -> dict[str, Any]:
                 "best[height=720]/best"
             ),
             "merge_output_format": "mp4",
-            "outtmpl": (
-                "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s"
-            ),
+            "outtmpl": (VIDEO_STORAGE_DIR / "%(playlist)s" / "%(playlist_index)s - %(title)s.%(ext)s").as_posix(),
             "ignoreerrors": "only_download",
         },
         "1080playlists": {
@@ -93,9 +89,7 @@ def get_source_options(source: str) -> dict[str, Any]:
                 "best[height=1080]/best"
             ),
             "merge_output_format": "mp4",
-            "outtmpl": (
-                "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s"
-            ),
+            "outtmpl": (VIDEO_STORAGE_DIR / "%(playlist)s" / "%(playlist_index)s - %(title)s.%(ext)s").as_posix(),
             "ignoreerrors": "only_download",
         },
     }
@@ -120,7 +114,7 @@ def get_source_options(source: str) -> dict[str, Any]:
     return {
         "format": format_string,
         "merge_output_format": "mp4",
-        "outtmpl": "E:/vid storage/%(title)s.%(ext)s",
+        "outtmpl": (VIDEO_STORAGE_DIR / "%(title)s.%(ext)s").as_posix(),
         "postprocessors": _default_postprocessors(),
     }
 

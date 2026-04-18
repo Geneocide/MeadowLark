@@ -38,10 +38,7 @@ def test_skip_downloading_appends_new_ids(tmp_path) -> None:
     archive_path = tmp_path / "tfarchive.txt"
     archive_path.write_text("youtube abc123\n")
 
-    def fake_path(path_str):
-        return tmp_path / Path(path_str).name
-
-    with patch("src.download_service.Path", side_effect=fake_path):
+    with patch("src.download_service.ARCHIVE_PATH", archive_path):
         with patch("src.download_service.yt_dlp.YoutubeDL") as mock_ydl_class:
             mock_ydl_instance = MagicMock()
             mock_ydl_instance.extract_info.return_value = {
@@ -66,10 +63,9 @@ def test_skip_downloading_appends_new_ids(tmp_path) -> None:
 def test_skip_downloading_creates_archive_if_missing(tmp_path) -> None:
     service = make_service()
 
-    def fake_path(path_str):
-        return tmp_path / Path(path_str).name
+    archive_path = tmp_path / "tfarchive.txt"
 
-    with patch("src.download_service.Path", side_effect=fake_path):
+    with patch("src.download_service.ARCHIVE_PATH", archive_path):
         with patch("src.download_service.yt_dlp.YoutubeDL") as mock_ydl_class:
             mock_ydl_instance = MagicMock()
             mock_ydl_instance.extract_info.return_value = {
@@ -81,6 +77,5 @@ def test_skip_downloading_creates_archive_if_missing(tmp_path) -> None:
                 ["https://youtube.com/watch?v=test"], "audio_playlists"
             )
 
-    archive_path = tmp_path / "tfarchive.txt"
     assert archive_path.exists()
     assert archive_path.read_text().strip() == "youtube newid"

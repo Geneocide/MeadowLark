@@ -72,6 +72,7 @@ import QYT
 import utils
 from src import live_queue
 from src.config import (
+    ARCHIVE_PATH,
     LABEL_OUTPUT_FONT_NAME,
     LABEL_OUTPUT_FONT_SIZE,
     LABEL_READY_TEXT,
@@ -80,6 +81,8 @@ from src.config import (
     PLAYLISTS_720_FILE,
     PLAYLISTS_AUDIO_FILE,
     PLAYLISTS_FILE,
+    PODCAST_MISC_OUTPUT_DIR,
+    VIDEO_STORAGE_DIR,
     YDL_COMMON_ERRORS,
     YDL_EXTRACTION_ERRORS,
 )
@@ -390,14 +393,14 @@ class MyWindow(QWidget):
                 "postprocessors": [
                     {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
                 ],
-                "outtmpl": "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/misc/%(title)s.%(ext)s",
+                "outtmpl": (PODCAST_MISC_OUTPUT_DIR / "%(title)s.%(ext)s").as_posix(),
             },
             "audio_playlists": {
                 "format": "m4a/bestaudio/best",
                 "postprocessors": [
                     {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
                 ],
-                "outtmpl": "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/misc/%(title)s.%(ext)s",
+                "outtmpl": (PODCAST_MISC_OUTPUT_DIR / "%(title)s.%(ext)s").as_posix(),
                 "ignoreerrors": "only_download",
             },
             "720playlists": {
@@ -408,7 +411,7 @@ class MyWindow(QWidget):
                     "best[height=720]/best"
                 ),
                 "merge_output_format": "mp4",
-                "outtmpl": "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s",
+                "outtmpl": (VIDEO_STORAGE_DIR / "%(playlist)s" / "%(playlist_index)s - %(title)s.%(ext)s").as_posix(),
                 "ignoreerrors": "only_download",
             },
             "1080playlists": {
@@ -419,7 +422,7 @@ class MyWindow(QWidget):
                     "best[height=1080]/best"
                 ),
                 "merge_output_format": "mp4",
-                "outtmpl": "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s",
+                "outtmpl": (VIDEO_STORAGE_DIR / "%(playlist)s" / "%(playlist_index)s - %(title)s.%(ext)s").as_posix(),
                 "ignoreerrors": "only_download",
             },
         }
@@ -446,7 +449,7 @@ class MyWindow(QWidget):
         return {
             "format": fmt,
             "merge_output_format": "mp4",
-            "outtmpl": "E:/vid storage/%(title)s.%(ext)s",
+            "outtmpl": (VIDEO_STORAGE_DIR / "%(title)s.%(ext)s").as_posix(),
             "match_filter": self.make_match_filter(source),
         }
 
@@ -558,7 +561,7 @@ class MyWindow(QWidget):
         self.labelOutput.setText("Skipping downloads.")
         qlogger = QYT.QLogger(self.downloadQueue)
         total_added = 0
-        archive_path = Path("C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt")
+        archive_path = ARCHIVE_PATH
         # Read existing IDs using centralized function
         existing_ids = load_downloaded_video_ids(str(archive_path))
         for url in urls:
@@ -608,9 +611,7 @@ class MyWindow(QWidget):
 
         # ignore archive checkbox
         if not self.checkIgnoreArchive.isChecked():
-            properties["download_archive"] = (
-                "C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt"
-            )
+            properties["download_archive"] = str(ARCHIVE_PATH)
 
         # detect if YT
         if "youtube.com" in urls[0]:
@@ -1475,7 +1476,7 @@ class MyWindow(QWidget):
             )
             if is_obj_list:
                 # Group per playlist label and set per-group outtmpl
-                base_dir = "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts"
+                base_dir = str(PODCAST_MISC_OUTPUT_DIR.parent)
                 groups: dict[str, list[str]] = {}
                 for obj in to_download:
                     try:
@@ -1609,7 +1610,7 @@ class MyWindow(QWidget):
             return statuses
 
         # read archive ids
-        archive_path = "C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt"
+        archive_path = str(ARCHIVE_PATH)
         archived_ids: set[str] = set()
         if Path(archive_path).exists():
             try:

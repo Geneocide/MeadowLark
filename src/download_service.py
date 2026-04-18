@@ -16,14 +16,15 @@ import yt_dlp
 import QYT
 import utils
 from src import live_queue
-from src.match_filter import build_match_filter
 from src.config import (
+    ARCHIVE_PATH,
     LIVE_QUEUE_FILE,
     PLAYLISTS_720_FILE,
     PLAYLISTS_AUDIO_FILE,
     PLAYLISTS_FILE,
     YDL_EXTRACTION_ERRORS,
 )
+from src.match_filter import build_match_filter
 
 
 class DownloadService:
@@ -170,9 +171,7 @@ class DownloadService:
 
         # ignore archive checkbox
         if not self.ignore_archive_callback():
-            properties["download_archive"] = (
-                "C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt"
-            )
+            properties["download_archive"] = str(ARCHIVE_PATH)
 
         # detect if YT
         if "youtube.com" in urls[0]:
@@ -204,7 +203,7 @@ class DownloadService:
         self.label_output_set_text_callback("Skipping downloads.")
         qlogger = self.qlogger_factory()
         total_added = 0
-        archive_path = Path("C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt")
+        archive_path = ARCHIVE_PATH
         # Read existing IDs into a set
         if archive_path.exists():
             with archive_path.open("r", encoding="utf-8") as archive:

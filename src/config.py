@@ -67,6 +67,20 @@ PLAYLISTS_AUDIO_FILE: Final[Path] = _resolve_path(
     PLAYLISTS_DIR / "audio playlists.txt",
 )
 
+# External storage paths
+ARCHIVE_PATH: Final[Path] = _resolve_path(
+    "VID_DL_ARCHIVE_PATH",
+    "C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt",
+)
+PODCAST_MISC_OUTPUT_DIR: Final[Path] = _resolve_path(
+    "VID_DL_PODCAST_MISC_OUTPUT_DIR",
+    "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/misc",
+)
+VIDEO_STORAGE_DIR: Final[Path] = _resolve_path(
+    "VID_DL_VIDEO_STORAGE_DIR",
+    "E:/vid storage",
+)
+
 # JavaScript runtime configuration
 VENV_SCRIPTS_DIR: Final[Path] = _resolve_path("VID_DL_VENV_SCRIPTS", ".venv/Scripts")
 

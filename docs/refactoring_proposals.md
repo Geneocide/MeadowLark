@@ -15,12 +15,10 @@ Extracted to `src/match_filter.py` as `build_match_filter()` factory accepting `
 
 ---
 
-### [R02] Hardcoded paths scattered across 6+ locations
+### ~~[R02] Hardcoded paths scattered across 6+ locations~~ ✅ DONE
 **Effort:** Low | **Files:** `vid downloader.pyw:559,610,1525,1659`, `src/download_service.py:172,205`, `src/ydl_options.py:64,73,85,97,123`
 
-`C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt`, `E:/vid storage/`, and the podcast base dir all appear hardcoded in multiple files. Any path change requires hunting across the codebase.
-
-**Action:** Move all to `src/config.py` as named constants: `ARCHIVE_PATH`, `PODCAST_BASE_DIR`, `VIDEO_STORAGE_DIR`, `AUDIO_OUTPUT_DIR`. Update all references.
+Added `ARCHIVE_PATH`, `PODCAST_MISC_OUTPUT_DIR`, and `VIDEO_STORAGE_DIR` to `src/config.py` with env-var override support (`VID_DL_ARCHIVE_PATH`, `VID_DL_PODCAST_MISC_OUTPUT_DIR`, `VID_DL_VIDEO_STORAGE_DIR`). All 14 hardcoded path strings replaced. Used `.as_posix()` for outtmpl strings to preserve forward-slash separators. 238 tests pass.
 
 ---
 
@@ -262,7 +260,7 @@ Validates skip callback, builds base properties, conditionally adds archive path
 | ID  | Priority | Effort | Category               |
 |-----|----------|--------|------------------------|
 | ~~R01~~ | 10       | Low    | Critical duplicate ✅  |
-| R02 | 10       | Low    | Hardcoded paths        |
+| ~~R02~~ | 10       | Low    | Hardcoded paths ✅     |
 | R03 | 9        | Low    | Duplicate logic        |
 | R04 | 9        | Low    | Duplicate logic        |
 | R05 | 9        | Medium | Repeated init pattern  |
