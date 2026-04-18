@@ -44,7 +44,10 @@
       "Bash(python -m ruff check src/ydl_options.py src/qt_protocols.py)",
       "Bash(py -m ruff --version)",
       "Bash(python3 -m ruff --version)",
-      "Bash(pytest tests/ -q)"
+      "Bash(pytest tests/ -q)",
+      "Bash(python -m pytest tests/ -x -q)",
+      "Bash(python -m pytest tests/test_download_service.py -q)",
+      "Bash(python -m ruff check src/download_service.py tests/test_download_service.py)"
     ],
     "deny": [
       "Bash(rm -rf *)",

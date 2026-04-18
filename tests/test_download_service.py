@@ -3,6 +3,7 @@
 from queue import Queue
 from unittest.mock import MagicMock, Mock, patch
 
+from src.config import ARCHIVE_PATH
 from src.download_service import DownloadService
 
 
@@ -80,7 +81,7 @@ def test_load_playlist_urls_reads_existing_file(tmp_path, monkeypatch) -> None:
     playlist_file = tmp_path / "playlists.txt"
     playlist_file.write_text("https://example.com/video1\nhttps://example.com/video2\n")
 
-    from src import download_service
+    from src import download_service  # noqa: PLC0415
 
     monkeypatch.setattr(download_service, "PLAYLISTS_FILE", playlist_file)
     monkeypatch.setattr(download_service, "PLAYLISTS_720_FILE", playlist_file)
@@ -103,3 +104,45 @@ def test_get_source_options_audio_playlists_has_ignore_errors() -> None:
     assert options["outtmpl"].startswith(
         "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/misc/"
     )
+
+
+def test_add_archive_if_needed_adds_path() -> None:
+    service = make_service(ignore_archive_callback=lambda: False)
+    props: dict = {}
+    service._add_archive_if_needed(props)
+    assert props.get("download_archive") == str(ARCHIVE_PATH)
+
+
+def test_add_archive_if_needed_skips_when_ignored() -> None:
+    service = make_service(ignore_archive_callback=lambda: True)
+    props: dict = {}
+    service._add_archive_if_needed(props)
+    assert "download_archive" not in props
+
+
+def test_add_match_filter_for_youtube_url() -> None:
+    service = make_service()
+    props: dict = {}
+    service._add_match_filter_if_youtube(props, ["https://youtube.com/watch?v=abc"], "1080")
+    assert "match_filter" in props
+
+
+def test_add_match_filter_skipped_for_non_youtube() -> None:
+    service = make_service()
+    props: dict = {}
+    service._add_match_filter_if_youtube(props, ["https://twitch.tv/stream"], "1080")
+    assert "match_filter" not in props
+
+
+def test_strip_watch_later_list_param_removes_list() -> None:
+    service = make_service()
+    urls = ["https://youtube.com/watch?v=abc&list=WL&index=3"]
+    service._strip_watch_later_list_param(urls)
+    assert urls[0] == "https://youtube.com/watch?v=abc"
+
+
+def test_strip_watch_later_list_param_leaves_playlist_url_alone() -> None:
+    service = make_service()
+    urls = ["https://youtube.com/playlist?list=PLabc"]
+    service._strip_watch_later_list_param(urls)
+    assert urls[0] == "https://youtube.com/playlist?list=PLabc"

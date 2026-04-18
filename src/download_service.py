@@ -141,38 +141,36 @@ class DownloadService:
         """
         Build yt-dlp options dict based on URLs and source type.
 
-        Args:
-            urls: List of URLs to process.
-            source: The source type (e.g., "1080playlists", "audio").
-
-        Returns:
-            Dict of yt-dlp options, or None if download should be skipped/cancelled.
+        Returns None if the download should be skipped or there are no URLs.
         """
         if self.skip_download_callback():
             self.skip_downloading(urls, source)
             return None
 
-        # If a playlist file contained no URLs, bail out early to avoid errors
         if not urls:
             self.log_edit_append_callback(f"No URLs found for source: {source}")
             return None
 
         properties = utils.get_source_options(source)
+        self._add_archive_if_needed(properties)
+        self._add_match_filter_if_youtube(properties, urls, source)
+        self._strip_watch_later_list_param(urls)
+        return properties
 
-        # ignore archive checkbox
+    def _add_archive_if_needed(self, properties: dict) -> None:
+        """Add the download archive path to properties unless the user opted to ignore it."""
         if not self.ignore_archive_callback():
             properties["download_archive"] = str(ARCHIVE_PATH)
 
-        # detect if YT
-        if "youtube.com" in urls[0]:
-            # Use a custom match_filter that records live videos for later
+    def _add_match_filter_if_youtube(self, properties: dict, urls: list, source: str) -> None:
+        """Attach a custom match_filter for YouTube URLs to skip and queue live videos."""
+        if urls and "youtube.com" in urls[0]:
             properties["match_filter"] = self.make_match_filter(source)
 
-        # strip out unnecessary parts of URL if dropping from Watch Later
-        if "youtube.com/watch" in urls[0] and "&list=" in urls[0]:
+    def _strip_watch_later_list_param(self, urls: list) -> None:
+        """Remove the &list= parameter from a Watch Later URL in place."""
+        if urls and "youtube.com/watch" in urls[0] and "&list=" in urls[0]:
             urls[0] = urls[0].split("&list=")[0]
-
-        return properties
 
     def append_properties(self, ydl_opts: dict, properties: dict) -> dict | None:
         """

@@ -190,12 +190,10 @@ Replaced orphan `"."` summary line with `"Fetch the latest accessible (non-priva
 
 ---
 
-### [R25] `DownloadService.get_options()` mixes five concerns in 37 lines
+### ~~[R25] `DownloadService.get_options()` mixes five concerns in 37 lines~~ ✅ DONE
 **Effort:** Medium | **File:** `src/download_service.py:147–184`
 
-Validates skip callback, builds base properties, conditionally adds archive path, registers match filter for YouTube, and strips URL parameters — all in sequence with no helper calls.
-
-**Action:** Extract `_add_archive_if_needed(properties)`, `_prepare_youtube_urls(urls) -> list[str]`, `_add_match_filter_for_youtube(properties, source)`.
+Extracted three private helpers: `_add_archive_if_needed(properties)`, `_add_match_filter_if_youtube(properties, urls, source)`, and `_strip_watch_later_list_param(urls)`. `get_options` body shrinks from 36 to 15 lines; each policy is now a named, independently-testable call. Six new unit tests added to `tests/test_download_service.py`. QA identified pre-existing false-positive domain detection (plain substring `"youtube.com" in url`) and missing `?list=` stripping (requires leading `&`); these are out of scope for this refactoring (no behavior change). 293 tests pass, 1 skipped.
 
 ---
 
@@ -227,4 +225,4 @@ Validates skip callback, builds base properties, conditionally adds archive path
 | ~~R22~~ | 4        | Low    | Dead code ✅           |
 | ~~R23~~ | 3        | Low    | Magic numbers ✅       |
 | ~~R24~~ | 3        | Low    | Docstring ✅           |
-| R25 | 3        | Medium | Long function          |
+| ~~R25~~ | 3        | Medium | Long function ✅       |
