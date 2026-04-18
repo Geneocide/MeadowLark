@@ -25,6 +25,7 @@ from src.config import (
     YDL_EXTRACTION_ERRORS,
 )
 from src.match_filter import build_match_filter
+from src.playlist_utils import load_playlist_urls
 from src.podcast_filtering import load_downloaded_video_ids
 
 
@@ -125,28 +126,16 @@ class DownloadService:
             return ("podcast_check", urls, ydl_opts)
         return ("queue", urls, ydl_opts)
 
-    def _load_playlist_urls(self, source: str) -> list | None:
-        """
-        Load playlist URLs from the appropriate file based on the source.
-
-        Args:
-            source (str): The source type (e.g., "1080playlists", "720playlists", "audio_playlists").
-
-        Returns:
-            list: List of URLs from the playlist file, or None if not a playlist source.
-        """
+    def _load_playlist_urls(self, source: str) -> list[str] | None:
+        """Load playlist URLs from the appropriate file based on the source."""
         playlist_files = {
             "1080playlists": PLAYLISTS_FILE,
             "720playlists": PLAYLISTS_720_FILE,
             "audio_playlists": PLAYLISTS_AUDIO_FILE,
         }
-        if source in playlist_files:
-            playlist_file = Path(playlist_files[source])
-            if playlist_file.exists():
-                with playlist_file.open("r", encoding="utf-8") as f:
-                    urls = [line.strip() for line in f if line.strip() and not line.startswith("#")]
-                return urls
-        return None
+        if source not in playlist_files:
+            return None
+        return load_playlist_urls(Path(playlist_files[source])) or None
 
     def get_options(self, urls: list, source: str) -> dict | None:
         """

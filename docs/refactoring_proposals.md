@@ -91,12 +91,10 @@ Added `_QUIET_YDL_OPTS: dict[str, bool] = {"quiet": True, "no_warnings": True}` 
 
 ---
 
-### [R12] Playlist file loading inconsistent between two modules
+### ~~[R12] Playlist file loading inconsistent between two modules~~ ✅ DONE
 **Effort:** Medium | **Files:** `src/playlist_utils.py:99–119`, `src/download_service.py:142–145`
 
-`playlist_utils.py` loads playlist files with comment support; `download_service.py` does a simpler line-by-line read with no comment handling.
-
-**Action:** Unify in `src/playlist_utils.py` as `load_playlist_file(path, include_comments=False) -> dict[str, str] | list[str]`; update `download_service.py` to call it.
+Added `load_playlist_urls(path: Path) -> list[str]` to `src/playlist_utils.py` — filters blank lines and comments, catches `OSError`/`UnicodeDecodeError`, returns `[]` on failure. `_load_playlist_urls` in `download_service.py` reduced from 20 lines to 4, now delegates to the shared helper (with `or None` to preserve caller contract). Created `tests/test_playlist_utils.py` with 22 tests (boundary matrix from QA). QA-identified bug fixed: original plan only caught `OSError`; `UnicodeDecodeError` added for non-UTF-8 files. 263 tests pass, 1 skipped (chmod on Windows).
 
 ---
 
@@ -222,7 +220,7 @@ Validates skip callback, builds base properties, conditionally adds archive path
 | ~~R09~~ | 7        | Medium | Duplicate structure ✅ |
 | ~~R10~~ | 7        | Low    | Duplicate pattern ✅   |
 | ~~R11~~ | 7        | Low    | Duplicate literal ✅   |
-| R12 | 7        | Medium | Inconsistent loading   |
+| ~~R12~~ | 7        | Medium | Inconsistent loading ✅ |
 | ~~R13~~ | 7        | Low    | Duplicate construction ✅ |
 | R14 | 6        | Medium | Long function          |
 | R15 | 6        | High   | Long / possibly dead   |

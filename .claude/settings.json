@@ -31,7 +31,13 @@
       "Bash(python -m pytest tests/ -q)",
       "Bash(git stash *)",
       "Bash(grep -v \"^$\")",
-      "Bash(python -m ruff check src/download_executor.py)"
+      "Bash(python -m ruff check src/download_executor.py)",
+      "Bash(python -m ruff check src/playlist_utils.py src/download_service.py tests/test_playlist_utils.py)",
+      "Bash(python -m py_compile src/playlist_utils.py src/download_service.py tests/test_playlist_utils.py)",
+      "Bash(where ruff *)",
+      "Bash(ruff --version)",
+      "Bash(pip show *)",
+      "Bash(python -m pytest tests/ -q --tb=short)"
     ],
     "deny": [
       "Bash(rm -rf *)",

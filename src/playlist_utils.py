@@ -72,6 +72,25 @@ def get_playlist_file_for_source(source: str) -> str | None:
     return mapping.get(source)
 
 
+def load_playlist_urls(path: Path) -> list[str]:
+    """Return all non-blank, non-comment lines from a playlist file as raw URL strings.
+
+    Returns an empty list if the file does not exist or cannot be read.
+    """
+    if not path.exists():
+        return []
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return [
+                line.strip()
+                for line in f
+                if line.strip() and not line.strip().startswith("#")
+            ]
+    except (OSError, UnicodeDecodeError) as exc:
+        log_exception(exc, f"Failed to read playlist file: {path}")
+        return []
+
+
 def load_playlist_comments_for_source(source: str) -> dict[str, str]:
     """Return {playlist_id: comment} for all commented entries in the source playlist file.
 
