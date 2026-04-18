@@ -11,6 +11,7 @@ from .config import (
     VIDEO_STORAGE_DIR,
 )
 from .dict_utils import DEFAULT_POSTPROCESSORS
+from .qt_protocols import YdlLogger, YdlProgressHook
 
 # JavaScript runtimes configuration
 JS_RUNTIMES_CONFIG = {
@@ -20,7 +21,7 @@ JS_RUNTIMES_CONFIG = {
 }
 
 
-def build_base_ydl_opts(logger: Any, qhook: Any) -> dict[str, Any]:  # noqa: ANN401
+def build_base_ydl_opts(logger: YdlLogger, qhook: YdlProgressHook) -> dict[str, Any]:
     """
     Centralize common yt-dlp options used across the app.
 

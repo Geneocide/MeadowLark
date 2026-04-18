@@ -144,12 +144,10 @@ Replaced function with `DEFAULT_POSTPROCESSORS: list[dict[str, Any]]` constant. 
 
 ---
 
-### [R19] `Any` type hints on `logger`/`qhook` params lack protocol or noqa
+### ~~[R19] `Any` type hints on `logger`/`qhook` params lack protocol or noqa~~ ✅ DONE
 **Effort:** Medium | **File:** `src/ydl_options.py:21,26`
 
-`build_base_ydl_opts(logger: Any, qhook: Any)` is too broad — Ruff's ANN401 will flag this. These objects have known shapes.
-
-**Action:** Define a minimal `QLogger` / `QHook` Protocol in `src/qt_types.py` (or use the actual class types); replace `Any` with the protocol.
+Created `src/qt_protocols.py` with `YdlLogger` (`@runtime_checkable` Protocol) and `YdlProgressHook` Protocol. Updated `build_base_ydl_opts` signature to use them; removed `# noqa: ANN401`. 287 tests pass.
 
 ---
 
@@ -223,7 +221,7 @@ Validates skip callback, builds base properties, conditionally adds archive path
 | ~~R16~~ | 6        | Low    | Long function ✅       |
 | ~~R17~~ | 5        | Low    | Ruff violation ✅      |
 | ~~R18~~ | 5        | Low    | Type / style ✅        |
-| R19 | 5        | Medium | Type hints             |
+| ~~R19~~ | 5        | Medium | Type hints ✅          |
 | ~~R20~~ | 5        | Low    | Unused annotation ✅   |
 | ~~R21~~ | 4        | Low    | Dead code ✅           |
 | ~~R22~~ | 4        | Low    | Dead code ✅           |
