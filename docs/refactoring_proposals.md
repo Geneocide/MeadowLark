@@ -38,12 +38,10 @@ Created `src/url_utils.py` with `extract_playlist_id(url: str) -> str | None`. U
 
 ---
 
-### [R05] QHook/QLogger/ydl_opts initialization repeated 6+ times
+### ~~[R05] QHook/QLogger/ydl_opts initialization repeated 6+ times~~ ✅ DONE
 **Effort:** Medium | **Files:** `vid downloader.pyw:505–506, 557, 861–862, 1379–1380, 1542–1543, 1556–1557`
 
-Every download trigger independently creates `QHook`, `QLogger`, and calls `build_base_ydl_opts()`. Signal connections vary slightly, making them hard to audit.
-
-**Action:** Extract `_create_download_context() -> tuple[QHook, QLogger, dict]` on the main class; call it from all six sites.
+Added `_create_download_context()`, `_fork_download_context(base_opts)`, and `_wire_download_signals(qhook, qlogger)` to `MyWindow` near the live-queue helpers. Updated all five call sites: `request_detected`, `check_live_queue`, `_download_podcast_now_action`, and both branches of `_on_podcast_check_finished`. 243 tests pass.
 
 ---
 
@@ -225,7 +223,7 @@ Validates skip callback, builds base properties, conditionally adds archive path
 | ~~R02~~ | 10       | Low    | Hardcoded paths ✅     |
 | ~~R03~~ | 9        | Low    | Duplicate logic ✅     |
 | ~~R04~~ | 9        | Low    | Duplicate logic ✅     |
-| R05 | 9        | Medium | Repeated init pattern  |
+| ~~R05~~ | 9        | Medium | Repeated init pattern ✅ |
 | ~~R06~~ | 8        | Medium | Structural ✅          |
 | ~~R07~~ | 8        | High   | Long function ✅       |
 | R08 | 8        | High   | Long function          |

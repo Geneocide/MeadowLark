@@ -133,7 +133,13 @@ def _make_podcast_status_entry(
     **kwargs: object,
 ) -> dict:
     """Create a podcast status entry dict with standard keys and optional extensions."""
-    return {"podcast": podcast, "latest_date": latest_date, "status": status, "url": url, **kwargs}
+    return {
+        "podcast": podcast,
+        "latest_date": latest_date,
+        "status": status,
+        "url": url,
+        **kwargs,
+    }
 
 
 class MyWindow(QWidget):
@@ -428,7 +434,11 @@ class MyWindow(QWidget):
                     "best[height=720]/best"
                 ),
                 "merge_output_format": "mp4",
-                "outtmpl": (VIDEO_STORAGE_DIR / "%(playlist)s" / "%(playlist_index)s - %(title)s.%(ext)s").as_posix(),
+                "outtmpl": (
+                    VIDEO_STORAGE_DIR
+                    / "%(playlist)s"
+                    / "%(playlist_index)s - %(title)s.%(ext)s"
+                ).as_posix(),
                 "ignoreerrors": "only_download",
             },
             "1080playlists": {
@@ -439,7 +449,11 @@ class MyWindow(QWidget):
                     "best[height=1080]/best"
                 ),
                 "merge_output_format": "mp4",
-                "outtmpl": (VIDEO_STORAGE_DIR / "%(playlist)s" / "%(playlist_index)s - %(title)s.%(ext)s").as_posix(),
+                "outtmpl": (
+                    VIDEO_STORAGE_DIR
+                    / "%(playlist)s"
+                    / "%(playlist_index)s - %(title)s.%(ext)s"
+                ).as_posix(),
                 "ignoreerrors": "only_download",
             },
         }
@@ -524,11 +538,10 @@ class MyWindow(QWidget):
 
         If the source is 'Update', triggers the update process. Otherwise, prepares yt-dlp options, merges additional properties, and enqueues the download with progress and log handlers.
         """
-        qhook = QYT.QHook()
-        qlogger = QYT.QLogger(self.downloadQueue)
         if source == "Update":
             self.do_updates()
             return
+        qhook, qlogger, ydl_opts = self._create_download_context()
 
         # Load playlist URLs if applicable
         if not urls:  # Only load from file if no URLs provided (e.g., button press)
@@ -543,9 +556,6 @@ class MyWindow(QWidget):
                         if "list" in query:
                             pl_id = query["list"][0]
                             self.playlist_comments[pl_id] = item["comment"]
-
-        # options constant for all downloads
-        ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
 
         properties = self.get_options(urls, source)
         if properties:
@@ -568,8 +578,7 @@ class MyWindow(QWidget):
                     self._setup_podcast_check(urls, ydl_opts)
                 else:
                     self.downloadQueue.put((urls, ydl_opts))
-                    qhook.info_changed.connect(self.handle_info_changed)
-                    qlogger.message_changed.connect(self.handle_log_entry)
+                    self._wire_download_signals(qhook, qlogger)
                     self.barProgress.setRange(0, 1)
 
     def skip_downloading(self, urls: list, source: str) -> None:
@@ -793,6 +802,30 @@ class MyWindow(QWidget):
         """Save the live queue entries to file."""
         live_queue.save_live_queue(self.live_queue_path, entries)
 
+    def _create_download_context(self) -> tuple[QYT.QHook, QYT.QLogger, dict]:
+        """Create a fresh QHook, QLogger, and base ydl_opts dict."""
+        qhook = QYT.QHook()
+        qlogger = QYT.QLogger(self.downloadQueue)
+        ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
+        return qhook, qlogger, ydl_opts
+
+    def _fork_download_context(
+        self,
+        base_opts: dict,
+    ) -> tuple[QYT.QHook, QYT.QLogger, dict]:
+        """Create a fresh QHook/QLogger and return a copy of base_opts with them wired in."""
+        qhook = QYT.QHook()
+        qlogger = QYT.QLogger(self.downloadQueue)
+        opts = dict(base_opts)
+        opts["logger"] = qlogger
+        opts["progress_hooks"] = [qhook]
+        return qhook, qlogger, opts
+
+    def _wire_download_signals(self, qhook: QYT.QHook, qlogger: QYT.QLogger) -> None:
+        """Connect qhook/qlogger signals to the main window handler slots."""
+        qhook.info_changed.connect(self.handle_info_changed)
+        qlogger.message_changed.connect(self.handle_log_entry)
+
     def add_to_live_queue(
         self,
         url: str,
@@ -828,9 +861,7 @@ class MyWindow(QWidget):
                     self.logEdit.appendPlainText(
                         f"Live ended, queued: {url} [{source}]",
                     )
-                    qhook = QYT.QHook()
-                    qlogger = QYT.QLogger(self.downloadQueue)
-                    ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
+                    qhook, qlogger, ydl_opts = self._create_download_context()
                     properties = self.get_options([url], source)
                     if properties:
                         # Don't re-apply match_filter: stream already confirmed ended
@@ -850,8 +881,7 @@ class MyWindow(QWidget):
                         ydl_opts["qmeta"] = qmeta
 
                         self.downloadQueue.put(([url], ydl_opts))
-                        qhook.info_changed.connect(self.handle_info_changed)
-                        qlogger.message_changed.connect(self.handle_log_entry)
+                        self._wire_download_signals(qhook, qlogger)
             except YDL_EXTRACTION_ERRORS as e:
                 # If any error in checking, keep it for later
                 self.logEdit.appendPlainText(
@@ -885,7 +915,13 @@ class MyWindow(QWidget):
         title = entry.get("title", "") or ""
         if "(Update)" not in title:
             return False
-        append_to_archive_and_mark_skipped(archive_path, vid, existing_ids, title, messages)
+        append_to_archive_and_mark_skipped(
+            archive_path,
+            vid,
+            existing_ids,
+            title,
+            messages,
+        )
         status_entry["status"] = "Skipped (Update)"
         QYT.HistoryLogger.log_skip(
             site=utils.detect_site_from_urls([webpage]),
@@ -910,7 +946,12 @@ class MyWindow(QWidget):
         if duration is None or duration >= PODCAST_MIN_DURATION_SECONDS:
             return False
         append_to_archive_and_mark_skipped(
-            archive_path, vid, existing_ids, title, messages, reason="Short duration (<3 min)",
+            archive_path,
+            vid,
+            existing_ids,
+            title,
+            messages,
+            reason="Short duration (<3 min)",
         )
         status_entry["status"] = "Skipped Short"
         QYT.HistoryLogger.log_skip(
@@ -1012,23 +1053,45 @@ class MyWindow(QWidget):
                     if self._episode_already_archived(vid, existing_ids, status_entry):
                         break
                     if self._skip_if_update_episode(
-                        entry, vid, webpage, archive_path, existing_ids, messages, status_entry,
+                        entry,
+                        vid,
+                        webpage,
+                        archive_path,
+                        existing_ids,
+                        messages,
+                        status_entry,
                     ):
                         break
                     if self._skip_if_short_duration(
-                        entry, vid, webpage, archive_path, existing_ids, messages, status_entry,
+                        entry,
+                        vid,
+                        webpage,
+                        archive_path,
+                        existing_ids,
+                        messages,
+                        status_entry,
                     ):
                         break
 
                     ts = parse_video_timestamp(entry)
                     self._classify_episode_by_age(
-                        vid, webpage, ts, now_ts, playlist_label,
-                        to_download, pending, status_entry,
+                        vid,
+                        webpage,
+                        ts,
+                        now_ts,
+                        playlist_label,
+                        to_download,
+                        pending,
+                        status_entry,
                         bypass_sponsorblock_wait=bypass_sponsorblock_wait,
                     )
                     break
 
-                self._cache_put(url, status_entry.get("latest_url"), status_entry.get("latest_ts"))
+                self._cache_put(
+                    url,
+                    status_entry.get("latest_url"),
+                    status_entry.get("latest_ts"),
+                )
                 statuses.append(status_entry)
             except YDL_EXTRACTION_ERRORS as e:
                 utils.log_exception(e, f"Error expanding playlist/url {url}")
@@ -1037,7 +1100,11 @@ class MyWindow(QWidget):
                 if scheduled_ts:
                     statuses.append(
                         _make_podcast_status_entry(
-                            url, url, status="Upcoming", latest_date="(scheduled)", recheck_ts=scheduled_ts,
+                            url,
+                            url,
+                            status="Upcoming",
+                            latest_date="(scheduled)",
+                            recheck_ts=scheduled_ts,
                         ),
                     )
                     messages.append(
@@ -1047,7 +1114,12 @@ class MyWindow(QWidget):
                     had_error = True
                     messages.append(f"Error expanding playlist/url {url}: {e}")
                     statuses.append(
-                        _make_podcast_status_entry(url, url, status=f"Error: {e}", latest_date="(error)"),
+                        _make_podcast_status_entry(
+                            url,
+                            url,
+                            status=f"Error: {e}",
+                            latest_date="(error)",
+                        ),
                     )
 
         return to_download, pending, had_error, messages, statuses
@@ -1259,10 +1331,17 @@ class MyWindow(QWidget):
         try:
             return webbrowser.get("brave")
         except (webbrowser.Error, OSError) as exc:
-            utils.log_exception(exc, "Failed to get Brave controller via webbrowser.get")
+            utils.log_exception(
+                exc,
+                "Failed to get Brave controller via webbrowser.get",
+            )
         for p in self._BRAVE_PATHS:
             if Path(p).exists():
-                webbrowser.register("windows-brave", None, webbrowser.BackgroundBrowser(p))
+                webbrowser.register(
+                    "windows-brave",
+                    None,
+                    webbrowser.BackgroundBrowser(p),
+                )
                 with contextlib.suppress(webbrowser.Error, OSError):
                     return webbrowser.get("windows-brave")
         return None
@@ -1329,9 +1408,7 @@ class MyWindow(QWidget):
         self._podcasts_downloading.add(playlist_url)
 
         # build ydl options similarly to the normal request path
-        qhook = QYT.QHook()
-        qlogger = QYT.QLogger(self.downloadQueue)
-        ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
+        _, _, ydl_opts = self._create_download_context()
         properties = self.get_options([playlist_url], "audio_playlists")
         if properties:
             ydl_opts = self.append_properties(ydl_opts, properties)
@@ -1492,28 +1569,22 @@ class MyWindow(QWidget):
                     if url:
                         groups.setdefault(safe_label, []).append(url)
                 for label, urls in groups.items():
-                    qhook = QYT.QHook()
-                    qlogger = QYT.QLogger(self.downloadQueue)
-                    batch_opts = dict(ydl_opts) if isinstance(ydl_opts, dict) else {}
-                    batch_opts["logger"] = qlogger
-                    batch_opts["progress_hooks"] = [qhook]
+                    qhook, qlogger, batch_opts = self._fork_download_context(
+                        ydl_opts if isinstance(ydl_opts, dict) else {},
+                    )
                     batch_opts["outtmpl"] = f"{base_dir}/{label}/%(title)s.%(ext)s"
                     self.downloadQueue.put((urls, batch_opts))
-                    qhook.info_changed.connect(self.handle_info_changed)
-                    qlogger.message_changed.connect(self.handle_log_entry)
+                    self._wire_download_signals(qhook, qlogger)
                     if not hasattr(self, "_active_qhooks"):
                         self._active_qhooks = []
                     self._active_qhooks.append((qhook, qlogger))
                 self.barProgress.setRange(0, 1)
             else:
-                qhook = QYT.QHook()
-                qlogger = QYT.QLogger(self.downloadQueue)
-                download_opts = dict(ydl_opts) if isinstance(ydl_opts, dict) else {}
-                download_opts["logger"] = qlogger
-                download_opts["progress_hooks"] = [qhook]
+                qhook, qlogger, download_opts = self._fork_download_context(
+                    ydl_opts if isinstance(ydl_opts, dict) else {},
+                )
                 self.downloadQueue.put((to_download, download_opts))
-                qhook.info_changed.connect(self.handle_info_changed)
-                qlogger.message_changed.connect(self.handle_log_entry)
+                self._wire_download_signals(qhook, qlogger)
                 if not hasattr(self, "_active_qhooks"):
                     self._active_qhooks = []
                 self._active_qhooks.append((qhook, qlogger))
@@ -1631,7 +1702,12 @@ class MyWindow(QWidget):
                 entries = info.get("entries", [info])
                 if not entries:
                     statuses.append(
-                        _make_podcast_status_entry(title, url, status="No episodes", latest_date="(none)"),
+                        _make_podcast_status_entry(
+                            title,
+                            url,
+                            status="No episodes",
+                            latest_date="(none)",
+                        ),
                     )
                     continue
                 latest = entries[0]
@@ -1681,7 +1757,12 @@ class MyWindow(QWidget):
                     status = "Ready"
 
                 entry = _make_podcast_status_entry(
-                    title, url, status=status, latest_date=latest_date, latest_url=webpage, latest_ts=ts,
+                    title,
+                    url,
+                    status=status,
+                    latest_date=latest_date,
+                    latest_url=webpage,
+                    latest_ts=ts,
                 )
                 if ts and ts > now_ts:
                     entry["recheck_ts"] = ts
@@ -1692,7 +1773,12 @@ class MyWindow(QWidget):
             except YDL_EXTRACTION_ERRORS as e:
                 utils.log_exception(e, f"Error fetching podcast status for {url}")
                 statuses.append(
-                    _make_podcast_status_entry(url, url, status=f"Error: {e}", latest_date="(error)"),
+                    _make_podcast_status_entry(
+                        url,
+                        url,
+                        status=f"Error: {e}",
+                        latest_date="(error)",
+                    ),
                 )
         return statuses
 
