@@ -114,12 +114,10 @@ Added `_extract_base_output_dir(options) -> str | None` and `_rename_na_folder_i
 
 ---
 
-### [R15] `_get_podcast_statuses()` near-duplicates `_filter_audio_playlist_urls()` logic
-**Effort:** High | **File:** `vid downloader.pyw:1637–1759`
+### ~~[R15] `_get_podcast_statuses()` near-duplicates `_filter_audio_playlist_urls()` logic~~ ✅ DONE
+**Effort:** High | **File:** `vid downloader.pyw:1668–1790`
 
-123 lines of status-determination logic that overlaps heavily with `_filter_audio_playlist_urls()` (lines 894–1096). May be dead code or an older version of the same flow.
-
-**Action:** First, determine whether this method is reachable. If dead, delete it. If live, factor the shared logic into the helpers from R07 and call them from both methods.
+Confirmed zero callers via codebase-wide grep (including `getattr` patterns). Deleted the entire 123-line method. Zero new Ruff violations. 287 tests pass.
 
 ---
 
@@ -221,7 +219,7 @@ Validates skip callback, builds base properties, conditionally adds archive path
 | ~~R12~~ | 7        | Medium | Inconsistent loading ✅ |
 | ~~R13~~ | 7        | Low    | Duplicate construction ✅ |
 | ~~R14~~ | 6        | Medium | Long function ✅       |
-| R15 | 6        | High   | Long / possibly dead   |
+| ~~R15~~ | 6        | High   | Dead code deleted ✅   |
 | ~~R16~~ | 6        | Low    | Long function ✅       |
 | ~~R17~~ | 5        | Low    | Ruff violation ✅      |
 | ~~R18~~ | 5        | Low    | Type / style ✅        |
