@@ -107,12 +107,10 @@ Added `_make_podcast_status_entry(podcast, url, status, latest_date, **kwargs)` 
 
 ## Priority 6 — Moderate Long Functions
 
-### [R14] `DownloadExecutor.execute()` mixes three concerns in 99 lines
+### ~~[R14] `DownloadExecutor.execute()` mixes three concerns in 99 lines~~ ✅ DONE
 **Effort:** Medium | **File:** `src/download_executor.py:155–253`
 
-Download execution, post-download folder renaming, and error-based fallback selection are all interleaved.
-
-**Action:** Extract `_extract_base_output_dir(options) -> str | None` and `_rename_na_folder_if_needed(options, urls) -> None`; `execute()` becomes ~40 lines of orchestration.
+Added `_extract_base_output_dir(options) -> str | None` and `_rename_na_folder_if_needed(options, urls) -> None`. `execute()` reduced from ~98 lines to ~25 lines. Also fixed two latent bugs: bare `/` outtmpl returning `""` instead of `None`, and empty-string `default` dict key blocking valid fallback values. 287 tests pass.
 
 ---
 
@@ -222,7 +220,7 @@ Validates skip callback, builds base properties, conditionally adds archive path
 | ~~R11~~ | 7        | Low    | Duplicate literal ✅   |
 | ~~R12~~ | 7        | Medium | Inconsistent loading ✅ |
 | ~~R13~~ | 7        | Low    | Duplicate construction ✅ |
-| R14 | 6        | Medium | Long function          |
+| ~~R14~~ | 6        | Medium | Long function ✅       |
 | R15 | 6        | High   | Long / possibly dead   |
 | ~~R16~~ | 6        | Low    | Long function ✅       |
 | ~~R17~~ | 5        | Low    | Ruff violation ✅      |

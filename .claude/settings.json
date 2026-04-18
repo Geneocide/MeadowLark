@@ -37,7 +37,10 @@
       "Bash(where ruff *)",
       "Bash(ruff --version)",
       "Bash(pip show *)",
-      "Bash(python -m pytest tests/ -q --tb=short)"
+      "Bash(python -m pytest tests/ -q --tb=short)",
+      "Bash(.venv/Scripts/ruff check *)",
+      "Bash(python -c \"import subprocess; result = subprocess.run\\(['ruff', 'check', 'src/download_executor.py'], capture_output=True, text=True\\); print\\(result.stdout\\); print\\(result.stderr\\)\")",
+      "Bash(python -m pytest tests/test_download_executor.py -v)"
     ],
     "deny": [
       "Bash(rm -rf *)",

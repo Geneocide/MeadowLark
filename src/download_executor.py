@@ -144,6 +144,44 @@ class DownloadExecutor:
             log_context="SponsorBlock removal retry failed",
         )
 
+    def _extract_base_output_dir(self, options: dict) -> str | None:
+        """Extract the base output directory from the outtmpl option, or None if not determinable."""
+        outtmpl = options.get("outtmpl", "")
+        outtmpl_str: str | None = None
+
+        if isinstance(outtmpl, str):
+            outtmpl_str = outtmpl
+        elif isinstance(outtmpl, dict):
+            outtmpl_str = outtmpl.get("default")
+            if not isinstance(outtmpl_str, str) or not outtmpl_str:
+                for value in outtmpl.values():
+                    if isinstance(value, str) and value:
+                        outtmpl_str = value
+                        break
+
+        if not outtmpl_str:
+            return None
+
+        # outtmpl is like "E:/vid storage/%(playlist)s/..." — take all but last segment
+        parts = outtmpl_str.split("/")
+        return "/".join(parts[:-1]) or None if len(parts) >= 2 else None  # noqa: PLR2004
+
+    def _rename_na_folder_if_needed(self, options: dict, urls: list) -> None:
+        """Rename 'NA' playlist folders using comment metadata after a successful download."""
+        meta = options.get("qmeta") or {}
+        playlist_comments = meta.get("playlist_comments")
+        if not playlist_comments:
+            return
+        base_output_dir = self._extract_base_output_dir(options)
+        if not base_output_dir:
+            return
+        rename_playlist_folders_from_comments(
+            base_output_dir,
+            urls,
+            playlist_comments,
+            direct_playlist_id=meta.get("playlist_id"),
+        )
+
     def execute(self, urls: list, options: dict) -> tuple[bool, str]:
         """
         Execute download with fallback strategies.
@@ -151,52 +189,11 @@ class DownloadExecutor:
         Attempts fallbacks for 720p (if 1080p unavailable) and without
         SponsorBlock (if API down) before reporting final failure.
 
-        Args:
-            urls: List of URLs to download.
-            options: yt-dlp options, including logger and progress_hooks.
-
-        Returns:
-            (success: bool, error_message: str)
-            - If success is True, error_message is empty
-            - If success is False, error_message contains the error details
+        Returns (success: bool, error_message: str).
         """
         try:
             self._download_with_cache_clear(options, urls)
-
-            # After successful download, try to rename 'NA' folders using comments
-            meta = options.get("qmeta") or {}
-            playlist_comments = meta.get("playlist_comments")
-            if playlist_comments:
-                # Extract base output directory from outtmpl
-                # outtmpl can be a string or dict (yt-dlp supports both)
-                outtmpl = options.get("outtmpl", "")
-                outtmpl_str = None
-
-                if isinstance(outtmpl, str):
-                    outtmpl_str = outtmpl
-                elif isinstance(outtmpl, dict):
-                    # Try to extract a string path from dict
-                    # Prefer 'default' key, then any string value
-                    outtmpl_str = outtmpl.get("default")
-                    if not isinstance(outtmpl_str, str):
-                        for value in outtmpl.values():
-                            if isinstance(value, str):
-                                outtmpl_str = value
-                                break
-
-                if outtmpl_str:
-                    # outtmpl is like "E:/vid storage/%(playlist)s/..."
-                    # Extract the base directory (first part before %(...)s)
-                    parts = outtmpl_str.split("/")
-                    if len(parts) >= 2:
-                        base_output_dir = "/".join(parts[:-1])
-                        rename_playlist_folders_from_comments(
-                            base_output_dir,
-                            urls,
-                            playlist_comments,
-                            direct_playlist_id=meta.get("playlist_id"),
-                        )
-
+            self._rename_na_folder_if_needed(options, urls)
             return True, ""
         except (
             DownloadError,
@@ -205,39 +202,21 @@ class DownloadExecutor:
             OSError,
             ValueError,
         ) as e:
-            # Extract title for error logging
             title = self._extract_title(urls)
             error_str = str(e)
             meta = options.get("qmeta") or {}
             site = meta.get("site", "unknown")
             dtype = meta.get("type", meta.get("source", "unknown"))
 
-            # Try 720p fallback if 1080p not available
             if dtype == "1080":
-                success, error_str = self._try_720_fallback(
-                    urls,
-                    options,
-                    title,
-                    site,
-                    error_str,
-                )
+                success, error_str = self._try_720_fallback(urls, options, title, site, error_str)
                 if success:
                     return True, ""
 
-            # Try without SponsorBlock if API is down
             success, error_str = self._try_without_sponsorblock(
-                urls,
-                options,
-                title,
-                site,
-                dtype,
-                error_str,
+                urls, options, title, site, dtype, error_str
             )
             if success:
                 return True, ""
 
-            # All retries failed
-            error_message = (
-                f"Error downloading '{title}' (site: {site}, type: {dtype}): {e!s}"
-            )
-            return False, error_message
+            return False, f"Error downloading '{title}' (site: {site}, type: {dtype}): {e!s}"
