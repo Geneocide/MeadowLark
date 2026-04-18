@@ -20,7 +20,8 @@
       "Bash(python -m ruff check src/match_filter.py)",
       "Bash(python -m pytest tests/ -v --tb=short -q)",
       "Bash(ruff check *)",
-      "Bash(pytest tests/ -q --tb=short)"
+      "Bash(pytest tests/ -q --tb=short)",
+      "Bash(python -m pytest tests/test_url_utils.py tests/test_path_utils.py tests/test_download_service.py -v)"
     ],
     "deny": [
       "Bash(rm -rf *)",

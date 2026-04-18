@@ -24,21 +24,17 @@ Added `ARCHIVE_PATH`, `PODCAST_MISC_OUTPUT_DIR`, and `VIDEO_STORAGE_DIR` to `src
 
 ## Priority 9 — High-Impact Duplication
 
-### [R03] Archive ID reading reimplemented in `download_service.py`
+### ~~[R03] Archive ID reading reimplemented in `download_service.py`~~ ✅ DONE
 **Effort:** Low | **Files:** `src/download_service.py:207–213`, `src/podcast_filtering.py:65–77`
 
-`download_service.py` re-implements the archive file parsing inline (splitting on whitespace, taking last token). `podcast_filtering.py` already has `load_downloaded_video_ids()` that does the same thing correctly.
-
-**Action:** Replace the inline block in `download_service.py` with a call to `load_downloaded_video_ids()` from `podcast_filtering.py`.
+Replaced 7-line inline archive-reading block in `skip_downloading` with a single call to `load_downloaded_video_ids(str(ARCHIVE_PATH))`. Added import from `src.podcast_filtering`. The canonical function already handles `OSError`, `UnicodeDecodeError`, and missing files. 17 tests pass.
 
 ---
 
-### [R04] URL parsing for playlist ID duplicated 3×
+### ~~[R04] URL parsing for playlist ID duplicated 3×~~ ✅ DONE
 **Effort:** Low | **Files:** `src/path_utils.py:86–89`, `src/path_utils.py:125–129`, `src/playlist_utils.py:109–112`
 
-The same `urlparse` + `parse_qs` + `qs.get("list")` pattern appears three times across two modules.
-
-**Action:** Extract `extract_playlist_id(url: str) -> str | None` into `src/url_utils.py`; update all three call sites.
+Created `src/url_utils.py` with `extract_playlist_id(url: str) -> str | None`. Updated all three call sites in `path_utils.py` (`resolve_playlist_label`, `rename_playlist_folders_from_comments`) and `playlist_utils.py` (`load_playlist_comments_for_source`). Removed `parse_qs` import from both files; `urlparse` retained in `path_utils.py` for path-segment fallback. Added `tests/test_url_utils.py` with 5 tests. 17 tests pass.
 
 ---
 
@@ -261,8 +257,8 @@ Validates skip callback, builds base properties, conditionally adds archive path
 |-----|----------|--------|------------------------|
 | ~~R01~~ | 10       | Low    | Critical duplicate ✅  |
 | ~~R02~~ | 10       | Low    | Hardcoded paths ✅     |
-| R03 | 9        | Low    | Duplicate logic        |
-| R04 | 9        | Low    | Duplicate logic        |
+| ~~R03~~ | 9        | Low    | Duplicate logic ✅     |
+| ~~R04~~ | 9        | Low    | Duplicate logic ✅     |
 | R05 | 9        | Medium | Repeated init pattern  |
 | ~~R06~~ | 8        | Medium | Structural ✅          |
 | R07 | 8        | High   | Long function          |

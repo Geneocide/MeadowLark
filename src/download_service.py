@@ -25,6 +25,7 @@ from src.config import (
     YDL_EXTRACTION_ERRORS,
 )
 from src.match_filter import build_match_filter
+from src.podcast_filtering import load_downloaded_video_ids
 
 
 class DownloadService:
@@ -204,14 +205,7 @@ class DownloadService:
         qlogger = self.qlogger_factory()
         total_added = 0
         archive_path = ARCHIVE_PATH
-        # Read existing IDs into a set
-        if archive_path.exists():
-            with archive_path.open("r", encoding="utf-8") as archive:
-                existing_ids = {
-                    line.strip().split()[-1] for line in archive if line.strip()
-                }
-        else:
-            existing_ids = set()
+        existing_ids = load_downloaded_video_ids(str(ARCHIVE_PATH))
         for url in urls:
             # Use extract_flat="in_playlist" for playlists, True for single videos
             ydl_opts = {

@@ -3,9 +3,10 @@
 import hashlib
 import re
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from .logging_utils import log_exception
+from .url_utils import extract_playlist_id
 
 # Constants for path sanitization
 WINDOWS_INVALID_CHARS = '<>:"/\\|?*'
@@ -82,17 +83,15 @@ def resolve_playlist_label(info: dict, url: str) -> str:
     """
     label = info.get("title") or info.get("uploader")
     if not label:
-        try:
-            u = urlparse(url)
-            qs = parse_qs(u.query or "")
-            if qs.get("list"):
-                label = f"playlist-{qs['list'][0]}"
-            else:
-                segs = [s for s in (u.path or "").split("/") if s]
+        pl_id = extract_playlist_id(url)
+        if pl_id:
+            label = f"playlist-{pl_id}"
+        else:
+            try:
+                segs = [s for s in (urlparse(url).path or "").split("/") if s]
                 label = segs[-1] if segs else url
-        except (ValueError, AttributeError, TypeError) as exc:
-            log_exception(exc, "Failed to resolve playlist label from URL")
-            label = url
+            except (ValueError, AttributeError, TypeError):
+                label = url
     return sanitize_for_path(label)
 
 
@@ -121,14 +120,9 @@ def rename_playlist_folders_from_comments(
         # Build a mapping of playlist_ids from URLs
         playlist_ids: dict[str, str] = {}
         for url in urls:
-            try:
-                parsed = urlparse(url)
-                qs = parse_qs(parsed.query or "")
-                if qs.get("list"):
-                    pl_id = qs["list"][0]
-                    playlist_ids[pl_id] = pl_id
-            except (ValueError, AttributeError, TypeError):
-                continue
+            pl_id = extract_playlist_id(url)
+            if pl_id:
+                playlist_ids[pl_id] = pl_id
 
         # Fall back to direct_playlist_id when no list= param found in URLs
         if not playlist_ids and direct_playlist_id:

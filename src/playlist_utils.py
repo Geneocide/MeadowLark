@@ -1,10 +1,10 @@
 """Playlist and URL detection utilities."""
 
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
 
 from .config import PLAYLISTS_720_FILE, PLAYLISTS_AUDIO_FILE, PLAYLISTS_FILE
 from .logging_utils import log_exception
+from .url_utils import extract_playlist_id
 
 
 def detect_site_from_urls(urls: list[str]) -> str:
@@ -105,14 +105,9 @@ def load_playlist_comments_for_source(source: str) -> dict[str, str]:
                     last_comment = line[1:].strip()
                 else:
                     if last_comment:
-                        try:
-                            parsed = urlparse(line)
-                            qs = parse_qs(parsed.query or "")
-                            if qs.get("list"):
-                                pl_id = qs["list"][0]
-                                comments[pl_id] = last_comment
-                        except (ValueError, AttributeError, TypeError) as exc:
-                            log_exception(exc, f"Failed to parse playlist URL: {line}")
+                        pl_id = extract_playlist_id(line)
+                        if pl_id:
+                            comments[pl_id] = last_comment
                     last_comment = None
     except OSError as exc:
         log_exception(exc, f"Failed to read playlist file: {playlist_file}")
