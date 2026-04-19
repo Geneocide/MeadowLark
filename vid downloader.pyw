@@ -50,7 +50,7 @@ from urllib.parse import parse_qs, urlparse
 import yt_dlp
 from hurry.filesize import size
 from PyQt6.QtCore import QDir, QObject, QPoint, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QCloseEvent, QFont, QIcon
+from PyQt6.QtGui import QCloseEvent, QFont, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -87,6 +87,7 @@ from src.config import (
     YDL_COMMON_ERRORS,
     YDL_EXTRACTION_ERRORS,
 )
+from src.history_dialog import HistoryDialog
 from src.match_filter import build_match_filter
 from src.podcast_filtering import (
     PODCAST_MIN_DURATION_SECONDS,
@@ -170,6 +171,8 @@ class MyWindow(QWidget):
         self._setup_queue_and_downloader()
         self._setup_timers()
         self._setup_podcast_state()
+
+        QShortcut(QKeySequence("Ctrl+H"), self).activated.connect(self._show_history)
 
         self.playlist_comments = {}
 
@@ -1212,6 +1215,25 @@ class MyWindow(QWidget):
         self._podcast_status_dialog = None
         self._podcast_status_table = None
 
+    def _show_history(self) -> None:
+        """Open a non-blocking dialog showing download history (Ctrl+H)."""
+        existing = getattr(self, "_history_dialog", None)
+        if existing and getattr(existing, "isVisible", lambda: False)():
+            try:
+                existing.raise_()
+                existing.activateWindow()
+            except (RuntimeError, AttributeError) as exc:
+                utils.log_exception(exc, "Failed to focus existing history dialog")
+            return
+
+        dialog = HistoryDialog(self)
+        dialog.destroyed.connect(self._on_history_dialog_destroyed)
+        dialog.show()
+        self._history_dialog = dialog
+
+    def _on_history_dialog_destroyed(self) -> None:
+        self._history_dialog = None
+
     # Cache TTL: 6 hours
     CACHE_TTL_SECONDS = 6 * 60 * 60
 
@@ -1749,8 +1771,7 @@ if __name__ == "__main__":
 
     app.exec()
 
-# TODO: add way of seeing history info in app?
 # TODO: look into Android Faithful showing up in the basic misc folder
-# TODO: size control for error logs
+# TODO: size control for error logs (low priority)
 # TODO: settings for making things more general, especially folder locations. Also, make sure no paths are hardcoded that should be config
 # TODO: make sure tfarchive.txt is checked first, always, for efficiency

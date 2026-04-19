@@ -6,7 +6,11 @@
       "Bash(python -m ruff check *)",
       "Bash(python -m ruff format *)",
       "Bash(.venv/Scripts/python -m pytest *)",
-      "Bash(ruff check *)"
+      "Bash(ruff check *)",
+      "Bash(grep -E \"\\\\.\\(py|pyw\\)$\")",
+      "Bash(python -c \"from src.history_dialog import HistoryDialog; print\\('import OK'\\)\")",
+      "Bash(python -c \"from PyQt6.QtWidgets import QMenu, QApplication; import sys; app = QApplication\\(sys.argv\\); m = QMenu\\(\\); a = m.addAction\\('test'\\); print\\(type\\(a\\)\\); print\\(a\\)\")",
+      "Bash(python -c ' *)"
     ],
     "deny": [
       "Bash(rm -rf *)",

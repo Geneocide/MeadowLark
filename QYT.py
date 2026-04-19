@@ -1,6 +1,7 @@
 """Provides PyQt-based classes for logging, progress signaling, and threaded download queue management using yt-dlp. Includes QLogger for emitting log messages, QHook for progress updates, and QYTQueue for managing and executing download tasks in a background thread with wake lock support."""
 
 import logging
+import re
 from pathlib import Path
 from queue import Queue
 
@@ -136,10 +137,20 @@ class HistoryLogger:
     HISTORY_PATH = HISTORY_LOG_PATH
 
     @staticmethod
-    def _format_entry(dt: str, site: str, dtype: str, title: str, result: str) -> str:
-        return (
-            f"[{dt}] Site: {site} | Type: {dtype} | Title: {title} | Result: {result}\n"
+    def _format_entry(
+        dt: str,
+        site: str,
+        dtype: str,
+        title: str,
+        result: str,
+        url: str | None = None,
+    ) -> str:
+        line = (
+            f"[{dt}] Site: {site} | Type: {dtype} | Title: {title} | Result: {result}"
         )
+        if url:
+            line += f" | URL: {url}"
+        return line + "\n"
 
     @staticmethod
     def _write_history_entry(
@@ -148,6 +159,7 @@ class HistoryLogger:
         dtype: str,
         title: str,
         result: str,
+        url: str | None = None,
     ) -> None:
         """
         Write a formatted entry to history_log.txt.
@@ -163,13 +175,17 @@ class HistoryLogger:
             history_path = HistoryLogger.HISTORY_PATH
             history_path.parent.mkdir(parents=True, exist_ok=True)
             with history_path.open("a", encoding="utf-8") as f:
-                f.write(HistoryLogger._format_entry(dt, site, dtype, title, result))
+                f.write(
+                    HistoryLogger._format_entry(dt, site, dtype, title, result, url)
+                )
         except OSError as exc:
             # Never allow history logging to crash downloading, but record it
             utils.log_exception(exc, "HistoryLogger failed to write to history_log.txt")
 
     @staticmethod
-    def log(site: str, dtype: str, title: str, *, success: bool) -> None:
+    def log(
+        site: str, dtype: str, title: str, *, success: bool, url: str | None = None
+    ) -> None:
         """
         Log a download result to history_log.txt with timestamp.
 
@@ -178,10 +194,11 @@ class HistoryLogger:
             dtype: The download type (e.g., '1080', '720', 'podcast').
             title: The video/content title.
             success: Whether the download succeeded.
+            url: The video's webpage URL (optional).
         """
         dt = get_local_timestamp()
         result = "SUCCESS" if success else "FAIL"
-        HistoryLogger._write_history_entry(dt, site, dtype, title, result)
+        HistoryLogger._write_history_entry(dt, site, dtype, title, result, url)
 
     @staticmethod
     def log_skip(site: str, dtype: str, title: str, reason: str) -> None:
@@ -197,6 +214,48 @@ class HistoryLogger:
         dt = get_local_timestamp()
         result = f"SKIPPED ({reason})"
         HistoryLogger._write_history_entry(dt, site, dtype, title, result)
+
+
+_HISTORY_RE = re.compile(
+    r"^\[(?P<dt>[^\]]+)\] Site: (?P<site>.+?) \| Type: (?P<dtype>.+?) \| Title: (?P<title>.+) \| Result: (?P<result_raw>.+)$",
+)
+
+
+def parse_history_log() -> list[dict]:
+    """
+    Read history_log.txt and return entries newest-first.
+
+    Each entry is a dict with keys: dt, site, dtype, title, result, url.
+    url is None for old entries that predate URL capture.
+    """
+    path = HistoryLogger.HISTORY_PATH
+    if not path.exists():
+        return []
+    entries: list[dict] = []
+    with path.open(encoding="utf-8-sig") as f:
+        for line in f:
+            line = line.rstrip("\r\n")
+            m = _HISTORY_RE.match(line)
+            if not m:
+                continue
+            result_raw = m.group("result_raw")
+            url: str | None = None
+            if " | URL: " in result_raw:
+                result_part, url_part = result_raw.rsplit(" | URL: ", 1)
+                result_raw = result_part
+                url = url_part.strip() or None
+            entries.append(
+                {
+                    "dt": m.group("dt"),
+                    "site": m.group("site"),
+                    "dtype": m.group("dtype"),
+                    "title": m.group("title"),
+                    "result": result_raw,
+                    "url": url,
+                },
+            )
+    entries.reverse()
+    return entries
 
 
 class HistoryHook:
@@ -270,14 +329,16 @@ class HistoryHook:
             site = self._infer_site(info)
             dtype = self.meta.get("type") or self.meta.get("source") or "unknown"
 
+            url = info.get("webpage_url") or info.get("url") or None
+
             if status == "postprocessing":
                 # Prefer logging when a merge or audio-extract postprocessor finishes
                 if "merger" in postproc or "ffmpegextractaudio" in postproc:
-                    HistoryLogger.log(site, dtype, title, success=True)
+                    HistoryLogger.log(site, dtype, title, success=True, url=url)
                     self._seen_ids.add(vid)
             elif status == "finished":
                 # Fallback for non-merged items (e.g., audio-only) or if no postprocessing runs
-                HistoryLogger.log(site, dtype, title, success=True)
+                HistoryLogger.log(site, dtype, title, success=True, url=url)
                 self._seen_ids.add(vid)
         except (AttributeError, TypeError, OSError) as exc:
             # Never let history logging break the download, but capture it

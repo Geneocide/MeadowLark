@@ -5,6 +5,11 @@
 - Enforce type hints.
 - No unused imports (F401).
 
+# Linting & Formatting
+- Ruff extension auto-fixes on save (imports, trailing commas, etc.)
+- Claude focuses on: type correctness, logical errors, security, architecture
+- Don't manually fix auto-fixable issues (import order, whitespace)
+
 # Structural Guidelines
 - Modularize files exceeding 1000 lines.
 - Zero code duplication; use functions with variables for variations.
