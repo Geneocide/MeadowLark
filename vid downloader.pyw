@@ -1108,7 +1108,7 @@ class MyWindow(QWidget):
                         ),
                     )
                     messages.append(
-                        f"Podcast {url} scheduled; will recheck at {datetime.fromtimestamp(scheduled_ts, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}",
+                        f"Podcast {url} scheduled; will recheck at {datetime.fromtimestamp(scheduled_ts).astimezone().strftime('%Y-%m-%d %H:%M:%S')}",
                     )
                 else:
                     had_error = True
@@ -1665,7 +1665,6 @@ class MyWindow(QWidget):
         finally:
             super().closeEvent(event)
 
-
     # --- Hourly automated YT Podcasts checks ---
     def _schedule_hourly_podcast_checks(self) -> None:
         """Schedule the initial single-shot to fire at the next :15 past the hour, then start recurring hourly checks."""
@@ -1677,7 +1676,7 @@ class MyWindow(QWidget):
         delay_ms = int((target - now).total_seconds() * 1000)
         QTimer.singleShot(delay_ms, self._start_hourly_podcast_timer)
         self.logEdit.appendPlainText(
-            f"Scheduled hourly YT Podcasts checks beginning {target.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"Scheduled hourly YT Podcasts checks beginning {target.astimezone().strftime('%Y-%m-%d %H:%M:%S')}",
         )
 
     def _start_hourly_podcast_timer(self) -> None:
@@ -1755,4 +1754,3 @@ if __name__ == "__main__":
 # TODO: size control for error logs
 # TODO: settings for making things more general, especially folder locations. Also, make sure no paths are hardcoded that should be config
 # TODO: make sure tfarchive.txt is checked first, always, for efficiency
-# TODO: fix the error/history log times to be local time

@@ -10,7 +10,7 @@ from wakepy import keep
 import utils
 from src.config import ERROR_LOG_PATH, HISTORY_LOG_PATH, LOGFILE_MIGRATION_ENABLED
 from src.download_executor import DownloadExecutor
-from src.logging_utils import get_utc_timestamp
+from src.logging_utils import get_local_timestamp
 
 logging.basicConfig(
     filename=str(ERROR_LOG_PATH),
@@ -179,7 +179,7 @@ class HistoryLogger:
             title: The video/content title.
             success: Whether the download succeeded.
         """
-        dt = get_utc_timestamp()
+        dt = get_local_timestamp()
         result = "SUCCESS" if success else "FAIL"
         HistoryLogger._write_history_entry(dt, site, dtype, title, result)
 
@@ -194,7 +194,7 @@ class HistoryLogger:
             title: The video/content title.
             reason: The reason for skipping (e.g., 'Short duration (<3 min)').
         """
-        dt = get_utc_timestamp()
+        dt = get_local_timestamp()
         result = f"SKIPPED ({reason})"
         HistoryLogger._write_history_entry(dt, site, dtype, title, result)
 
