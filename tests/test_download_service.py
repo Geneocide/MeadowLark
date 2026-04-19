@@ -146,3 +146,59 @@ def test_strip_watch_later_list_param_leaves_playlist_url_alone() -> None:
     urls = ["https://youtube.com/playlist?list=PLabc"]
     service._strip_watch_later_list_param(urls)
     assert urls[0] == "https://youtube.com/playlist?list=PLabc"
+
+
+# ---------------------------------------------------------------------------
+# request_detected: playlist URL loading from file (lines 110-112)
+# ---------------------------------------------------------------------------
+
+
+def test_request_detected_loads_urls_from_file_when_empty_urls_provided() -> None:
+    service = make_service()
+    loaded_urls = ["https://youtube.com/playlist?list=PLabc"]
+    service._load_playlist_urls = MagicMock(return_value=loaded_urls)  # type: ignore[method-assign]
+    service.get_options = MagicMock(return_value=None)  # type: ignore[method-assign]
+
+    service.request_detected([], "1080playlists")
+
+    service._load_playlist_urls.assert_called_once_with("1080playlists")
+    service.get_options.assert_called_once_with(loaded_urls, "1080playlists")
+
+
+# ---------------------------------------------------------------------------
+# check_live_queue: empty queue returns immediately (line 243)
+# ---------------------------------------------------------------------------
+
+
+def test_check_live_queue_empty_queue_does_not_call_save() -> None:
+    service = make_service()
+    service.load_live_queue = MagicMock(return_value={})  # type: ignore[method-assign]
+    service.save_live_queue = MagicMock()  # type: ignore[method-assign]
+
+    service.check_live_queue()
+
+    service.load_live_queue.assert_called_once()
+    service.save_live_queue.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# check_live_queue: YDL extraction error keeps URL in remaining (lines 288-291)
+# ---------------------------------------------------------------------------
+
+
+def test_check_live_queue_ydl_error_keeps_url_in_remaining() -> None:
+    log_callback = Mock()
+    service = make_service(log_edit_append_callback=log_callback)
+
+    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None)}
+    service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
+    service.save_live_queue = MagicMock()  # type: ignore[method-assign]
+
+    with patch("src.download_service.yt_dlp.YoutubeDL") as MockYDL:
+        ydl_instance = MockYDL.return_value.__enter__.return_value
+        ydl_instance.extract_info.side_effect = OSError("extraction failed")
+        service.check_live_queue()
+
+    saved_remaining = service.save_live_queue.call_args[0][0]
+    assert "https://youtube.com/watch?v=abc" in saved_remaining
+    log_callback.assert_called()

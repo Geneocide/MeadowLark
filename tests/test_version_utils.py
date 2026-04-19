@@ -63,6 +63,34 @@ def test_is_yt_dlp_update_available_detects_newer_version() -> None:
         assert latest == (2026, 2, 2)
 
 
+def test_get_current_yt_dlp_version_falls_back_to_module_attribute() -> None:
+    module = MagicMock()
+    version_mock = MagicMock(spec=[])  # no __version__ in spec → AttributeError
+    module.version = version_mock
+    module.__version__ = "2026.03.03"
+    with patch("src.version_utils.yt_dlp", module):
+        result = get_current_yt_dlp_version()
+    assert result == "2026.03.03"
+
+
+def test_get_latest_yt_dlp_version_returns_none_for_non_200_status() -> None:
+    response = Mock()
+    response.status_code = 404
+    with patch("src.version_utils.requests.get", return_value=response):
+        assert get_latest_yt_dlp_version() is None
+
+
+def test_get_current_yt_dlp_version_returns_none_on_import_error() -> None:
+    class FakeYtDlp:
+        @property
+        def version(self):
+            raise ImportError("yt_dlp.version not available")
+
+    with patch("src.version_utils.yt_dlp", FakeYtDlp()):
+        result = get_current_yt_dlp_version()
+    assert result is None
+
+
 def test_is_yt_dlp_update_available_returns_false_when_up_to_date() -> None:
     with (
         patch(

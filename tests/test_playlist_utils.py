@@ -4,13 +4,18 @@ import stat
 import sys
 from pathlib import Path
 from queue import Queue
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from src import download_service as _ds
 from src.download_service import DownloadService
-from src.playlist_utils import load_playlist_urls
+from src.playlist_utils import (
+    get_playlist_file_for_source,
+    is_primitive_technology,
+    load_playlist_comments_for_source,
+    load_playlist_urls,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +240,107 @@ def test_load_playlist_urls_wrapper_known_source_with_urls_returns_list(
     svc = _make_service()
     result = svc._load_playlist_urls("1080playlists")  # noqa: SLF001
     assert result == ["https://youtube.com/playlist?list=PLabc"]
+
+
+# ---------------------------------------------------------------------------
+# is_primitive_technology exception branch (lines 51-53)
+# ---------------------------------------------------------------------------
+
+
+def test_is_primitive_technology_none_returns_false() -> None:
+    assert is_primitive_technology(None) is False  # type: ignore[arg-type]
+
+
+def test_is_primitive_technology_none_fields_returns_false() -> None:
+    assert is_primitive_technology({"title": None, "channel": None}) is False
+
+
+# ---------------------------------------------------------------------------
+# get_playlist_file_for_source mappings (lines 67-72)
+# ---------------------------------------------------------------------------
+
+
+def test_get_playlist_file_for_source_1080() -> None:
+    result = get_playlist_file_for_source("1080playlists")
+    assert isinstance(result, str)
+
+
+def test_get_playlist_file_for_source_720() -> None:
+    result = get_playlist_file_for_source("720playlists")
+    assert isinstance(result, str)
+
+
+def test_get_playlist_file_for_source_audio() -> None:
+    result = get_playlist_file_for_source("audio_playlists")
+    assert isinstance(result, str)
+
+
+def test_get_playlist_file_for_source_unknown_returns_none() -> None:
+    assert get_playlist_file_for_source("unknown_source") is None
+
+
+# ---------------------------------------------------------------------------
+# load_playlist_comments_for_source (lines 108-133)
+# ---------------------------------------------------------------------------
+
+
+def test_load_playlist_comments_unknown_source_returns_empty() -> None:
+    result = load_playlist_comments_for_source("unknown_source")
+    assert result == {}
+
+
+def test_load_playlist_comments_valid_source_missing_file_returns_empty() -> None:
+    with patch(
+        "src.playlist_utils.get_playlist_file_for_source",
+        return_value="/nonexistent/path/playlists.txt",
+    ):
+        result = load_playlist_comments_for_source("1080playlists")
+    assert result == {}
+
+
+def test_load_playlist_comments_extracts_comment_before_url(tmp_path: Path) -> None:
+    playlist_file = tmp_path / "playlists.txt"
+    playlist_file.write_text("#My Comment\nhttps://www.youtube.com/playlist?list=PLabc123\n")
+    with patch("src.playlist_utils.get_playlist_file_for_source", return_value=str(playlist_file)):
+        result = load_playlist_comments_for_source("1080playlists")
+    assert result == {"PLabc123": "My Comment"}
+
+
+def test_load_playlist_comments_url_without_list_param_not_added(tmp_path: Path) -> None:
+    playlist_file = tmp_path / "playlists.txt"
+    playlist_file.write_text("#Comment\nhttps://www.youtube.com/watch?v=abc\n")
+    with patch("src.playlist_utils.get_playlist_file_for_source", return_value=str(playlist_file)):
+        result = load_playlist_comments_for_source("1080playlists")
+    assert result == {}
+
+
+def test_load_playlist_comments_url_without_preceding_comment_not_added(tmp_path: Path) -> None:
+    playlist_file = tmp_path / "playlists.txt"
+    playlist_file.write_text("https://www.youtube.com/playlist?list=PLxyz\n")
+    with patch("src.playlist_utils.get_playlist_file_for_source", return_value=str(playlist_file)):
+        result = load_playlist_comments_for_source("1080playlists")
+    assert result == {}
+
+
+def test_load_playlist_comments_oserror_returns_empty(tmp_path: Path) -> None:
+    playlist_file = tmp_path / "playlists.txt"
+    playlist_file.write_text("#Comment\nhttps://www.youtube.com/playlist?list=PLabc\n")
+    with (
+        patch("src.playlist_utils.get_playlist_file_for_source", return_value=str(playlist_file)),
+        patch("pathlib.Path.open", side_effect=OSError("permission denied")),
+    ):
+        result = load_playlist_comments_for_source("1080playlists")
+    assert result == {}
+
+
+def test_load_playlist_comments_blank_line_is_skipped(tmp_path: Path) -> None:
+    playlist_file = tmp_path / "playlists.txt"
+    playlist_file.write_text(
+        "\n#My Comment\nhttps://www.youtube.com/playlist?list=PLabc123\n"
+    )
+    with patch("src.playlist_utils.get_playlist_file_for_source", return_value=str(playlist_file)):
+        result = load_playlist_comments_for_source("1080playlists")
+    assert result == {"PLabc123": "My Comment"}
 
 
 def test_request_detected_skips_file_load_when_urls_provided(

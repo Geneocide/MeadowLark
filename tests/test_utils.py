@@ -1,6 +1,7 @@
 """Unit tests for utils module and extracted utility functions."""
 
 from src.dict_utils import merge_dicts_recursive, remove_sponsorblock_postprocessor
+from src.exceptions import PlaylistExtractionError
 from src.path_utils import (
     resolve_playlist_label,
     sanitize_for_path,
@@ -78,6 +79,31 @@ class TestDictUtils:
         assert result["postprocessors"][0]["key"] == "FFmpegExtractAudio"
         # Verify original not mutated
         assert len(opts["postprocessors"]) == 2
+
+    def test_remove_sponsorblock_postprocessor_none_postprocessors(self) -> None:
+        opts = {"postprocessors": None, "format": "best"}
+        result = remove_sponsorblock_postprocessor(opts)
+        assert result["postprocessors"] is None
+        assert result["format"] == "best"
+
+    def test_remove_sponsorblock_postprocessor_string_postprocessors(self) -> None:
+        opts = {"postprocessors": "not_a_list"}
+        result = remove_sponsorblock_postprocessor(opts)
+        assert result["postprocessors"] == "not_a_list"
+
+
+class TestExceptions:
+    """Tests for exceptions module."""
+
+    def test_playlist_extraction_error_stores_original_exc(self) -> None:
+        orig = ValueError("x")
+        err = PlaylistExtractionError(original_exc=orig)
+        assert err.original_exc is orig
+
+    def test_playlist_extraction_error_uses_default_msg(self) -> None:
+        err = PlaylistExtractionError()
+        assert str(err) == PlaylistExtractionError.MSG
+        assert err.original_exc is None
 
 
 class TestPlaylistUtils:

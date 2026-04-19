@@ -1,9 +1,10 @@
 """Tests for src.logging_utils module."""
 
+import logging
 import re
 from datetime import datetime, timezone
 
-from src.logging_utils import get_utc_timestamp
+from src.logging_utils import get_utc_timestamp, log_exception
 
 
 class TestGetUtcTimestamp:
@@ -44,3 +45,15 @@ class TestGetUtcTimestamp:
         assert timestamp1 <= timestamp2, (
             f"First timestamp {timestamp1} should be <= second timestamp {timestamp2}"
         )
+
+
+class TestLogException:
+    """Tests for log_exception() function."""
+
+    def test_log_exception_no_root_handlers_triggers_basicconfig(self) -> None:
+        original_handlers = logging.root.handlers[:]
+        logging.root.handlers.clear()
+        try:
+            log_exception(ValueError("test error"), "test context")
+        finally:
+            logging.root.handlers = original_handlers

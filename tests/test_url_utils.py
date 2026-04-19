@@ -22,3 +22,11 @@ def test_returns_none_for_malformed_url() -> None:
 def test_handles_url_with_multiple_params() -> None:
     url = "https://www.youtube.com/watch?v=abc&list=PLxyz&index=1"
     assert extract_playlist_id(url) == "PLxyz"
+
+
+def test_returns_none_for_none_input() -> None:
+    assert extract_playlist_id(None) is None  # type: ignore[arg-type]
+
+
+def test_returns_none_for_integer_input() -> None:
+    assert extract_playlist_id(123) is None  # type: ignore[arg-type]
