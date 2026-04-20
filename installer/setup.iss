@@ -6,7 +6,7 @@
 [Setup]
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppPublisher=etreq
+AppPublisher=Geneocide
 DefaultDirName={autopf}\VidDownloader
 DefaultGroupName={#AppName}
 OutputDir=..\installer_output
