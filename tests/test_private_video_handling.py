@@ -1,11 +1,10 @@
 import importlib.util
-import os
 import queue
 import sys
-from pathlib import Path
 
 # helper function to import the main module even though its filename contains a space
 import types
+from pathlib import Path
 
 import pytest
 
@@ -61,7 +60,7 @@ def import_vid_module():
 
     path = str(Path(__file__).parent.parent / "vid downloader.pyw")
     # Ensure the repo root is on sys.path so imports like `import QYT` succeed
-    repo_root = os.path.dirname(path)
+    repo_root = str(Path(path).parent)
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
     spec = importlib.util.spec_from_file_location("vd", path)

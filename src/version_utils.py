@@ -59,7 +59,9 @@ def get_latest_yt_dlp_version() -> str | None:
 
 
 def is_yt_dlp_update_available() -> tuple[
-    bool, tuple[int, ...] | None, tuple[int, ...] | None
+    bool,
+    tuple[int, ...] | None,
+    tuple[int, ...] | None,
 ]:
     """
     Check whether a newer yt-dlp version is available.
@@ -70,4 +72,4 @@ def is_yt_dlp_update_available() -> tuple[
     current = normalize_version(get_current_yt_dlp_version() or "")
     latest = normalize_version(get_latest_yt_dlp_version() or "")
     update = (current and latest) and (current != latest)
-    return update, current if current else None, latest if latest else None
+    return update, current or None, latest or None

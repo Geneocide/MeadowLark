@@ -66,7 +66,7 @@ class DownloadExecutor:
             utils.log_exception(exc, "Failed to extract title for error logging")
         return title
 
-    def _try_fallback(  # noqa: PLR0913
+    def _try_fallback(
         self,
         urls: list,
         options: dict,
@@ -99,6 +99,7 @@ class DownloadExecutor:
         error_str: str,
     ) -> tuple[bool, str]:
         """Try downloading at 720p if 1080p format unavailable."""
+
         def _modify(opts: dict) -> dict:
             fallback = opts.copy()
             fallback["format"] = (
@@ -123,7 +124,7 @@ class DownloadExecutor:
             log_context="720p fallback attempt failed",
         )
 
-    def _try_without_sponsorblock(  # noqa: PLR0913
+    def _try_without_sponsorblock(
         self,
         urls: list,
         options: dict,
@@ -164,7 +165,7 @@ class DownloadExecutor:
 
         # outtmpl is like "E:/vid storage/%(playlist)s/..." — take all but last segment
         parts = outtmpl_str.split("/")
-        return "/".join(parts[:-1]) or None if len(parts) >= 2 else None  # noqa: PLR2004
+        return "/".join(parts[:-1]) or None if len(parts) >= 2 else None
 
     def _rename_na_folder_if_needed(self, options: dict, urls: list) -> None:
         """Rename 'NA' playlist folders using comment metadata after a successful download."""
@@ -194,7 +195,6 @@ class DownloadExecutor:
         try:
             self._download_with_cache_clear(options, urls)
             self._rename_na_folder_if_needed(options, urls)
-            return True, ""
         except (
             DownloadError,
             ExtractorError,
@@ -209,14 +209,26 @@ class DownloadExecutor:
             dtype = meta.get("type", meta.get("source", "unknown"))
 
             if dtype == "1080":
-                success, error_str = self._try_720_fallback(urls, options, title, site, error_str)
+                success, error_str = self._try_720_fallback(
+                    urls, options, title, site, error_str
+                )
                 if success:
                     return True, ""
 
             success, error_str = self._try_without_sponsorblock(
-                urls, options, title, site, dtype, error_str
+                urls,
+                options,
+                title,
+                site,
+                dtype,
+                error_str,
             )
             if success:
                 return True, ""
 
-            return False, f"Error downloading '{title}' (site: {site}, type: {dtype}): {e!s}"
+            return (
+                False,
+                f"Error downloading '{title}' (site: {site}, type: {dtype}): {e!s}",
+            )
+        else:
+            return True, ""

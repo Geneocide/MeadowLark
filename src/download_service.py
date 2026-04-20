@@ -163,7 +163,9 @@ class DownloadService:
         if not self.ignore_archive_callback():
             properties["download_archive"] = str(ARCHIVE_PATH)
 
-    def _add_match_filter_if_youtube(self, properties: dict, urls: list, source: str) -> None:
+    def _add_match_filter_if_youtube(
+        self, properties: dict, urls: list, source: str
+    ) -> None:
         """Attach a custom match_filter for YouTube URLs to skip and queue live videos."""
         if urls and "youtube.com" in urls[0]:
             properties["match_filter"] = self.make_match_filter(source)
@@ -233,7 +235,9 @@ class DownloadService:
         """Save the live queue entries to file."""
         live_queue.save_live_queue(self.live_queue_path, entries)
 
-    def add_to_live_queue(self, url: str, source: str, playlist_id: str | None = None) -> None:
+    def add_to_live_queue(
+        self, url: str, source: str, playlist_id: str | None = None
+    ) -> None:
         """Add a URL to the live queue."""
         live_queue.add_to_live_queue(self.live_queue_path, url, source, playlist_id)
 
@@ -276,7 +280,9 @@ class DownloadService:
                             "type": source,
                         }
                         if playlist_id:
-                            playlist_comments = utils.load_playlist_comments_for_source(source)
+                            playlist_comments = utils.load_playlist_comments_for_source(
+                                source
+                            )
                             if playlist_comments:
                                 qmeta["playlist_comments"] = playlist_comments
                                 qmeta["playlist_id"] = playlist_id
@@ -286,7 +292,7 @@ class DownloadService:
                         qhook.info_changed.connect(self.handle_info_changed_callback)
                         qlogger.message_changed.connect(self.handle_log_entry_callback)
                         self.bar_progress_set_range_callback(0, 1)
-            except YDL_EXTRACTION_ERRORS as e:
+            except YDL_EXTRACTION_ERRORS as e:  # noqa: PERF203
                 # If any error in checking, keep it for later
                 remaining[url] = (source, playlist_id)
                 self.log_edit_append_callback(

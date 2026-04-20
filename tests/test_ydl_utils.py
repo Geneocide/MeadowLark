@@ -1,5 +1,4 @@
 """Unit tests for src.ydl_utils."""
-# ruff: noqa: S101
 
 from collections.abc import Callable
 from unittest.mock import MagicMock
@@ -65,7 +64,7 @@ def test_extract_video_entries_wraps_single_video_in_list() -> None:
 
 
 def test_extract_playlist_info_uses_default_ydl_class_when_none() -> None:
-    from unittest.mock import patch  # noqa: PLC0415
+    from unittest.mock import patch
 
     mock_instance = MagicMock()
     mock_instance.__enter__ = MagicMock(return_value=mock_instance)
@@ -78,7 +77,7 @@ def test_extract_playlist_info_uses_default_ydl_class_when_none() -> None:
 
 
 def test_extract_video_entries_uses_default_ydl_class_when_none() -> None:
-    from unittest.mock import patch  # noqa: PLC0415
+    from unittest.mock import patch
 
     mock_instance = MagicMock()
     mock_instance.__enter__ = MagicMock(return_value=mock_instance)

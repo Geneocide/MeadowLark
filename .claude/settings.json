@@ -18,6 +18,9 @@
       "Read(//c/Users/etreq/.claude/**)",
       "mcp__plugin_github_github__list_commits",
       "mcp__plugin_github_github__list_pull_requests",
+      "Bash(ruff format *)",
+      "Read(//tmp/**)",
+      "Bash(tee /tmp/ruff_check.txt)"
     ],
     "deny": [
       "Bash(rm -rf *)",
@@ -51,7 +54,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -m ruff check --fix \"$CLAUDE_TOOL_INPUT_PATH\" && python -m ruff format \"$CLAUDE_TOOL_INPUT_PATH\""
+            "command": "python -c \"import sys, json, subprocess; inp=json.load(sys.stdin); path=inp.get('tool_input', {}).get('file_path', ''); path.endswith('.py') and (subprocess.run(['python', '-m', 'ruff', 'check', '--fix', path]), subprocess.run(['python', '-m', 'ruff', 'format', path]))\""
           }
         ]
       }

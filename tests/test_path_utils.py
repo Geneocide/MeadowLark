@@ -50,7 +50,9 @@ def test_rename_playlist_folders_no_comments(tmp_path) -> None:
     na = tmp_path / "NA"
     na.mkdir()
 
-    rename_playlist_folders_from_comments(str(tmp_path), ["https://youtube.com/watch?v=x"])
+    rename_playlist_folders_from_comments(
+        str(tmp_path), ["https://youtube.com/watch?v=x"]
+    )
 
     assert na.exists()
 

@@ -20,7 +20,7 @@ def test_normalize_version_parses_numeric_segments() -> None:
 
 def test_normalize_version_returns_empty_for_invalid_input() -> None:
     assert normalize_version("") == ()
-    assert normalize_version(None) == ()  # type: ignore
+    assert normalize_version(None) == ()  # type: ignore[arg-type]
     assert normalize_version("abc") == ()
 
 
@@ -50,7 +50,8 @@ def test_get_latest_yt_dlp_version_success() -> None:
 def test_is_yt_dlp_update_available_detects_newer_version() -> None:
     with (
         patch(
-            "src.version_utils.get_current_yt_dlp_version", return_value="2026.01.01"
+            "src.version_utils.get_current_yt_dlp_version",
+            return_value="2026.01.01",
         ),
         patch(
             "src.version_utils.get_latest_yt_dlp_version",
@@ -94,7 +95,8 @@ def test_get_current_yt_dlp_version_returns_none_on_import_error() -> None:
 def test_is_yt_dlp_update_available_returns_false_when_up_to_date() -> None:
     with (
         patch(
-            "src.version_utils.get_current_yt_dlp_version", return_value="2026.02.02"
+            "src.version_utils.get_current_yt_dlp_version",
+            return_value="2026.02.02",
         ),
         patch(
             "src.version_utils.get_latest_yt_dlp_version",

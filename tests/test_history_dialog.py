@@ -1,5 +1,4 @@
 """Tests for history dialog filter logic."""
-# ruff: noqa: S101
 
 from src.history_dialog import _result_matches
 

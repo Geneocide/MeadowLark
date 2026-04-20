@@ -15,8 +15,8 @@ def load_live_queue(path: Path) -> LiveQueueEntries:
                 continue
             # stored as: source|url  or  source|url|playlist_id
             parts = line.split("|", 2)
-            if len(parts) >= 2 and parts[1]:  # noqa: PLR2004
-                playlist_id = parts[2] if len(parts) == 3 and parts[2] else None  # noqa: PLR2004
+            if len(parts) >= 2 and parts[1]:
+                playlist_id = parts[2] if len(parts) == 3 and parts[2] else None
                 entries[parts[1]] = (parts[0], playlist_id)
     return entries
 

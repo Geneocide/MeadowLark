@@ -17,7 +17,7 @@ def build_match_filter(
 ) -> Callable[[dict, bool], str | None]:
     """Build a yt-dlp match_filter that skips live/upcoming videos and queues them for later."""
 
-    def _mf(info: dict, incomplete: bool) -> str | None:  # noqa: ARG001,FBT001
+    def _mf(info: dict, incomplete: bool) -> str | None:
         try:
             is_live = info.get("is_live")
             live_status = info.get("live_status")

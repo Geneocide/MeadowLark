@@ -55,7 +55,8 @@ class TestExtractTitle:
 
     @patch("src.download_executor.extract_playlist_info")
     def test_extract_title_handles_download_error(
-        self, mock_extract_func: Mock
+        self,
+        mock_extract_func: Mock,
     ) -> None:
         """Test title extraction handles DownloadError gracefully."""
         mock_extract_func.side_effect = DownloadError(
@@ -253,7 +254,7 @@ class TestExecute:
 
         call_count = 0
 
-        def side_effect(*args, **kwargs):  # noqa: ARG001
+        def side_effect(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -280,7 +281,7 @@ class TestExecute:
 
         call_count = 0
 
-        def side_effect(*args, **kwargs):  # noqa: ARG001
+        def side_effect(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -357,83 +358,93 @@ class TestExtractBaseOutputDir:
     def test_outtmpl_string_two_segment_path_returns_parent(self) -> None:
         """Nominal: string outtmpl with two segments returns first segment."""
         executor = DownloadExecutor()
-        result = executor._extract_base_output_dir({"outtmpl": "E:/vid storage/%(playlist)s.%(ext)s"})  # noqa: SLF001
+        result = executor._extract_base_output_dir(
+            {"outtmpl": "E:/vid storage/%(playlist)s.%(ext)s"}
+        )
         assert result == "E:/vid storage"
 
     def test_outtmpl_string_three_segment_path_returns_all_but_last(self) -> None:
         """String outtmpl with three segments returns all but last."""
         executor = DownloadExecutor()
-        result = executor._extract_base_output_dir({"outtmpl": "E:/vid storage/playlists/%(title)s.%(ext)s"})  # noqa: SLF001
+        result = executor._extract_base_output_dir(
+            {"outtmpl": "E:/vid storage/playlists/%(title)s.%(ext)s"}
+        )
         assert result == "E:/vid storage/playlists"
 
     def test_outtmpl_string_single_segment_returns_none(self) -> None:
         """String outtmpl with no slash (single segment) returns None — no parent to extract."""
         executor = DownloadExecutor()
-        result = executor._extract_base_output_dir({"outtmpl": "output.%(ext)s"})  # noqa: SLF001
+        result = executor._extract_base_output_dir({"outtmpl": "output.%(ext)s"})
         assert result is None
 
     def test_outtmpl_empty_string_returns_none(self) -> None:
         """Empty string outtmpl returns None."""
         executor = DownloadExecutor()
-        result = executor._extract_base_output_dir({"outtmpl": ""})  # noqa: SLF001
+        result = executor._extract_base_output_dir({"outtmpl": ""})
         assert result is None
 
     def test_outtmpl_missing_key_returns_none(self) -> None:
         """Missing outtmpl key returns None (defaults to empty string sentinel)."""
         executor = DownloadExecutor()
-        result = executor._extract_base_output_dir({})  # noqa: SLF001
+        result = executor._extract_base_output_dir({})
         assert result is None
 
     def test_outtmpl_dict_with_default_string_returns_parent(self) -> None:
         """Dict outtmpl with string 'default' key uses that value."""
         executor = DownloadExecutor()
         options = {"outtmpl": {"default": "E:/vid/%(playlist)s/%(title)s.%(ext)s"}}
-        result = executor._extract_base_output_dir(options)  # noqa: SLF001
+        result = executor._extract_base_output_dir(options)
         assert result == "E:/vid/%(playlist)s"
 
     def test_outtmpl_dict_default_not_string_falls_back_to_other_value(self) -> None:
         """Dict outtmpl where 'default' is not a string falls back to first string value found."""
         executor = DownloadExecutor()
-        options = {"outtmpl": {"default": 42, "chapter": "E:/vid/chapters/%(title)s.%(ext)s"}}
-        result = executor._extract_base_output_dir(options)  # noqa: SLF001
+        options = {
+            "outtmpl": {"default": 42, "chapter": "E:/vid/chapters/%(title)s.%(ext)s"}
+        }
+        result = executor._extract_base_output_dir(options)
         assert result == "E:/vid/chapters"
 
     def test_outtmpl_dict_no_string_values_returns_none(self) -> None:
         """Dict outtmpl with no string values at all returns None."""
         executor = DownloadExecutor()
         options = {"outtmpl": {"default": None, "chapter": 99}}
-        result = executor._extract_base_output_dir(options)  # noqa: SLF001
+        result = executor._extract_base_output_dir(options)
         assert result is None
 
     def test_outtmpl_dict_empty_dict_returns_none(self) -> None:
         """Empty dict outtmpl returns None."""
         executor = DownloadExecutor()
-        result = executor._extract_base_output_dir({"outtmpl": {}})  # noqa: SLF001
+        result = executor._extract_base_output_dir({"outtmpl": {}})
         assert result is None
 
     def test_outtmpl_dict_default_empty_string_falls_back_to_other_value(self) -> None:
         """Dict outtmpl where 'default' is an empty string falls back to first non-empty string value."""
         executor = DownloadExecutor()
-        options = {"outtmpl": {"default": "", "chapter": "E:/vid/chapters/%(title)s.%(ext)s"}}
-        result = executor._extract_base_output_dir(options)  # noqa: SLF001
+        options = {
+            "outtmpl": {"default": "", "chapter": "E:/vid/chapters/%(title)s.%(ext)s"}
+        }
+        result = executor._extract_base_output_dir(options)
         assert result == "E:/vid/chapters"
 
     def test_outtmpl_non_string_non_dict_type_returns_none(self) -> None:
-        """outtmpl of an unexpected type (e.g. list) returns None without raising."""
+        """Outtmpl of an unexpected type (e.g. list) returns None without raising."""
         executor = DownloadExecutor()
-        result = executor._extract_base_output_dir({"outtmpl": ["E:/vid/%(title)s.%(ext)s"]})  # noqa: SLF001
+        result = executor._extract_base_output_dir(
+            {"outtmpl": ["E:/vid/%(title)s.%(ext)s"]}
+        )
         assert result is None
 
     def test_outtmpl_string_trailing_slash_single_useful_segment(self) -> None:
-        """outtmpl ending with a slash produces an empty last segment; all-but-last is returned."""
+        """Outtmpl ending with a slash produces an empty last segment; all-but-last is returned."""
         executor = DownloadExecutor()
-        result = executor._extract_base_output_dir({"outtmpl": "E:/vid/"})  # noqa: SLF001
+        result = executor._extract_base_output_dir({"outtmpl": "E:/vid/"})
         assert result == "E:/vid"
 
     def test_outtmpl_string_only_slash_returns_none(self) -> None:
-        """outtmpl of just '/' produces an empty join which coerces to None via `or None`."""
+        """Outtmpl of just '/' produces an empty join which coerces to None via `or None`."""
         executor = DownloadExecutor()
-        result = executor._extract_base_output_dir({"outtmpl": "/"})  # noqa: SLF001
+        result = executor._extract_base_output_dir({"outtmpl": "/"})
         assert result is None
 
 
@@ -451,7 +462,9 @@ class TestRenameNaFolderIfNeeded:
                 "playlist_id": "PL123",
             },
         }
-        executor._rename_na_folder_if_needed(options, ["https://youtube.com/playlist?list=PL123"])  # noqa: SLF001
+        executor._rename_na_folder_if_needed(
+            options, ["https://youtube.com/playlist?list=PL123"]
+        )
         mock_rename.assert_called_once_with(
             "E:/vid",
             ["https://youtube.com/playlist?list=PL123"],
@@ -463,47 +476,55 @@ class TestRenameNaFolderIfNeeded:
     def test_no_qmeta_key_does_not_invoke_rename(self, mock_rename: Mock) -> None:
         """Missing 'qmeta' key — rename is never called."""
         executor = DownloadExecutor()
-        executor._rename_na_folder_if_needed({"outtmpl": "E:/vid/x.%(ext)s"}, ["url"])  # noqa: SLF001
+        executor._rename_na_folder_if_needed({"outtmpl": "E:/vid/x.%(ext)s"}, ["url"])
         mock_rename.assert_not_called()
 
     @patch("src.download_executor.rename_playlist_folders_from_comments")
     def test_qmeta_is_none_does_not_invoke_rename(self, mock_rename: Mock) -> None:
         """Explicit None qmeta — meta falls back to {}, no playlist_comments, rename not called."""
         executor = DownloadExecutor()
-        executor._rename_na_folder_if_needed({"outtmpl": "E:/vid/x.%(ext)s", "qmeta": None}, ["url"])  # noqa: SLF001
+        executor._rename_na_folder_if_needed(
+            {"outtmpl": "E:/vid/x.%(ext)s", "qmeta": None}, ["url"]
+        )
         mock_rename.assert_not_called()
 
     @patch("src.download_executor.rename_playlist_folders_from_comments")
-    def test_playlist_comments_empty_dict_does_not_invoke_rename(self, mock_rename: Mock) -> None:
+    def test_playlist_comments_empty_dict_does_not_invoke_rename(
+        self, mock_rename: Mock
+    ) -> None:
         """Empty playlist_comments dict is falsy — rename is not called."""
         executor = DownloadExecutor()
         options = {
             "outtmpl": "E:/vid/%(playlist)s.%(ext)s",
             "qmeta": {"playlist_comments": {}},
         }
-        executor._rename_na_folder_if_needed(options, ["url"])  # noqa: SLF001
+        executor._rename_na_folder_if_needed(options, ["url"])
         mock_rename.assert_not_called()
 
     @patch("src.download_executor.rename_playlist_folders_from_comments")
-    def test_playlist_comments_none_does_not_invoke_rename(self, mock_rename: Mock) -> None:
+    def test_playlist_comments_none_does_not_invoke_rename(
+        self, mock_rename: Mock
+    ) -> None:
         """Explicit None playlist_comments — rename is not called."""
         executor = DownloadExecutor()
         options = {
             "outtmpl": "E:/vid/%(playlist)s.%(ext)s",
             "qmeta": {"playlist_comments": None},
         }
-        executor._rename_na_folder_if_needed(options, ["url"])  # noqa: SLF001
+        executor._rename_na_folder_if_needed(options, ["url"])
         mock_rename.assert_not_called()
 
     @patch("src.download_executor.rename_playlist_folders_from_comments")
-    def test_no_extractable_base_dir_does_not_invoke_rename(self, mock_rename: Mock) -> None:
+    def test_no_extractable_base_dir_does_not_invoke_rename(
+        self, mock_rename: Mock
+    ) -> None:
         """When base dir cannot be extracted (single-segment path), rename is not called."""
         executor = DownloadExecutor()
         options = {
             "outtmpl": "output.%(ext)s",
             "qmeta": {"playlist_comments": {"PL123": "My Playlist"}},
         }
-        executor._rename_na_folder_if_needed(options, ["url"])  # noqa: SLF001
+        executor._rename_na_folder_if_needed(options, ["url"])
         mock_rename.assert_not_called()
 
     @patch("src.download_executor.rename_playlist_folders_from_comments")
@@ -511,7 +532,7 @@ class TestRenameNaFolderIfNeeded:
         """Missing outtmpl yields no base dir — rename is not called."""
         executor = DownloadExecutor()
         options = {"qmeta": {"playlist_comments": {"PL123": "My Playlist"}}}
-        executor._rename_na_folder_if_needed(options, ["url"])  # noqa: SLF001
+        executor._rename_na_folder_if_needed(options, ["url"])
         mock_rename.assert_not_called()
 
     @patch("src.download_executor.rename_playlist_folders_from_comments")
@@ -522,7 +543,7 @@ class TestRenameNaFolderIfNeeded:
             "outtmpl": "E:/vid/%(playlist)s.%(ext)s",
             "qmeta": {"playlist_comments": {"PL123": "My Playlist"}},
         }
-        executor._rename_na_folder_if_needed(options, [])  # noqa: SLF001
+        executor._rename_na_folder_if_needed(options, [])
         mock_rename.assert_called_once()
 
     @patch("src.download_executor.rename_playlist_folders_from_comments")
@@ -533,19 +554,21 @@ class TestRenameNaFolderIfNeeded:
             "outtmpl": "E:/vid/%(playlist)s.%(ext)s",
             "qmeta": {"playlist_comments": {"PL123": "My Playlist"}},
         }
-        executor._rename_na_folder_if_needed(options, ["url"])  # noqa: SLF001
+        executor._rename_na_folder_if_needed(options, ["url"])
         _, kwargs = mock_rename.call_args
         assert kwargs["direct_playlist_id"] is None
 
     @patch("src.download_executor.rename_playlist_folders_from_comments")
-    def test_dict_outtmpl_extracts_dir_and_invokes_rename(self, mock_rename: Mock) -> None:
+    def test_dict_outtmpl_extracts_dir_and_invokes_rename(
+        self, mock_rename: Mock
+    ) -> None:
         """Dict-form outtmpl is handled correctly — dir extracted and rename called."""
         executor = DownloadExecutor()
         options = {
             "outtmpl": {"default": "E:/vid/%(playlist)s/%(title)s.%(ext)s"},
             "qmeta": {"playlist_comments": {"PL123": "My Playlist"}},
         }
-        executor._rename_na_folder_if_needed(options, ["url"])  # noqa: SLF001
+        executor._rename_na_folder_if_needed(options, ["url"])
         mock_rename.assert_called_once()
         call_args = mock_rename.call_args[0]
         assert call_args[0] == "E:/vid/%(playlist)s"
@@ -557,8 +580,10 @@ class TestExtractBaseOutputDirEdgeCaseBug:
     def test_dict_default_empty_string_falls_back_to_non_empty_value(self) -> None:
         """When 'default' is '' the loop skips it and uses the first non-empty string value."""
         executor = DownloadExecutor()
-        options = {"outtmpl": {"default": "", "chapter": "E:/vid/chapters/%(title)s.%(ext)s"}}
-        result = executor._extract_base_output_dir(options)  # noqa: SLF001
+        options = {
+            "outtmpl": {"default": "", "chapter": "E:/vid/chapters/%(title)s.%(ext)s"}
+        }
+        result = executor._extract_base_output_dir(options)
         assert result == "E:/vid/chapters"
 
 

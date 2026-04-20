@@ -268,7 +268,7 @@ class TestEpisodeStatusEvaluation:
         recent_ts = executor.now_ts - (12 * 60 * 60)  # 12 hours old
         with (
             patch(
-                "src.podcast_filter_executor.check_sponsorblock_for_video_id"
+                "src.podcast_filter_executor.check_sponsorblock_for_video_id",
             ) as mock_sb,
             patch("utils.detect_site_from_urls", return_value="soundcloud"),
         ):
@@ -566,7 +566,7 @@ class TestEdgeCases:
 
         # First evaluation
         entries1 = [
-            {"id": "vid456", "webpage_url": "https://example.com", "title": "New"}
+            {"id": "vid456", "webpage_url": "https://example.com", "title": "New"},
         ]
         to_download1, _, _ = executor.evaluate_playlist_urls(entries1)
 

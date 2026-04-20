@@ -5,19 +5,22 @@ import re
 from pathlib import Path
 from queue import Queue
 
+from dotenv import load_dotenv
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from wakepy import keep
-
-from dotenv import load_dotenv
 
 _user_env = Path.home() / "AppData" / "Roaming" / "VidDownloader" / ".env"
 load_dotenv(dotenv_path=_user_env if _user_env.exists() else None)
 load_dotenv()  # also load project .env in dev (won't override vars already set)
 
-import utils
-from src.config import ERROR_LOG_PATH, HISTORY_LOG_PATH, LOGFILE_MIGRATION_ENABLED
-from src.download_executor import DownloadExecutor
-from src.logging_utils import get_local_timestamp
+import utils  # noqa: E402
+from src.config import (  # noqa: E402
+    ERROR_LOG_PATH,
+    HISTORY_LOG_PATH,
+    LOGFILE_MIGRATION_ENABLED,
+)
+from src.download_executor import DownloadExecutor  # noqa: E402
+from src.logging_utils import get_local_timestamp  # noqa: E402
 
 logging.basicConfig(
     filename=str(ERROR_LOG_PATH),
@@ -244,8 +247,8 @@ def parse_history_log() -> list[dict]:
         return []
     entries: list[dict] = []
     with path.open(encoding="utf-8-sig") as f:
-        for line in f:
-            line = line.rstrip("\r\n")
+        for raw_line in f:
+            line = raw_line.rstrip("\r\n")
             m = _HISTORY_RE.match(line)
             if not m:
                 continue

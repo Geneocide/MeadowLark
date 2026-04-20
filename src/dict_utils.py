@@ -4,7 +4,8 @@ from typing import Any
 
 
 def merge_dicts_recursive(
-    base: dict[str, Any], overrides: dict[str, Any]
+    base: dict[str, Any],
+    overrides: dict[str, Any],
 ) -> dict[str, Any]:
     """
     Recursively merge overrides into base without mutating inputs.

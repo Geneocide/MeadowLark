@@ -1,5 +1,4 @@
 """Unit tests for podcast_filtering helpers."""
-# ruff: noqa: S101
 
 from datetime import datetime, timezone
 from pathlib import Path

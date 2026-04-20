@@ -50,7 +50,9 @@ HISTORY_LOG_PATH: Final[Path] = _resolve_path("VID_DL_HISTORY_LOG", "history_log
 
 # Resource directories and files
 RESOURCES_DIR: Final[Path] = _resolve_path("VID_DL_RESOURCES_DIR", "resources")
-COOKIES_FILE: Final[Path] = _resolve_path("VID_DL_COOKIES_FILE", RESOURCES_DIR / "cookies.txt")
+COOKIES_FILE: Final[Path] = _resolve_path(
+    "VID_DL_COOKIES_FILE", RESOURCES_DIR / "cookies.txt"
+)
 LIVE_QUEUE_FILE: Final[Path] = RESOURCES_DIR / "live_queue.txt"
 
 # Playlist files
@@ -86,7 +88,9 @@ VIDEO_STORAGE_DIR: Final[Path] = _resolve_path(
 if getattr(sys, "frozen", False):
     VENV_SCRIPTS_DIR: Final[Path] = Path(sys._MEIPASS)  # type: ignore[attr-defined]
 else:
-    VENV_SCRIPTS_DIR: Final[Path] = _resolve_path("VID_DL_VENV_SCRIPTS", ".venv/Scripts")
+    VENV_SCRIPTS_DIR: Final[Path] = _resolve_path(
+        "VID_DL_VENV_SCRIPTS", ".venv/Scripts"
+    )
 
 # ============================================================================
 # Timeout Configuration (seconds)

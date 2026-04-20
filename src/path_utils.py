@@ -95,13 +95,14 @@ def resolve_playlist_label(info: dict, url: str) -> str:
     return sanitize_for_path(label)
 
 
-def rename_playlist_folders_from_comments(
+def rename_playlist_folders_from_comments(  # noqa: C901
     base_output_dir: str,
     urls: list[str],
     playlist_comments: dict[str, str] | None = None,
     direct_playlist_id: str | None = None,
 ) -> None:
-    """Rename 'NA' playlist folders using comment-based names when available.
+    """
+    Rename 'NA' playlist folders using comment-based names when available.
 
     Args:
         base_output_dir: Base directory where playlists are downloaded (e.g., "E:/vid storage").

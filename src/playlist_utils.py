@@ -73,7 +73,8 @@ def get_playlist_file_for_source(source: str) -> str | None:
 
 
 def load_playlist_urls(path: Path) -> list[str]:
-    """Return all non-blank, non-comment lines from a playlist file as raw URL strings.
+    """
+    Return all non-blank, non-comment lines from a playlist file as raw URL strings.
 
     Returns an empty list if the file does not exist or cannot be read.
     """
@@ -92,7 +93,8 @@ def load_playlist_urls(path: Path) -> list[str]:
 
 
 def load_playlist_comments_for_source(source: str) -> dict[str, str]:
-    """Return {playlist_id: comment} for all commented entries in the source playlist file.
+    """
+    Return {playlist_id: comment} for all commented entries in the source playlist file.
 
     Parses lines of the form:
         #Some Comment

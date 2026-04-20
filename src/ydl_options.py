@@ -80,7 +80,11 @@ def get_source_options(source: str) -> dict[str, Any]:
                 "best[height=720]/best"
             ),
             "merge_output_format": "mp4",
-            "outtmpl": (VIDEO_STORAGE_DIR / "%(playlist)s" / "%(playlist_index)s - %(title)s.%(ext)s").as_posix(),
+            "outtmpl": (
+                VIDEO_STORAGE_DIR
+                / "%(playlist)s"
+                / "%(playlist_index)s - %(title)s.%(ext)s"
+            ).as_posix(),
             "ignoreerrors": "only_download",
         },
         "1080playlists": {
@@ -90,7 +94,11 @@ def get_source_options(source: str) -> dict[str, Any]:
                 "best[height=1080]/best"
             ),
             "merge_output_format": "mp4",
-            "outtmpl": (VIDEO_STORAGE_DIR / "%(playlist)s" / "%(playlist_index)s - %(title)s.%(ext)s").as_posix(),
+            "outtmpl": (
+                VIDEO_STORAGE_DIR
+                / "%(playlist)s"
+                / "%(playlist_index)s - %(title)s.%(ext)s"
+            ).as_posix(),
             "ignoreerrors": "only_download",
         },
     }
@@ -143,4 +151,6 @@ def get_postprocessors(source: str) -> list[dict[str, Any]]:
     Returns:
         A list of yt-dlp postprocessor dictionaries.
     """
-    return get_source_options(source).get("postprocessors", list(DEFAULT_POSTPROCESSORS))
+    return get_source_options(source).get(
+        "postprocessors", list(DEFAULT_POSTPROCESSORS)
+    )

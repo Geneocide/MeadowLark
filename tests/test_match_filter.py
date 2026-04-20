@@ -1,5 +1,4 @@
 """Unit tests for src.match_filter.build_match_filter."""
-# ruff: noqa: S101, FBT003
 
 from collections.abc import Callable
 from unittest.mock import MagicMock, patch
@@ -33,5 +32,7 @@ def test_mf_none_info_calls_log_exception_and_returns_none() -> None:
 
 def test_mf_normal_video_returns_none() -> None:
     mf = _make_mf()
-    result = mf({"is_live": False, "live_status": "not_live", "availability": "public"}, False)
+    result = mf(
+        {"is_live": False, "live_status": "not_live", "availability": "public"}, False
+    )
     assert result is None

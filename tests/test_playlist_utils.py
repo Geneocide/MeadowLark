@@ -17,7 +17,6 @@ from src.playlist_utils import (
     load_playlist_urls,
 )
 
-
 # ---------------------------------------------------------------------------
 # Original 6 tests (preserved verbatim)
 # ---------------------------------------------------------------------------
@@ -25,7 +24,9 @@ from src.playlist_utils import (
 
 def test_load_playlist_urls_returns_urls(tmp_path: Path) -> None:
     f = tmp_path / "playlists.txt"
-    f.write_text("https://youtube.com/playlist?list=PLabc\nhttps://youtube.com/playlist?list=PLxyz\n")
+    f.write_text(
+        "https://youtube.com/playlist?list=PLabc\nhttps://youtube.com/playlist?list=PLxyz\n"
+    )
     assert load_playlist_urls(f) == [
         "https://youtube.com/playlist?list=PLabc",
         "https://youtube.com/playlist?list=PLxyz",
@@ -72,7 +73,9 @@ def test_load_playlist_urls_single_url_no_trailing_newline(tmp_path: Path) -> No
     assert load_playlist_urls(f) == ["https://youtube.com/playlist?list=PLabc"]
 
 
-def test_load_playlist_urls_strips_leading_trailing_whitespace_from_url(tmp_path: Path) -> None:
+def test_load_playlist_urls_strips_leading_trailing_whitespace_from_url(
+    tmp_path: Path,
+) -> None:
     """Row 7 - URLs padded with spaces/tabs must be returned stripped."""
     f = tmp_path / "playlists.txt"
     f.write_text("  https://youtube.com/playlist?list=PLabc  \n")
@@ -118,7 +121,8 @@ def test_load_playlist_urls_mixed_content_returns_only_urls(tmp_path: Path) -> N
 
 
 def test_load_playlist_urls_non_utf8_file_behavior(tmp_path: Path) -> None:
-    """Row 12 - documents behavior on non-UTF-8 bytes.
+    """
+    Row 12 - documents behavior on non-UTF-8 bytes.
 
     The implementation opens with encoding='utf-8' and only catches OSError.
     UnicodeDecodeError is NOT a subclass of OSError, so the function will raise
@@ -137,7 +141,9 @@ def test_load_playlist_urls_non_utf8_file_behavior(tmp_path: Path) -> None:
         pass
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="chmod permission tests are unreliable on Windows")
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="chmod permission tests are unreliable on Windows"
+)
 def test_load_playlist_urls_permission_denied_returns_empty(tmp_path: Path) -> None:
     """Row 14 - a file that exists but cannot be read must return []."""
     f = tmp_path / "playlists.txt"
@@ -150,7 +156,8 @@ def test_load_playlist_urls_permission_denied_returns_empty(tmp_path: Path) -> N
 
 
 def test_load_playlist_urls_path_is_directory_returns_empty(tmp_path: Path) -> None:
-    """Row 15 - passing a directory path (which exists) must return [] not crash.
+    """
+    Row 15 - passing a directory path (which exists) must return [] not crash.
 
     path.exists() is True for a directory; open() raises IsADirectoryError which
     is a subclass of OSError, so the except clause must catch it.
@@ -198,7 +205,7 @@ def _make_service() -> DownloadService:
 def test_load_playlist_urls_wrapper_unknown_source_returns_none() -> None:
     """Row 20 - an unrecognised source must return None (not [])."""
     svc = _make_service()
-    assert svc._load_playlist_urls("not_a_real_source") is None  # noqa: SLF001
+    assert svc._load_playlist_urls("not_a_real_source") is None
 
 
 def test_load_playlist_urls_wrapper_known_source_missing_file_returns_none(
@@ -208,14 +215,15 @@ def test_load_playlist_urls_wrapper_known_source_missing_file_returns_none(
     """Row 21 - known source whose playlist file does not exist must return None."""
     monkeypatch.setattr(_ds, "PLAYLISTS_FILE", tmp_path / "nonexistent.txt")
     svc = _make_service()
-    assert svc._load_playlist_urls("1080playlists") is None  # noqa: SLF001
+    assert svc._load_playlist_urls("1080playlists") is None
 
 
 def test_load_playlist_urls_wrapper_known_source_empty_file_returns_none(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Row 18 - known source whose playlist file is empty must return None (not []).
+    """
+    Row 18 - known source whose playlist file is empty must return None (not []).
 
     The wrapper uses `load_playlist_urls(...) or None` which converts [] to None.
     This test verifies that contract holds so request_detected treats empty files
@@ -225,8 +233,10 @@ def test_load_playlist_urls_wrapper_known_source_empty_file_returns_none(
     f.write_text("")
     monkeypatch.setattr(_ds, "PLAYLISTS_FILE", f)
     svc = _make_service()
-    result = svc._load_playlist_urls("1080playlists")  # noqa: SLF001
-    assert result is None, "Empty playlist file must yield None, not [], to satisfy caller contract"
+    result = svc._load_playlist_urls("1080playlists")
+    assert result is None, (
+        "Empty playlist file must yield None, not [], to satisfy caller contract"
+    )
 
 
 def test_load_playlist_urls_wrapper_known_source_with_urls_returns_list(
@@ -238,7 +248,7 @@ def test_load_playlist_urls_wrapper_known_source_with_urls_returns_list(
     f.write_text("https://youtube.com/playlist?list=PLabc\n")
     monkeypatch.setattr(_ds, "PLAYLISTS_FILE", f)
     svc = _make_service()
-    result = svc._load_playlist_urls("1080playlists")  # noqa: SLF001
+    result = svc._load_playlist_urls("1080playlists")
     assert result == ["https://youtube.com/playlist?list=PLabc"]
 
 
@@ -300,24 +310,39 @@ def test_load_playlist_comments_valid_source_missing_file_returns_empty() -> Non
 
 def test_load_playlist_comments_extracts_comment_before_url(tmp_path: Path) -> None:
     playlist_file = tmp_path / "playlists.txt"
-    playlist_file.write_text("#My Comment\nhttps://www.youtube.com/playlist?list=PLabc123\n")
-    with patch("src.playlist_utils.get_playlist_file_for_source", return_value=str(playlist_file)):
+    playlist_file.write_text(
+        "#My Comment\nhttps://www.youtube.com/playlist?list=PLabc123\n"
+    )
+    with patch(
+        "src.playlist_utils.get_playlist_file_for_source",
+        return_value=str(playlist_file),
+    ):
         result = load_playlist_comments_for_source("1080playlists")
     assert result == {"PLabc123": "My Comment"}
 
 
-def test_load_playlist_comments_url_without_list_param_not_added(tmp_path: Path) -> None:
+def test_load_playlist_comments_url_without_list_param_not_added(
+    tmp_path: Path,
+) -> None:
     playlist_file = tmp_path / "playlists.txt"
     playlist_file.write_text("#Comment\nhttps://www.youtube.com/watch?v=abc\n")
-    with patch("src.playlist_utils.get_playlist_file_for_source", return_value=str(playlist_file)):
+    with patch(
+        "src.playlist_utils.get_playlist_file_for_source",
+        return_value=str(playlist_file),
+    ):
         result = load_playlist_comments_for_source("1080playlists")
     assert result == {}
 
 
-def test_load_playlist_comments_url_without_preceding_comment_not_added(tmp_path: Path) -> None:
+def test_load_playlist_comments_url_without_preceding_comment_not_added(
+    tmp_path: Path,
+) -> None:
     playlist_file = tmp_path / "playlists.txt"
     playlist_file.write_text("https://www.youtube.com/playlist?list=PLxyz\n")
-    with patch("src.playlist_utils.get_playlist_file_for_source", return_value=str(playlist_file)):
+    with patch(
+        "src.playlist_utils.get_playlist_file_for_source",
+        return_value=str(playlist_file),
+    ):
         result = load_playlist_comments_for_source("1080playlists")
     assert result == {}
 
@@ -326,7 +351,10 @@ def test_load_playlist_comments_oserror_returns_empty(tmp_path: Path) -> None:
     playlist_file = tmp_path / "playlists.txt"
     playlist_file.write_text("#Comment\nhttps://www.youtube.com/playlist?list=PLabc\n")
     with (
-        patch("src.playlist_utils.get_playlist_file_for_source", return_value=str(playlist_file)),
+        patch(
+            "src.playlist_utils.get_playlist_file_for_source",
+            return_value=str(playlist_file),
+        ),
         patch("pathlib.Path.open", side_effect=OSError("permission denied")),
     ):
         result = load_playlist_comments_for_source("1080playlists")
@@ -336,9 +364,12 @@ def test_load_playlist_comments_oserror_returns_empty(tmp_path: Path) -> None:
 def test_load_playlist_comments_blank_line_is_skipped(tmp_path: Path) -> None:
     playlist_file = tmp_path / "playlists.txt"
     playlist_file.write_text(
-        "\n#My Comment\nhttps://www.youtube.com/playlist?list=PLabc123\n"
+        "\n#My Comment\nhttps://www.youtube.com/playlist?list=PLabc123\n",
     )
-    with patch("src.playlist_utils.get_playlist_file_for_source", return_value=str(playlist_file)):
+    with patch(
+        "src.playlist_utils.get_playlist_file_for_source",
+        return_value=str(playlist_file),
+    ):
         result = load_playlist_comments_for_source("1080playlists")
     assert result == {"PLabc123": "My Comment"}
 
@@ -351,9 +382,9 @@ def test_request_detected_skips_file_load_when_urls_provided(
     monkeypatch.setattr(_ds, "PLAYLISTS_FILE", tmp_path / "nonexistent.txt")
 
     svc = _make_service()
-    svc._load_playlist_urls = MagicMock(return_value=None)  # type: ignore[method-assign]  # noqa: SLF001
+    svc._load_playlist_urls = MagicMock(return_value=None)  # type: ignore[method-assign]
     svc.get_options = MagicMock(return_value=None)  # short-circuit after the load guard
 
     svc.request_detected(["https://youtube.com/watch?v=abc"], "1080playlists")
 
-    svc._load_playlist_urls.assert_not_called()  # noqa: SLF001
+    svc._load_playlist_urls.assert_not_called()

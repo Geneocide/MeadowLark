@@ -1,5 +1,4 @@
 """Unit tests for UIClasses module."""
-# ruff: noqa: S101
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch

@@ -1,5 +1,4 @@
 """Unit tests for src.ydl_options builders."""
-# ruff: noqa: S101
 
 from src.dict_utils import DEFAULT_POSTPROCESSORS
 from src.ydl_options import get_output_template, get_postprocessors, get_source_options

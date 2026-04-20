@@ -13,22 +13,25 @@ def make_service(**kwargs):
         ignore_archive_callback=kwargs.get("ignore_archive_callback", lambda: False),
         skip_download_callback=kwargs.get("skip_download_callback", lambda: False),
         label_output_set_text_callback=kwargs.get(
-            "label_output_set_text_callback", Mock()
+            "label_output_set_text_callback",
+            Mock(),
         ),
         log_edit_append_callback=kwargs.get("log_edit_append_callback", Mock()),
         bar_progress_set_range_callback=kwargs.get(
-            "bar_progress_set_range_callback", Mock()
+            "bar_progress_set_range_callback",
+            Mock(),
         ),
         bar_progress_set_value_callback=kwargs.get(
-            "bar_progress_set_value_callback", Mock()
+            "bar_progress_set_value_callback",
+            Mock(),
         ),
         handle_info_changed_callback=kwargs.get("handle_info_changed_callback", Mock()),
         handle_log_entry_callback=kwargs.get("handle_log_entry_callback", Mock()),
         handle_queue_empty_callback=kwargs.get("handle_queue_empty_callback", Mock()),
         do_updates_callback=kwargs.get("do_updates_callback", Mock()),
         add_to_live_queue_callback=kwargs.get("add_to_live_queue_callback", Mock()),
-        qhook_factory=kwargs.get("qhook_factory", lambda: MagicMock()),
-        qlogger_factory=kwargs.get("qlogger_factory", lambda: MagicMock()),
+        qhook_factory=kwargs.get("qhook_factory", MagicMock),
+        qlogger_factory=kwargs.get("qlogger_factory", MagicMock),
     )
 
 
@@ -37,7 +40,8 @@ def test_request_detected_update_triggers_update_callback() -> None:
     service = make_service(do_updates_callback=callback)
 
     action, urls, ydl_opts = service.request_detected(
-        ["https://youtube.com/watch?v=1"], "Update"
+        ["https://youtube.com/watch?v=1"],
+        "Update",
     )
 
     assert action == "update"
@@ -81,7 +85,7 @@ def test_load_playlist_urls_reads_existing_file(tmp_path, monkeypatch) -> None:
     playlist_file = tmp_path / "playlists.txt"
     playlist_file.write_text("https://example.com/video1\nhttps://example.com/video2\n")
 
-    from src import download_service  # noqa: PLC0415
+    from src import download_service
 
     monkeypatch.setattr(download_service, "PLAYLISTS_FILE", playlist_file)
     monkeypatch.setattr(download_service, "PLAYLISTS_720_FILE", playlist_file)
@@ -96,7 +100,8 @@ def test_load_playlist_urls_reads_existing_file(tmp_path, monkeypatch) -> None:
 def test_get_source_options_audio_playlists_has_ignore_errors() -> None:
     service = make_service()
     options = service.get_options(
-        ["https://youtube.com/watch?v=123"], "audio_playlists"
+        ["https://youtube.com/watch?v=123"],
+        "audio_playlists",
     )
 
     assert options["ignoreerrors"] == "only_download"
@@ -121,7 +126,9 @@ def test_add_archive_if_needed_skips_when_ignored() -> None:
 def test_add_match_filter_for_youtube_url() -> None:
     service = make_service()
     props: dict = {}
-    service._add_match_filter_if_youtube(props, ["https://youtube.com/watch?v=abc"], "1080")
+    service._add_match_filter_if_youtube(
+        props, ["https://youtube.com/watch?v=abc"], "1080"
+    )
     assert "match_filter" in props
 
 

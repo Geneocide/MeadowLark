@@ -1,5 +1,4 @@
 """Unit tests for QYT module classes and functionality."""
-# ruff: noqa: S101,SLF001
 
 from pathlib import Path
 from queue import Queue
@@ -291,11 +290,13 @@ class TestParseHistoryLog:
         assert len(entries) == 1
         assert entries[0]["title"] == "Good"
 
-    def test_crlf_line_endings_no_trailing_carriage_return(self, tmp_path: Path) -> None:
-        """CRLF line endings do not leave a trailing \\r in the result field."""
+    def test_crlf_line_endings_no_trailing_carriage_return(
+        self, tmp_path: Path
+    ) -> None:
+        r"""CRLF line endings do not leave a trailing \r in the result field."""
         log_file = tmp_path / "history_log.txt"
         log_file.write_bytes(
-            b"[2026-04-01 12:00:00] Site: youtube | Type: 1080 | Title: Video | Result: SUCCESS\r\n"
+            b"[2026-04-01 12:00:00] Site: youtube | Type: 1080 | Title: Video | Result: SUCCESS\r\n",
         )
         with patch("QYT.HistoryLogger.HISTORY_PATH", log_file):
             entries = parse_history_log()
@@ -306,14 +307,16 @@ class TestParseHistoryLog:
         """UTF-8 BOM at start of file does not cause the first entry to be skipped."""
         log_file = tmp_path / "history_log.txt"
         log_file.write_bytes(
-            b"\xef\xbb\xbf[2026-04-01 12:00:00] Site: youtube | Type: 1080 | Title: First | Result: SUCCESS\n"
+            b"\xef\xbb\xbf[2026-04-01 12:00:00] Site: youtube | Type: 1080 | Title: First | Result: SUCCESS\n",
         )
         with patch("QYT.HistoryLogger.HISTORY_PATH", log_file):
             entries = parse_history_log()
         assert len(entries) == 1
         assert entries[0]["title"] == "First"
 
-    def test_result_containing_pipe_url_uses_last_occurrence(self, tmp_path: Path) -> None:
+    def test_result_containing_pipe_url_uses_last_occurrence(
+        self, tmp_path: Path
+    ) -> None:
         """When result text contains ' | URL: ', the real URL (last field) is extracted correctly."""
         log_file = tmp_path / "history_log.txt"
         log_file.write_text(
@@ -324,7 +327,7 @@ class TestParseHistoryLog:
             entries = parse_history_log()
         assert len(entries) == 1
         assert entries[0]["url"] == "https://youtube.com/watch?v=abc"
-        assert "SKIPPED (see | URL: docs)" == entries[0]["result"]
+        assert entries[0]["result"] == "SKIPPED (see | URL: docs)"
 
 
 class TestHistoryHook:
