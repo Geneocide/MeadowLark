@@ -8,6 +8,12 @@ from queue import Queue
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from wakepy import keep
 
+from dotenv import load_dotenv
+
+_user_env = Path.home() / "AppData" / "Roaming" / "VidDownloader" / ".env"
+load_dotenv(dotenv_path=_user_env if _user_env.exists() else None)
+load_dotenv()  # also load project .env in dev (won't override vars already set)
+
 import utils
 from src.config import ERROR_LOG_PATH, HISTORY_LOG_PATH, LOGFILE_MIGRATION_ENABLED
 from src.download_executor import DownloadExecutor
@@ -176,7 +182,7 @@ class HistoryLogger:
             history_path.parent.mkdir(parents=True, exist_ok=True)
             with history_path.open("a", encoding="utf-8") as f:
                 f.write(
-                    HistoryLogger._format_entry(dt, site, dtype, title, result, url)
+                    HistoryLogger._format_entry(dt, site, dtype, title, result, url),
                 )
         except OSError as exc:
             # Never allow history logging to crash downloading, but record it
@@ -184,7 +190,12 @@ class HistoryLogger:
 
     @staticmethod
     def log(
-        site: str, dtype: str, title: str, *, success: bool, url: str | None = None
+        site: str,
+        dtype: str,
+        title: str,
+        *,
+        success: bool,
+        url: str | None = None,
     ) -> None:
         """
         Log a download result to history_log.txt with timestamp.

@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "deno>=2.5.4",
+    "python-dotenv>=1.0.0",
     "hurry-filesize>=0.9",
     "keyring>=25.6.0",
     "pyqt6>=6.9.1",
@@ -13,6 +14,11 @@ dependencies = [
     "requests>=2.32.5",
     "wakepy>=0.10.2.post1",
     "yt-dlp>=2025.7.21",
+]
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.0",
 ]
 
 [tool.setuptools.packages.find]

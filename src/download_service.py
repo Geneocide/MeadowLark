@@ -18,6 +18,7 @@ import utils
 from src import live_queue
 from src.config import (
     ARCHIVE_PATH,
+    COOKIES_FILE,
     LIVE_QUEUE_FILE,
     PLAYLISTS_720_FILE,
     PLAYLISTS_AUDIO_FILE,
@@ -248,7 +249,7 @@ class DownloadService:
                     {
                         "quiet": True,
                         "skip_download": True,
-                        "cookiefile": r"resources\cookies.txt",
+                        "cookiefile": str(COOKIES_FILE),
                         "extract_flat": True,
                     },
                 ) as ydl:

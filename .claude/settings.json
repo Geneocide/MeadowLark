@@ -10,7 +10,11 @@
       "Bash(grep -E \"\\\\.\\(py|pyw\\)$\")",
       "Bash(python -c \"from src.history_dialog import HistoryDialog; print\\('import OK'\\)\")",
       "Bash(python -c \"from PyQt6.QtWidgets import QMenu, QApplication; import sys; app = QApplication\\(sys.argv\\); m = QMenu\\(\\); a = m.addAction\\('test'\\); print\\(type\\(a\\)\\); print\\(a\\)\")",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(grep -r \"C:\\\\\\\\\\\\\\\\Users\\\\\\\\|etreq\" \"c:\\\\Users\\\\etreq\\\\dev\\\\vid downloader\" --include=\"*.py\")",
+      "Bash(awk -F: '{sum+=$2} END {print \"Total test functions:\", sum}')",
+      "Bash(uv sync *)",
+      "Bash(awk '{print $1}')"
     ],
     "deny": [
       "Bash(rm -rf *)",

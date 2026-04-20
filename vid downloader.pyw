@@ -83,10 +83,12 @@ from src.config import (
     PLAYLISTS_AUDIO_FILE,
     PLAYLISTS_FILE,
     PODCAST_MISC_OUTPUT_DIR,
+    VENV_SCRIPTS_DIR,
     VIDEO_STORAGE_DIR,
     YDL_COMMON_ERRORS,
     YDL_EXTRACTION_ERRORS,
 )
+from src.first_run_wizard import FirstRunWizard, needs_first_run
 from src.history_dialog import HistoryDialog
 from src.match_filter import build_match_filter
 from src.podcast_filtering import (
@@ -1757,8 +1759,13 @@ class MyWindow(QWidget):
 
 
 if __name__ == "__main__":
-    startfile(r"E:\vid storage")  # noqa: S606
-    dirname = Path(__file__).parent
+    _storage = Path(VIDEO_STORAGE_DIR)
+    if _storage.exists():
+        startfile(str(_storage))  # noqa: S606
+    if getattr(sys, "frozen", False):
+        dirname = Path(sys.executable).parent
+    else:
+        dirname = Path(__file__).parent
     QDir.addSearchPath("icons", str(dirname / "resources" / "icons"))
 
     app = QApplication(sys.argv)
@@ -1769,9 +1776,35 @@ if __name__ == "__main__":
     window = MyWindow()
     window.show()
 
+    if needs_first_run():
+        _wizard = FirstRunWizard(window)
+        _wizard.exec()
+
+    if not shutil.which("ffmpeg"):
+        QMessageBox.warning(
+            None,
+            "FFmpeg not found",
+            "FFmpeg is not installed or not on PATH.\nAudio and podcast downloads will fail.",
+        )
+
+    deno_exe = Path(VENV_SCRIPTS_DIR) / "deno.exe"
+    if not deno_exe.exists():
+        if getattr(sys, "frozen", False):
+            _deno_msg = f"Deno not found at {deno_exe}.\nYouTube downloads may fail."
+        else:
+            _deno_msg = f"Deno not found at {deno_exe}.\nRun `uv sync` to install it."
+        QMessageBox.warning(None, "Deno not found", _deno_msg)
+
     app.exec()
 
 # TODO: look into Android Faithful showing up in the basic misc folder
 # TODO: size control for error logs (low priority)
 # TODO: settings for making things more general, especially folder locations. Also, make sure no paths are hardcoded that should be config
 # TODO: make sure tfarchive.txt is checked first, always, for efficiency
+# TODO: look into the 5 Skipped every time audio_playlists is run
+# TODO: make .ico
+# TODO: rename???
+# TODO: make it possible to update .env settings via the app
+# TODO: add auto-check for updates?
+# TODO: figure out playlists for fresh users
+# TODO: Optionally add Inno Setup to the workflow to produce a single-file installer instead of a zip?

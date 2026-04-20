@@ -8,3 +8,7 @@ __pycache__
 .sqlite
 *.lock
 .coverage
+.env
+dist/
+build/
+installer_output/

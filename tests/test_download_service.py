@@ -3,7 +3,7 @@
 from queue import Queue
 from unittest.mock import MagicMock, Mock, patch
 
-from src.config import ARCHIVE_PATH
+from src.config import ARCHIVE_PATH, PODCAST_MISC_OUTPUT_DIR
 from src.download_service import DownloadService
 
 
@@ -101,9 +101,7 @@ def test_get_source_options_audio_playlists_has_ignore_errors() -> None:
 
     assert options["ignoreerrors"] == "only_download"
     assert options["format"] == "m4a/bestaudio/best"
-    assert options["outtmpl"].startswith(
-        "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/misc/"
-    )
+    assert options["outtmpl"].startswith(PODCAST_MISC_OUTPUT_DIR.as_posix())
 
 
 def test_add_archive_if_needed_adds_path() -> None:

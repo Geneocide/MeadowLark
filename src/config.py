@@ -1,6 +1,7 @@
 """Centralized configuration management for paths and constants with environment variable fallbacks."""
 
 import os
+import sys
 from pathlib import Path
 from typing import Final
 
@@ -49,7 +50,7 @@ HISTORY_LOG_PATH: Final[Path] = _resolve_path("VID_DL_HISTORY_LOG", "history_log
 
 # Resource directories and files
 RESOURCES_DIR: Final[Path] = _resolve_path("VID_DL_RESOURCES_DIR", "resources")
-COOKIES_FILE: Final[Path] = RESOURCES_DIR / "cookies.txt"
+COOKIES_FILE: Final[Path] = _resolve_path("VID_DL_COOKIES_FILE", RESOURCES_DIR / "cookies.txt")
 LIVE_QUEUE_FILE: Final[Path] = RESOURCES_DIR / "live_queue.txt"
 
 # Playlist files
@@ -70,19 +71,22 @@ PLAYLISTS_AUDIO_FILE: Final[Path] = _resolve_path(
 # External storage paths
 ARCHIVE_PATH: Final[Path] = _resolve_path(
     "VID_DL_ARCHIVE_PATH",
-    "C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt",
+    Path(__file__).parent.parent / "resources" / "archive.txt",
 )
 PODCAST_MISC_OUTPUT_DIR: Final[Path] = _resolve_path(
     "VID_DL_PODCAST_MISC_OUTPUT_DIR",
-    "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/misc",
+    Path.home() / "Music" / "Podcasts",
 )
 VIDEO_STORAGE_DIR: Final[Path] = _resolve_path(
     "VID_DL_VIDEO_STORAGE_DIR",
-    "E:/vid storage",
+    Path.home() / "Videos",
 )
 
 # JavaScript runtime configuration
-VENV_SCRIPTS_DIR: Final[Path] = _resolve_path("VID_DL_VENV_SCRIPTS", ".venv/Scripts")
+if getattr(sys, "frozen", False):
+    VENV_SCRIPTS_DIR: Final[Path] = Path(sys._MEIPASS)  # type: ignore[attr-defined]
+else:
+    VENV_SCRIPTS_DIR: Final[Path] = _resolve_path("VID_DL_VENV_SCRIPTS", ".venv/Scripts")
 
 # ============================================================================
 # Timeout Configuration (seconds)
