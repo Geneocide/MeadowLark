@@ -1803,8 +1803,9 @@ if __name__ == "__main__":
 # TODO: make sure tfarchive.txt is checked first, always, for efficiency
 # TODO: look into the 5 Skipped every time audio_playlists is run
 # TODO: make .ico
-# TODO: rename???
+# TODO: rename??? MeadowLark?
 # TODO: make it possible to update .env settings via the app
 # TODO: add auto-check for updates?
 # TODO: figure out playlists for fresh users
 # TODO: Optionally add Inno Setup to the workflow to produce a single-file installer instead of a zip?
+# TODO: figure out github CI issue

@@ -14,7 +14,10 @@
       "Bash(grep -r \"C:\\\\\\\\\\\\\\\\Users\\\\\\\\|etreq\" \"c:\\\\Users\\\\etreq\\\\dev\\\\vid downloader\" --include=\"*.py\")",
       "Bash(awk -F: '{sum+=$2} END {print \"Total test functions:\", sum}')",
       "Bash(uv sync *)",
-      "Bash(awk '{print $1}')"
+      "Bash(awk '{print $1}')",
+      "Read(//c/Users/etreq/.claude/**)",
+      "mcp__plugin_github_github__list_commits",
+      "mcp__plugin_github_github__list_pull_requests",
     ],
     "deny": [
       "Bash(rm -rf *)",
