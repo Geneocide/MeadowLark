@@ -1802,8 +1802,10 @@ if __name__ == "__main__":
 # TODO: settings for making things more general, especially folder locations. Also, make sure no paths are hardcoded that should be config
 # TODO: make sure tfarchive.txt is checked first, always, for efficiency
 # TODO: look into the 5 Skipped every time audio_playlists is run
-# TODO: make .ico
 # TODO: rename??? MeadowLark?
 # TODO: make it possible to update .env settings via the app
 # TODO: add auto-check for updates?
 # TODO: figure out playlists for fresh users
+# TODO: bug: icon not used when installed from installer
+# TODO: bug: upon initial setup, settings are not applied until restart but nothing prompts this
+# TODO: resizing makes Audio big (low priority)
