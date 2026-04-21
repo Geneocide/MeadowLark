@@ -1,5 +1,4 @@
 """Unit tests for QYT module classes and functionality."""
-# ruff: noqa: S101,SLF001
 
 from pathlib import Path
 from queue import Queue
@@ -7,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from PyQt6.QtCore import QObject
 
-from QYT import HistoryHook, HistoryLogger, QHook, QLogger, QYTQueue
+from QYT import HistoryHook, HistoryLogger, QHook, QLogger, QYTQueue, parse_history_log
 
 
 class TestQLogger:
@@ -110,6 +109,31 @@ class TestHistoryLogger:
         assert "Result: SUCCESS" in result
         assert result.endswith("\n")
 
+    def test_format_entry_with_url(self) -> None:
+        """Test _format_entry appends URL field when provided."""
+        result = HistoryLogger._format_entry(
+            "2026-03-24 10:30:45",
+            "youtube",
+            "1080",
+            "Test Video",
+            "SUCCESS",
+            "https://www.youtube.com/watch?v=abc123",
+        )
+        assert "| URL: https://www.youtube.com/watch?v=abc123" in result
+        assert result.endswith("\n")
+
+    def test_format_entry_without_url(self) -> None:
+        """Test _format_entry omits URL field when url is None."""
+        result = HistoryLogger._format_entry(
+            "2026-03-24 10:30:45",
+            "youtube",
+            "1080",
+            "Test Video",
+            "SUCCESS",
+            None,
+        )
+        assert "URL" not in result
+
     def test_format_entry_failure(self) -> None:
         """Test HistoryLogger._format_entry with failure."""
         result = HistoryLogger._format_entry(
@@ -143,10 +167,32 @@ class TestHistoryLogger:
 
         HistoryLogger.log("youtube", "1080", "Test Video", success=True)
 
-        # Verify write was called
         mock_file.write.assert_called_once()
         written_content = mock_file.write.call_args[0][0]
         assert "SUCCESS" in written_content
+        assert "URL" not in written_content
+
+    @patch("QYT.HistoryLogger.HISTORY_PATH")
+    def test_log_success_with_url(self, mock_path: MagicMock) -> None:
+        """Test HistoryLogger.log writes URL field when provided."""
+        mock_file = MagicMock()
+        mock_path.parent.mkdir = MagicMock()
+        mock_path.open = MagicMock(return_value=mock_file.__enter__.return_value)
+        mock_path.open.return_value.__enter__ = MagicMock(return_value=mock_file)
+        mock_path.open.return_value.__exit__ = MagicMock(return_value=None)
+
+        HistoryLogger.log(
+            "youtube",
+            "1080",
+            "Test Video",
+            success=True,
+            url="https://www.youtube.com/watch?v=abc123",
+        )
+
+        mock_file.write.assert_called_once()
+        written_content = mock_file.write.call_args[0][0]
+        assert "SUCCESS" in written_content
+        assert "| URL: https://www.youtube.com/watch?v=abc123" in written_content
 
     @patch("QYT.HistoryLogger.HISTORY_PATH")
     def test_log_skip(self, mock_path: MagicMock) -> None:
@@ -168,6 +214,120 @@ class TestHistoryLogger:
         mock_file.write.assert_called_once()
         written_content = mock_file.write.call_args[0][0]
         assert "SKIPPED (Short duration (<3 min))" in written_content
+
+
+class TestParseHistoryLog:
+    """Tests for parse_history_log()."""
+
+    def test_returns_empty_when_no_file(self, tmp_path: Path) -> None:
+        """Returns empty list when history file does not exist."""
+        with patch("QYT.HistoryLogger.HISTORY_PATH", tmp_path / "nonexistent.txt"):
+            assert parse_history_log() == []
+
+    def test_parses_old_format_without_url(self, tmp_path: Path) -> None:
+        """Parses legacy entries that have no URL field."""
+        log_file = tmp_path / "history_log.txt"
+        log_file.write_text(
+            "[2026-03-01 10:00:00] Site: youtube | Type: 1080 | Title: Old Video | Result: SUCCESS\n",
+            encoding="utf-8",
+        )
+        with patch("QYT.HistoryLogger.HISTORY_PATH", log_file):
+            entries = parse_history_log()
+        assert len(entries) == 1
+        assert entries[0]["url"] is None
+        assert entries[0]["result"] == "SUCCESS"
+        assert entries[0]["title"] == "Old Video"
+
+    def test_parses_new_format_with_url(self, tmp_path: Path) -> None:
+        """Parses new entries that include URL field."""
+        log_file = tmp_path / "history_log.txt"
+        log_file.write_text(
+            "[2026-04-01 12:00:00] Site: youtube | Type: 1080 | Title: New Video | Result: SUCCESS | URL: https://www.youtube.com/watch?v=xyz\n",
+            encoding="utf-8",
+        )
+        with patch("QYT.HistoryLogger.HISTORY_PATH", log_file):
+            entries = parse_history_log()
+        assert len(entries) == 1
+        assert entries[0]["url"] == "https://www.youtube.com/watch?v=xyz"
+        assert entries[0]["result"] == "SUCCESS"
+
+    def test_returns_newest_first(self, tmp_path: Path) -> None:
+        """Entries are returned newest-first (file order reversed)."""
+        log_file = tmp_path / "history_log.txt"
+        log_file.write_text(
+            "[2026-03-01 10:00:00] Site: youtube | Type: 1080 | Title: First | Result: SUCCESS\n"
+            "[2026-04-01 12:00:00] Site: youtube | Type: 1080 | Title: Second | Result: FAIL\n",
+            encoding="utf-8",
+        )
+        with patch("QYT.HistoryLogger.HISTORY_PATH", log_file):
+            entries = parse_history_log()
+        assert entries[0]["title"] == "Second"
+        assert entries[1]["title"] == "First"
+
+    def test_title_with_pipe_characters(self, tmp_path: Path) -> None:
+        """Parses entries where the title contains ' | ' without breaking."""
+        log_file = tmp_path / "history_log.txt"
+        log_file.write_text(
+            "[2026-04-01 12:00:00] Site: nebula | Type: podcast | Title: Part 1 | The Story | Result: SUCCESS | URL: https://nebula.tv/ep1\n",
+            encoding="utf-8",
+        )
+        with patch("QYT.HistoryLogger.HISTORY_PATH", log_file):
+            entries = parse_history_log()
+        assert len(entries) == 1
+        assert entries[0]["title"] == "Part 1 | The Story"
+        assert entries[0]["url"] == "https://nebula.tv/ep1"
+
+    def test_skips_malformed_lines(self, tmp_path: Path) -> None:
+        """Silently skips lines that don't match the expected format."""
+        log_file = tmp_path / "history_log.txt"
+        log_file.write_text(
+            "this is garbage\n"
+            "[2026-04-01 12:00:00] Site: youtube | Type: 1080 | Title: Good | Result: SUCCESS\n",
+            encoding="utf-8",
+        )
+        with patch("QYT.HistoryLogger.HISTORY_PATH", log_file):
+            entries = parse_history_log()
+        assert len(entries) == 1
+        assert entries[0]["title"] == "Good"
+
+    def test_crlf_line_endings_no_trailing_carriage_return(
+        self, tmp_path: Path
+    ) -> None:
+        r"""CRLF line endings do not leave a trailing \r in the result field."""
+        log_file = tmp_path / "history_log.txt"
+        log_file.write_bytes(
+            b"[2026-04-01 12:00:00] Site: youtube | Type: 1080 | Title: Video | Result: SUCCESS\r\n",
+        )
+        with patch("QYT.HistoryLogger.HISTORY_PATH", log_file):
+            entries = parse_history_log()
+        assert len(entries) == 1
+        assert entries[0]["result"] == "SUCCESS"
+
+    def test_utf8_bom_does_not_drop_first_entry(self, tmp_path: Path) -> None:
+        """UTF-8 BOM at start of file does not cause the first entry to be skipped."""
+        log_file = tmp_path / "history_log.txt"
+        log_file.write_bytes(
+            b"\xef\xbb\xbf[2026-04-01 12:00:00] Site: youtube | Type: 1080 | Title: First | Result: SUCCESS\n",
+        )
+        with patch("QYT.HistoryLogger.HISTORY_PATH", log_file):
+            entries = parse_history_log()
+        assert len(entries) == 1
+        assert entries[0]["title"] == "First"
+
+    def test_result_containing_pipe_url_uses_last_occurrence(
+        self, tmp_path: Path
+    ) -> None:
+        """When result text contains ' | URL: ', the real URL (last field) is extracted correctly."""
+        log_file = tmp_path / "history_log.txt"
+        log_file.write_text(
+            "[2026-04-01 12:00:00] Site: youtube | Type: 1080 | Title: Vid | Result: SKIPPED (see | URL: docs) | URL: https://youtube.com/watch?v=abc\n",
+            encoding="utf-8",
+        )
+        with patch("QYT.HistoryLogger.HISTORY_PATH", log_file):
+            entries = parse_history_log()
+        assert len(entries) == 1
+        assert entries[0]["url"] == "https://youtube.com/watch?v=abc"
+        assert entries[0]["result"] == "SKIPPED (see | URL: docs)"
 
 
 class TestHistoryHook:
@@ -224,10 +384,29 @@ class TestHistoryHook:
         }
         hook(event)
 
-        # Verify logging occurred
         mock_log.assert_called_once()
         args = mock_log.call_args
         assert args[1]["success"] is True
+        assert args[1]["url"] is None
+
+    @patch("QYT.HistoryLogger.log")
+    def test_history_hook_passes_url(self, mock_log: MagicMock) -> None:
+        """Test HistoryHook.__call__ extracts and passes webpage_url."""
+        meta = {"site": "youtube", "type": "1080"}
+        hook = HistoryHook(meta)
+
+        event = {
+            "status": "finished",
+            "info_dict": {
+                "id": "abc",
+                "title": "Video With URL",
+                "webpage_url": "https://www.youtube.com/watch?v=abc",
+            },
+        }
+        hook(event)
+
+        mock_log.assert_called_once()
+        assert mock_log.call_args[1]["url"] == "https://www.youtube.com/watch?v=abc"
 
     @patch("QYT.HistoryLogger.log")
     def test_history_hook_call_deduplication(

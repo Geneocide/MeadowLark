@@ -44,12 +44,13 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from os import startfile
 from pathlib import Path
+from typing import ClassVar
 from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 from hurry.filesize import size
 from PyQt6.QtCore import QDir, QObject, QPoint, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QCloseEvent, QFont, QIcon
+from PyQt6.QtGui import QCloseEvent, QFont, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -70,7 +71,9 @@ from PyQt6.QtWidgets import (
 
 import QYT
 import utils
+from src import live_queue
 from src.config import (
+    ARCHIVE_PATH,
     LABEL_OUTPUT_FONT_NAME,
     LABEL_OUTPUT_FONT_SIZE,
     LABEL_READY_TEXT,
@@ -79,9 +82,15 @@ from src.config import (
     PLAYLISTS_720_FILE,
     PLAYLISTS_AUDIO_FILE,
     PLAYLISTS_FILE,
+    PODCAST_MISC_OUTPUT_DIR,
+    VENV_SCRIPTS_DIR,
+    VIDEO_STORAGE_DIR,
     YDL_COMMON_ERRORS,
     YDL_EXTRACTION_ERRORS,
 )
+from src.first_run_wizard import FirstRunWizard, needs_first_run
+from src.history_dialog import HistoryDialog
+from src.match_filter import build_match_filter
 from src.podcast_filtering import (
     PODCAST_MIN_DURATION_SECONDS,
     append_to_archive_and_mark_skipped,
@@ -119,12 +128,34 @@ THREAD_QUIT_TIMEOUT_MS = 2000
 THREAD_TERMINATE_TIMEOUT_MS = 1000
 
 
+def _make_podcast_status_entry(
+    podcast: str,
+    url: str,
+    status: str = "(unknown)",
+    latest_date: str = "(unknown)",
+    **kwargs: object,
+) -> dict:
+    """Create a podcast status entry dict with standard keys and optional extensions."""
+    return {
+        "podcast": podcast,
+        "latest_date": latest_date,
+        "status": status,
+        "url": url,
+        **kwargs,
+    }
+
+
 class MyWindow(QWidget):
     """
     MyWindow - A PyQt6-based main window for the Vid Downloader application, providing a GUI for downloading and managing video and audio content from YouTube and other platforms.
 
     Features include playlist and audio download options, drag-and-drop support, progress tracking, log display, update checking, and integration with custom download queue and processing logic.
     """
+
+    _BRAVE_PATHS: ClassVar[list[str]] = [
+        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+        r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+    ]
 
     def __init__(self) -> None:
         """
@@ -142,6 +173,8 @@ class MyWindow(QWidget):
         self._setup_queue_and_downloader()
         self._setup_timers()
         self._setup_podcast_state()
+
+        QShortcut(QKeySequence("Ctrl+H"), self).activated.connect(self._show_history)
 
         self.playlist_comments = {}
 
@@ -340,7 +373,7 @@ class MyWindow(QWidget):
             def _on_finished(
                 to_download: list,
                 pending: list,
-                had_error: bool,  # noqa: FBT001
+                had_error: bool,
                 messages: list[str],
                 statuses: list[str],
             ) -> None:
@@ -388,14 +421,14 @@ class MyWindow(QWidget):
                 "postprocessors": [
                     {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
                 ],
-                "outtmpl": "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/misc/%(title)s.%(ext)s",
+                "outtmpl": (PODCAST_MISC_OUTPUT_DIR / "%(title)s.%(ext)s").as_posix(),
             },
             "audio_playlists": {
                 "format": "m4a/bestaudio/best",
                 "postprocessors": [
                     {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
                 ],
-                "outtmpl": "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/misc/%(title)s.%(ext)s",
+                "outtmpl": (PODCAST_MISC_OUTPUT_DIR / "%(title)s.%(ext)s").as_posix(),
                 "ignoreerrors": "only_download",
             },
             "720playlists": {
@@ -406,7 +439,11 @@ class MyWindow(QWidget):
                     "best[height=720]/best"
                 ),
                 "merge_output_format": "mp4",
-                "outtmpl": "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s",
+                "outtmpl": (
+                    VIDEO_STORAGE_DIR
+                    / "%(playlist)s"
+                    / "%(playlist_index)s - %(title)s.%(ext)s"
+                ).as_posix(),
                 "ignoreerrors": "only_download",
             },
             "1080playlists": {
@@ -417,7 +454,11 @@ class MyWindow(QWidget):
                     "best[height=1080]/best"
                 ),
                 "merge_output_format": "mp4",
-                "outtmpl": "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s",
+                "outtmpl": (
+                    VIDEO_STORAGE_DIR
+                    / "%(playlist)s"
+                    / "%(playlist_index)s - %(title)s.%(ext)s"
+                ).as_posix(),
                 "ignoreerrors": "only_download",
             },
         }
@@ -444,7 +485,7 @@ class MyWindow(QWidget):
         return {
             "format": fmt,
             "merge_output_format": "mp4",
-            "outtmpl": "E:/vid storage/%(title)s.%(ext)s",
+            "outtmpl": (VIDEO_STORAGE_DIR / "%(title)s.%(ext)s").as_posix(),
             "match_filter": self.make_match_filter(source),
         }
 
@@ -502,11 +543,10 @@ class MyWindow(QWidget):
 
         If the source is 'Update', triggers the update process. Otherwise, prepares yt-dlp options, merges additional properties, and enqueues the download with progress and log handlers.
         """
-        qhook = QYT.QHook()
-        qlogger = QYT.QLogger(self.downloadQueue)
         if source == "Update":
             self.do_updates()
             return
+        qhook, qlogger, ydl_opts = self._create_download_context()
 
         # Load playlist URLs if applicable
         if not urls:  # Only load from file if no URLs provided (e.g., button press)
@@ -521,9 +561,6 @@ class MyWindow(QWidget):
                         if "list" in query:
                             pl_id = query["list"][0]
                             self.playlist_comments[pl_id] = item["comment"]
-
-        # options constant for all downloads
-        ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
 
         properties = self.get_options(urls, source)
         if properties:
@@ -546,9 +583,7 @@ class MyWindow(QWidget):
                     self._setup_podcast_check(urls, ydl_opts)
                 else:
                     self.downloadQueue.put((urls, ydl_opts))
-                    qhook.info_changed.connect(self.handle_info_changed)
-                    # qlogger.message_changed.connect(self.logEdit.appendPlainText)
-                    qlogger.message_changed.connect(self.handle_log_entry)
+                    self._wire_download_signals(qhook, qlogger)
                     self.barProgress.setRange(0, 1)
 
     def skip_downloading(self, urls: list, source: str) -> None:
@@ -556,7 +591,7 @@ class MyWindow(QWidget):
         self.labelOutput.setText("Skipping downloads.")
         qlogger = QYT.QLogger(self.downloadQueue)
         total_added = 0
-        archive_path = Path("C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt")
+        archive_path = ARCHIVE_PATH
         # Read existing IDs using centralized function
         existing_ids = load_downloaded_video_ids(str(archive_path))
         for url in urls:
@@ -606,9 +641,7 @@ class MyWindow(QWidget):
 
         # ignore archive checkbox
         if not self.checkIgnoreArchive.isChecked():
-            properties["download_archive"] = (
-                "C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt"
-            )
+            properties["download_archive"] = str(ARCHIVE_PATH)
 
         # detect if YT
         if "youtube.com" in urls[0]:
@@ -736,9 +769,9 @@ class MyWindow(QWidget):
                     # - (to_download, pending, had_error, messages)
                     # - (to_download, pending, had_error, messages, statuses)
                     if isinstance(result, tuple):
-                        if len(result) == 5:  # noqa: PLR2004
+                        if len(result) == 5:
                             to_download, pending, had_error, errors, statuses = result
-                        elif len(result) == 4:  # noqa: PLR2004
+                        elif len(result) == 4:
                             to_download, pending, had_error, errors = result
                         else:
                             to_download, pending, had_error = result
@@ -759,75 +792,53 @@ class MyWindow(QWidget):
 
     # --- Live queue management ---
     def make_match_filter(self, source: str) -> Callable:
-        """
-        Build a custom match_filter that...
+        """Build a match_filter that skips live/upcoming videos and queues them."""
+        return build_match_filter(
+            source,
+            add_to_queue_fn=self.add_to_live_queue,
+            log_fn=self.logEdit.appendPlainText,
+        )
 
-        - Skips live and upcoming videos now
-        - Records them into a persistent live queue for later re-check
-        - Skips videos that need auth
-        """
-
-        def _mf(info: dict, incomplete: bool) -> str | None:  # noqa: ARG001,FBT001
-            try:
-                is_live = info.get("is_live")
-                live_status = info.get("live_status")
-                availability = info.get("availability")
-                if availability in ("needs_auth", "scheduled"):
-                    return f"Skipping: {availability}"
-                if is_live or live_status in ("is_live", "is_upcoming"):
-                    url = (
-                        info.get("webpage_url")
-                        or info.get("original_url")
-                        or info.get("url")
-                    )
-                    if url:
-                        playlist_id = info.get("playlist_id")
-                        self.add_to_live_queue(url, source, playlist_id)
-                        self.logEdit.appendPlainText(
-                            f"Queued live for later: {url} [{source}]",
-                        )
-                    return "Skipping live; queued for later"
-            except (TypeError, AttributeError) as exc:
-                # If anything goes wrong, allow download to proceed rather than crash
-                utils.log_exception(exc, "Error in match_filter")
-                return None
-            return None
-
-        return _mf
-
-    def load_live_queue(self) -> dict[str, tuple[str, str | None]]:
+    def load_live_queue(self) -> live_queue.LiveQueueEntries:
         """Load live queue entries; returns {url: (source, playlist_id)}."""
-        entries: dict[str, tuple[str, str | None]] = {}
-        if self.live_queue_path.exists():
-            with self.live_queue_path.open("r", encoding="utf-8") as f:
-                for raw_line in f:
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-                    # stored as: source|url  or  source|url|playlist_id
-                    parts = line.split("|", 2)
-                    if len(parts) >= 2 and parts[1]:  # noqa: PLR2004
-                        playlist_id = parts[2] if len(parts) == 3 and parts[2] else None  # noqa: PLR2004
-                        entries[parts[1]] = (parts[0], playlist_id)
-        return entries
+        return live_queue.load_live_queue(self.live_queue_path)
 
-    def save_live_queue(self, entries: dict[str, tuple[str, str | None]]) -> None:
+    def save_live_queue(self, entries: live_queue.LiveQueueEntries) -> None:
         """Save the live queue entries to file."""
-        with self.live_queue_path.open("w", encoding="utf-8") as f:
-            for url, (source, playlist_id) in entries.items():
-                if playlist_id:
-                    f.write(f"{source}|{url}|{playlist_id}\n")
-                else:
-                    f.write(f"{source}|{url}\n")
+        live_queue.save_live_queue(self.live_queue_path, entries)
+
+    def _create_download_context(self) -> tuple[QYT.QHook, QYT.QLogger, dict]:
+        """Create a fresh QHook, QLogger, and base ydl_opts dict."""
+        qhook = QYT.QHook()
+        qlogger = QYT.QLogger(self.downloadQueue)
+        ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
+        return qhook, qlogger, ydl_opts
+
+    def _fork_download_context(
+        self,
+        base_opts: dict,
+    ) -> tuple[QYT.QHook, QYT.QLogger, dict]:
+        """Create a fresh QHook/QLogger and return a copy of base_opts with them wired in."""
+        qhook = QYT.QHook()
+        qlogger = QYT.QLogger(self.downloadQueue)
+        opts = dict(base_opts)
+        opts["logger"] = qlogger
+        opts["progress_hooks"] = [qhook]
+        return qhook, qlogger, opts
+
+    def _wire_download_signals(self, qhook: QYT.QHook, qlogger: QYT.QLogger) -> None:
+        """Connect qhook/qlogger signals to the main window handler slots."""
+        qhook.info_changed.connect(self.handle_info_changed)
+        qlogger.message_changed.connect(self.handle_log_entry)
 
     def add_to_live_queue(
-        self, url: str, source: str, playlist_id: str | None = None
+        self,
+        url: str,
+        source: str,
+        playlist_id: str | None = None,
     ) -> None:
         """Add a URL to the live queue."""
-        entries = self.load_live_queue()
-        # Avoid duplicates
-        entries[url] = (source, playlist_id)
-        self.save_live_queue(entries)
+        live_queue.add_to_live_queue(self.live_queue_path, url, source, playlist_id)
 
     def check_live_queue(self) -> None:
         """Check the live queue for ended streams and queue them for download."""
@@ -855,9 +866,7 @@ class MyWindow(QWidget):
                     self.logEdit.appendPlainText(
                         f"Live ended, queued: {url} [{source}]",
                     )
-                    qhook = QYT.QHook()
-                    qlogger = QYT.QLogger(self.downloadQueue)
-                    ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
+                    qhook, qlogger, ydl_opts = self._create_download_context()
                     properties = self.get_options([url], source)
                     if properties:
                         # Don't re-apply match_filter: stream already confirmed ended
@@ -869,7 +878,7 @@ class MyWindow(QWidget):
                         }
                         if playlist_id:
                             playlist_comments = utils.load_playlist_comments_for_source(
-                                source
+                                source,
                             )
                             if playlist_comments:
                                 qmeta["playlist_comments"] = playlist_comments
@@ -877,8 +886,7 @@ class MyWindow(QWidget):
                         ydl_opts["qmeta"] = qmeta
 
                         self.downloadQueue.put(([url], ydl_opts))
-                        qhook.info_changed.connect(self.handle_info_changed)
-                        qlogger.message_changed.connect(self.handle_log_entry)
+                        self._wire_download_signals(qhook, qlogger)
             except YDL_EXTRACTION_ERRORS as e:
                 # If any error in checking, keep it for later
                 self.logEdit.appendPlainText(
@@ -888,7 +896,114 @@ class MyWindow(QWidget):
                 remaining[url] = (source, playlist_id)
         self.save_live_queue(remaining)
 
-    def _filter_audio_playlist_urls(  # noqa: C901,PLR0912,PLR0915
+    def _episode_already_archived(
+        self,
+        vid: str,
+        existing_ids: set[str],
+        status_entry: dict,
+    ) -> bool:
+        if vid in existing_ids:
+            status_entry["status"] = "Downloaded"
+            return True
+        return False
+
+    def _skip_if_update_episode(
+        self,
+        entry: dict,
+        vid: str,
+        webpage: str,
+        archive_path: str | None,
+        existing_ids: set[str],
+        messages: list[str],
+        status_entry: dict,
+    ) -> bool:
+        title = entry.get("title", "") or ""
+        if "(Update)" not in title:
+            return False
+        append_to_archive_and_mark_skipped(
+            archive_path,
+            vid,
+            existing_ids,
+            title,
+            messages,
+        )
+        status_entry["status"] = "Skipped (Update)"
+        QYT.HistoryLogger.log_skip(
+            site=utils.detect_site_from_urls([webpage]),
+            dtype="audio_playlists",
+            title=title,
+            reason="Update exception",
+        )
+        return True
+
+    def _skip_if_short_duration(
+        self,
+        entry: dict,
+        vid: str,
+        webpage: str,
+        archive_path: str | None,
+        existing_ids: set[str],
+        messages: list[str],
+        status_entry: dict,
+    ) -> bool:
+        duration = entry.get("duration")
+        title = entry.get("title", "") or ""
+        if duration is None or duration >= PODCAST_MIN_DURATION_SECONDS:
+            return False
+        append_to_archive_and_mark_skipped(
+            archive_path,
+            vid,
+            existing_ids,
+            title,
+            messages,
+            reason="Short duration (<3 min)",
+        )
+        status_entry["status"] = "Skipped Short"
+        QYT.HistoryLogger.log_skip(
+            site=utils.detect_site_from_urls([webpage]),
+            dtype="audio_playlists",
+            title=title,
+            reason="Short duration (<3 min)",
+        )
+        return True
+
+    def _classify_episode_by_age(
+        self,
+        vid: str,
+        webpage: str,
+        ts: float | None,
+        now_ts: float,
+        playlist_label: str,
+        to_download: list,
+        pending: list,
+        status_entry: dict,
+        *,
+        bypass_sponsorblock_wait: bool = False,
+    ) -> None:
+        obj = {"url": webpage, "playlist": playlist_label}
+        if ts is None:
+            to_download.append(obj)
+            status_entry["status"] = "Ready"
+            return
+        status_entry["latest_date"] = format_timestamp_readable(ts)
+        if ts > now_ts:
+            status_entry["status"] = "Upcoming"
+            status_entry["recheck_ts"] = ts
+            return
+        age_seconds = now_ts - ts
+        if bypass_sponsorblock_wait or age_seconds >= 24 * 60 * 60:
+            to_download.append(obj)
+            status_entry["status"] = "Ready"
+            return
+        site = utils.detect_site_from_urls([webpage])
+        if site != "youtube" or check_sponsorblock_for_video_id(vid):
+            to_download.append(obj)
+            status_entry["status"] = "Ready"
+        else:
+            pending.append(obj)
+            status_entry["status"] = "Pending SponsorBlock"
+
+    def _filter_audio_playlist_urls(
         self,
         urls: list,
         ydl_opts: dict,
@@ -913,181 +1028,103 @@ class MyWindow(QWidget):
         if any errors occurred during expansion. messages is a list of human-readable strings to
         be logged from the main thread. statuses is a list of dicts with {podcast, latest_date, status, url}.
         """
-        to_download: list[str] = []
-        pending: list[str] = []
+        to_download: list[dict] = []
+        pending: list[dict] = []
         had_error = False
         messages: list[str] = []
         statuses: list[dict] = []
         archive_path = ydl_opts.get("download_archive")
         existing_ids: set[str] = load_downloaded_video_ids(archive_path)
-
         now_ts = datetime.now(tz=timezone.utc).timestamp()
+
         for url in urls:
             try:
-                # Fetch the latest accessible entry.  This helper will return a
-                # one-item list and a flag indicating whether a private video was
-                # skipped; it may re-raise if the playlist contains no
-                # accessible entries.
                 entries, skipped, info = fetch_latest_accessible_entry(url)
                 if skipped:
                     messages.append(
                         f"Latest episode for podcast {url} is private - using previous accessible video",
                     )
-                # Resolve a robust playlist label and build base status entry for this podcast
                 playlist_label = utils.resolve_playlist_label(info, url)
-                status_entry: dict = {
-                    "podcast": playlist_label,
-                    "latest_date": "(unknown)",
-                    "status": "(unknown)",
-                    "url": url,
-                }
+                status_entry = _make_podcast_status_entry(playlist_label, url)
 
                 for entry in entries:
                     vid = entry.get("id") or entry.get("url")
                     webpage = entry.get("webpage_url") or entry.get("url")
                     if not vid or not webpage:
                         continue
-                    # Store for status_entry later
                     status_entry["latest_url"] = webpage
                     status_entry["latest_ts"] = parse_video_timestamp(entry)
-                    # Already archived? handle that first to avoid redundant logging
-                    if vid in existing_ids:
-                        status_entry["status"] = "Downloaded"
+
+                    if self._episode_already_archived(vid, existing_ids, status_entry):
+                        break
+                    if self._skip_if_update_episode(
+                        entry,
+                        vid,
+                        webpage,
+                        archive_path,
+                        existing_ids,
+                        messages,
+                        status_entry,
+                    ):
+                        break
+                    if self._skip_if_short_duration(
+                        entry,
+                        vid,
+                        webpage,
+                        archive_path,
+                        existing_ids,
+                        messages,
+                        status_entry,
+                    ):
                         break
 
-                    # check for special '(Update)' titles which should be skipped
-                    title = entry.get("title", "") or ""
-                    if "(Update)" in title:
-                        append_to_archive_and_mark_skipped(
-                            archive_path,
-                            vid,
-                            existing_ids,
-                            title,
-                            messages,
-                        )
-                        status_entry["status"] = "Skipped (Update)"
-                        QYT.HistoryLogger.log_skip(
-                            site=utils.detect_site_from_urls([webpage]),
-                            dtype="audio_playlists",
-                            title=title,
-                            reason="Update exception",
-                        )
-                        break
-
-                    # Check if episode is too short to download (under 3 minutes)
-                    duration = entry.get("duration")
-                    if duration is not None and duration < PODCAST_MIN_DURATION_SECONDS:
-                        append_to_archive_and_mark_skipped(
-                            archive_path,
-                            vid,
-                            existing_ids,
-                            title,
-                            messages,
-                            reason="Short duration (<3 min)",
-                        )
-                        status_entry["status"] = "Skipped Short"
-                        QYT.HistoryLogger.log_skip(
-                            site=utils.detect_site_from_urls([webpage]),
-                            dtype="audio_playlists",
-                            title=title,
-                            reason="Short duration (<3 min)",
-                        )
-                        break
-
-                    # Determine upload timestamp
                     ts = parse_video_timestamp(entry)
-                    if ts:
-                        # If timestamp is in the future, treat as an upcoming scheduled episode
-                        if ts > now_ts:
-                            status_entry["status"] = "Upcoming"
-                            status_entry["recheck_ts"] = ts
-                        else:
-                            age_seconds = now_ts - ts
-                            if bypass_sponsorblock_wait:
-                                # Bypass the normal 24-hour/SponsorBlock gating entirely
-                                to_download.append(
-                                    {"url": webpage, "playlist": playlist_label},
-                                )
-                                status_entry["status"] = "Ready"
-                            elif age_seconds < (24 * 60 * 60):
-                                # New episode; check SponsorBlock (only YouTube)
-                                site = utils.detect_site_from_urls([webpage])
-                                if site == "youtube":
-                                    has_sb = check_sponsorblock_for_video_id(vid)
-                                    if has_sb:
-                                        to_download.append(
-                                            {
-                                                "url": webpage,
-                                                "playlist": playlist_label,
-                                            },
-                                        )
-                                        status_entry["status"] = "Ready"
-                                    else:
-                                        pending.append(
-                                            {
-                                                "url": webpage,
-                                                "playlist": playlist_label,
-                                            },
-                                        )
-                                        status_entry["status"] = "Pending SponsorBlock"
-                                else:
-                                    # Non-YouTube: fall back to not requiring SponsorBlock
-                                    to_download.append(
-                                        {"url": webpage, "playlist": playlist_label},
-                                    )
-                                    status_entry["status"] = "Ready"
-                            else:
-                                # Older than 24h -> download
-                                to_download.append(
-                                    {"url": webpage, "playlist": playlist_label},
-                                )
-                                status_entry["status"] = "Ready"
-                    else:
-                        # No timestamp -> be permissive and download
-                        to_download.append({"url": webpage, "playlist": playlist_label})
-                        status_entry["status"] = "Ready"
-
-                    # latest_date formatting
-                    status_entry["latest_date"] = format_timestamp_readable(ts)
-
-                # Append a single status entry per podcast after evaluating its latest entry
-                # Cache the latest URL if present
-                if status_entry.get("latest_url"):
-                    self._cache_put(
-                        url,
-                        status_entry["latest_url"],
-                        status_entry.get("latest_ts"),
+                    self._classify_episode_by_age(
+                        vid,
+                        webpage,
+                        ts,
+                        now_ts,
+                        playlist_label,
+                        to_download,
+                        pending,
+                        status_entry,
+                        bypass_sponsorblock_wait=bypass_sponsorblock_wait,
                     )
+                    break
+
+                self._cache_put(
+                    url,
+                    status_entry.get("latest_url"),
+                    status_entry.get("latest_ts"),
+                )
                 statuses.append(status_entry)
             except YDL_EXTRACTION_ERRORS as e:
-                # Log unexpected extraction failures and then try to interpret common scheduled/upcoming patterns
                 utils.log_exception(e, f"Error expanding playlist/url {url}")
                 errstr = str(e)
                 scheduled_ts = parse_scheduled_time_from_error(errstr)
                 if scheduled_ts:
                     statuses.append(
-                        {
-                            "podcast": url,
-                            "latest_date": "(scheduled)",
-                            "status": "Upcoming",
-                            "url": url,
-                            "recheck_ts": scheduled_ts,
-                        },
+                        _make_podcast_status_entry(
+                            url,
+                            url,
+                            status="Upcoming",
+                            latest_date="(scheduled)",
+                            recheck_ts=scheduled_ts,
+                        ),
                     )
                     messages.append(
-                        f"Podcast {url} scheduled; will recheck at {datetime.fromtimestamp(scheduled_ts, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}",
+                        f"Podcast {url} scheduled; will recheck at {datetime.fromtimestamp(scheduled_ts).astimezone().strftime('%Y-%m-%d %H:%M:%S')}",
                     )
                 else:
-                    # If extracting playlist fails, record the error and continue
                     had_error = True
                     messages.append(f"Error expanding playlist/url {url}: {e}")
                     statuses.append(
-                        {
-                            "podcast": url,
-                            "latest_date": "(error)",
-                            "status": f"Error: {e}",
-                            "url": url,
-                        },
+                        _make_podcast_status_entry(
+                            url,
+                            url,
+                            status=f"Error: {e}",
+                            latest_date="(error)",
+                        ),
                     )
 
         return to_download, pending, had_error, messages, statuses
@@ -1180,13 +1217,32 @@ class MyWindow(QWidget):
         self._podcast_status_dialog = None
         self._podcast_status_table = None
 
+    def _show_history(self) -> None:
+        """Open a non-blocking dialog showing download history (Ctrl+H)."""
+        existing = getattr(self, "_history_dialog", None)
+        if existing and getattr(existing, "isVisible", lambda: False)():
+            try:
+                existing.raise_()
+                existing.activateWindow()
+            except (RuntimeError, AttributeError) as exc:
+                utils.log_exception(exc, "Failed to focus existing history dialog")
+            return
+
+        dialog = HistoryDialog(self)
+        dialog.destroyed.connect(self._on_history_dialog_destroyed)
+        dialog.show()
+        self._history_dialog = dialog
+
+    def _on_history_dialog_destroyed(self) -> None:
+        self._history_dialog = None
+
     # Cache TTL: 6 hours
     CACHE_TTL_SECONDS = 6 * 60 * 60
 
     def _cache_put(
         self,
         playlist_url: str,
-        latest_url: str,
+        latest_url: str | None,
         latest_ts: int | None,
     ) -> None:
         """Store or update a cache entry for a podcast's latest URL."""
@@ -1282,40 +1338,44 @@ class MyWindow(QWidget):
             )
             return None
 
-    def _open_url_in_browser(self, latest_url: str, label: str | None = None) -> None:
-        """Open a URL in the default browser, with fallback to Brave."""
-        # Try default browser first
+    def _try_open_default_browser(self, url: str, label: str | None) -> bool:
+        """Try to open URL in the system default browser. Returns True on success."""
         try:
-            if webbrowser.open_new_tab(latest_url):
+            if webbrowser.open_new_tab(url):
                 self.logEdit.appendPlainText(
-                    f"Opened latest for {label or latest_url} in default browser",
+                    f"Opened latest for {label or url} in default browser",
                 )
-                return
+                return True
         except (webbrowser.Error, OSError) as exc:
             utils.log_exception(exc, "Failed to open URL in default browser")
-        # Fallback to Brave
+        return False
+
+    def _get_brave_controller(self) -> webbrowser.BaseBrowser | None:
+        """Return a Brave browser controller, registering it from disk if needed."""
         try:
-            try:
-                controller = webbrowser.get("brave")
-            except (webbrowser.Error, OSError) as exc:
-                utils.log_exception(
-                    exc,
-                    "Failed to get Brave controller via webbrowser.get",
+            return webbrowser.get("brave")
+        except (webbrowser.Error, OSError) as exc:
+            utils.log_exception(
+                exc,
+                "Failed to get Brave controller via webbrowser.get",
+            )
+        for p in self._BRAVE_PATHS:
+            if Path(p).exists():
+                webbrowser.register(
+                    "windows-brave",
+                    None,
+                    webbrowser.BackgroundBrowser(p),
                 )
-                brave_paths = [
-                    r"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
-                    r"C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
-                ]
-                controller = None
-                for p in brave_paths:
-                    if Path(p).exists():
-                        webbrowser.register(
-                            "windows-brave",
-                            None,
-                            webbrowser.BackgroundBrowser(p),
-                        )
-                        controller = webbrowser.get("windows-brave")
-                        break
+                with contextlib.suppress(webbrowser.Error, OSError):
+                    return webbrowser.get("windows-brave")
+        return None
+
+    def _open_url_in_browser(self, latest_url: str, label: str | None = None) -> None:
+        """Open a URL in the default browser, with fallback to Brave."""
+        if self._try_open_default_browser(latest_url, label):
+            return
+        try:
+            controller = self._get_brave_controller()
             if controller:
                 controller.open_new_tab(latest_url)
                 self.logEdit.appendPlainText(
@@ -1325,7 +1385,6 @@ class MyWindow(QWidget):
         except (webbrowser.Error, OSError) as e:
             self.logEdit.appendPlainText(f"Failed to open Brave: {e}")
             utils.log_exception(e, "Failed to open URL in Brave")
-        # If all fails
         self.logEdit.appendPlainText(f"Failed to open latest for {label or latest_url}")
 
     def _refresh_podcast_status_dialog(self) -> None:
@@ -1373,9 +1432,7 @@ class MyWindow(QWidget):
         self._podcasts_downloading.add(playlist_url)
 
         # build ydl options similarly to the normal request path
-        qhook = QYT.QHook()
-        qlogger = QYT.QLogger(self.downloadQueue)
-        ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
+        _, _, ydl_opts = self._create_download_context()
         properties = self.get_options([playlist_url], "audio_playlists")
         if properties:
             ydl_opts = self.append_properties(ydl_opts, properties)
@@ -1429,166 +1486,167 @@ class MyWindow(QWidget):
             updated,
         )
 
-    def _on_podcast_check_finished(  # noqa: C901,PLR0912,PLR0913,PLR0915
+    def _schedule_podcast_rechecks(self, statuses: list[dict]) -> None:
+        """Store podcast statuses and schedule QTimer rechecks for upcoming episodes."""
+        self._podcast_last_statuses = statuses
+        if not hasattr(self, "_podcast_recheck_times"):
+            self._podcast_recheck_times = {}
+        if not hasattr(self, "_podcast_recheck_timers"):
+            self._podcast_recheck_timers = {}
+        for s in statuses:
+            try:
+                url = s.get("url")
+                lu = s.get("latest_url")
+                lts = s.get("latest_ts")
+                if url and lu:
+                    self._cache_put(url, lu, lts)
+                rts = s.get("recheck_ts")
+                if rts and url:
+                    self._podcast_recheck_times[url] = rts
+                    now_ts = datetime.now(tz=timezone.utc).timestamp()
+                    if rts > now_ts and url not in self._podcast_recheck_timers:
+                        delay_ms = int((rts - now_ts) * 1000)
+                        t = QTimer(self)
+                        t.setSingleShot(True)
+                        t.timeout.connect(
+                            lambda u=url: self.request_detected([u], "audio_playlists"),
+                        )
+                        try:
+                            t.start(delay_ms)
+                            self._podcast_recheck_timers[url] = t
+                        except (RuntimeError, ValueError, TypeError) as exc:
+                            self.logEdit.appendPlainText(
+                                f"Failed to schedule recheck timer for {url}",
+                            )
+                            utils.log_exception(
+                                exc,
+                                f"Failed to schedule recheck timer for {url}",
+                            )
+                else:
+                    self._podcast_recheck_times.pop(url, None)
+                    t = self._podcast_recheck_timers.pop(url, None)
+                    if t:
+                        with contextlib.suppress(Exception):
+                            t.stop()
+            except (AttributeError, TypeError, KeyError, RuntimeError) as exc:  # noqa: PERF203
+                utils.log_exception(
+                    exc,
+                    "Unexpected error while processing podcast statuses",
+                )
+
+    def _queue_podcast_downloads_grouped(
+        self,
+        to_download: list[dict],
+        ydl_opts: dict,
+    ) -> None:
+        """Queue podcast downloads grouped by playlist label, one batch per label."""
+        base_dir = str(PODCAST_MISC_OUTPUT_DIR.parent)
+        groups: dict[str, list[str]] = {}
+        for obj in to_download:
+            try:
+                label = obj.get("playlist") or "misc"
+            except (AttributeError, TypeError) as exc:
+                label = "misc"
+                utils.log_exception(
+                    exc,
+                    "Failed to read playlist label from podcast object",
+                )
+            safe_label = utils.slugify_if_too_long(base_dir, label)
+            url = obj.get("url") if isinstance(obj, dict) else obj
+            if url:
+                groups.setdefault(safe_label, []).append(url)
+        if not groups:
+            return
+        for label, urls in groups.items():
+            qhook, qlogger, batch_opts = self._fork_download_context(
+                ydl_opts if isinstance(ydl_opts, dict) else {},
+            )
+            batch_opts["outtmpl"] = f"{base_dir}/{label}/%(title)s.%(ext)s"
+            self.downloadQueue.put((urls, batch_opts))
+            self._wire_download_signals(qhook, qlogger)
+            if not hasattr(self, "_active_qhooks"):
+                self._active_qhooks = []
+            self._active_qhooks.append((qhook, qlogger))
+        self.barProgress.setRange(0, 1)
+
+    def _queue_podcast_downloads_flat(
+        self,
+        to_download: list[str],
+        ydl_opts: dict,
+    ) -> None:
+        """Queue all podcast download URLs as a single batch."""
+        qhook, qlogger, download_opts = self._fork_download_context(
+            ydl_opts if isinstance(ydl_opts, dict) else {},
+        )
+        self.downloadQueue.put((to_download, download_opts))
+        self._wire_download_signals(qhook, qlogger)
+        if not hasattr(self, "_active_qhooks"):
+            self._active_qhooks = []
+        self._active_qhooks.append((qhook, qlogger))
+        self.barProgress.setRange(0, 1)
+
+    def _update_podcast_indicator(
+        self,
+        had_error: bool,
+        to_download: list,
+        pending_urls: set[str],
+    ) -> None:
+        """Set the podcast status indicator based on current results."""
+        if had_error:
+            self._set_podcast_indicator("error")
+        elif to_download:
+            self._set_podcast_indicator("busy")
+        elif pending_urls:
+            self._set_podcast_indicator("pending")
+        else:
+            self._set_podcast_indicator("all_good")
+
+    def _on_podcast_check_finished(
         self,
         to_download: list,
         pending: list,
-        had_error: bool,  # noqa: FBT001
+        had_error: bool,
         ydl_opts: dict,
         messages: list | None,
         statuses: list | None = None,
     ) -> None:
         """Handle results of a background podcast check (runs in main thread)."""
-        # Log any messages returned from the worker (avoid GUI calls in the worker)
-        if messages:
-            for m in messages:
-                self.logEdit.appendPlainText(m)
+        for m in messages or []:
+            self.logEdit.appendPlainText(m)
 
-        # Cache last known statuses for non-blocking status dialog display
         if statuses:
-            self._podcast_last_statuses = statuses
-            # Record any per-podcast recheck timestamps so we can skip checks until scheduled time,
-            # and schedule a precise recheck for feeds with known scheduled times.
-            if not hasattr(self, "_podcast_recheck_times"):
-                self._podcast_recheck_times = {}
-            if not hasattr(self, "_podcast_recheck_timers"):
-                self._podcast_recheck_timers = {}
-            for s in statuses:
-                try:
-                    url = s.get("url")
-                    # Sync cache with latest_url and latest_ts from status
-                    lu = s.get("latest_url")
-                    lts = s.get("latest_ts")
-                    if url and lu:
-                        self._cache_put(url, lu, lts)
-                    rts = s.get("recheck_ts")
-                    if rts:
-                        self._podcast_recheck_times[url] = rts
-                        # schedule a one-shot timer to re-run check at the scheduled time if not already scheduled
-                        now_ts = datetime.now(
-                            tz=timezone.utc,
-                        ).timestamp()
-                        if rts > now_ts and url not in self._podcast_recheck_timers:
-                            delay_ms = int((rts - now_ts) * 1000)
-                            t = QTimer(self)
-                            t.setSingleShot(True)
-                            t.timeout.connect(
-                                lambda u=url: self.request_detected(
-                                    [u],
-                                    "audio_playlists",
-                                ),
-                            )
-                            try:
-                                t.start(delay_ms)
-                                self._podcast_recheck_timers[url] = t
-                            except (RuntimeError, ValueError, TypeError) as exc:
-                                # If timer scheduling fails, just log and continue
-                                self.logEdit.appendPlainText(
-                                    f"Failed to schedule recheck timer for {url}",
-                                )
-                                utils.log_exception(
-                                    exc,
-                                    f"Failed to schedule recheck timer for {url}",
-                                )
-                    else:
-                        # Remove any stale scheduled time and cancel any timer
-                        self._podcast_recheck_times.pop(url, None)
-                        t = self._podcast_recheck_timers.pop(url, None)
-                        if t:
-                            with contextlib.suppress(Exception):
-                                t.stop()
-                except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
-                    utils.log_exception(
-                        exc,
-                        "Unexpected error while processing podcast statuses",
-                    )
+            self._schedule_podcast_rechecks(statuses)
 
-        # Update internal state
         self._last_podcast_check_error = had_error
         self._podcast_pending_urls.clear()
         for v in pending:
-            self._podcast_pending_urls.add(v.get("url") if isinstance(v, dict) else v)
+            url = v.get("url") if isinstance(v, dict) else v
+            if url:
+                self._podcast_pending_urls.add(url)
 
-        # Queue downloads if present
         if to_download:
-            # Determine if we received enriched objects or plain URLs
-            is_obj_list = (
-                isinstance(to_download, list)
-                and len(to_download) > 0
-                and isinstance(to_download[0], dict)
-            )
-            if is_obj_list:
-                # Group per playlist label and set per-group outtmpl
-                base_dir = "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts"
-                groups: dict[str, list[str]] = {}
-                for obj in to_download:
-                    try:
-                        label = obj.get("playlist") or "misc"
-                    except (AttributeError, TypeError) as exc:
-                        label = "misc"
-                        utils.log_exception(
-                            exc,
-                            "Failed to read playlist label from podcast object",
-                        )
-                    # Enforce safe/short label for Windows paths
-                    safe_label = utils.slugify_if_too_long(base_dir, label)
-                    url = obj.get("url") if isinstance(obj, dict) else obj
-                    if url:
-                        groups.setdefault(safe_label, []).append(url)
-                for label, urls in groups.items():
-                    qhook = QYT.QHook()
-                    qlogger = QYT.QLogger(self.downloadQueue)
-                    batch_opts = dict(ydl_opts) if isinstance(ydl_opts, dict) else {}
-                    batch_opts["logger"] = qlogger
-                    batch_opts["progress_hooks"] = [qhook]
-                    batch_opts["outtmpl"] = f"{base_dir}/{label}/%(title)s.%(ext)s"
-                    self.downloadQueue.put((urls, batch_opts))
-                    qhook.info_changed.connect(self.handle_info_changed)
-                    qlogger.message_changed.connect(self.handle_log_entry)
-                    if not hasattr(self, "_active_qhooks"):
-                        self._active_qhooks = []
-                    self._active_qhooks.append((qhook, qlogger))
-                self.barProgress.setRange(0, 1)
+            if isinstance(to_download[0], dict):
+                self._queue_podcast_downloads_grouped(to_download, ydl_opts)
             else:
-                qhook = QYT.QHook()
-                qlogger = QYT.QLogger(self.downloadQueue)
-                download_opts = dict(ydl_opts) if isinstance(ydl_opts, dict) else {}
-                download_opts["logger"] = qlogger
-                download_opts["progress_hooks"] = [qhook]
-                self.downloadQueue.put((to_download, download_opts))
-                qhook.info_changed.connect(self.handle_info_changed)
-                qlogger.message_changed.connect(self.handle_log_entry)
-                if not hasattr(self, "_active_qhooks"):
-                    self._active_qhooks = []
-                self._active_qhooks.append((qhook, qlogger))
-                self.barProgress.setRange(0, 1)
+                self._queue_podcast_downloads_flat(to_download, ydl_opts)
 
-        # Update indicator according to results
-        if had_error:
-            self._set_podcast_indicator("error")
-        elif to_download:
-            self._set_podcast_indicator("busy")
-        elif self._podcast_pending_urls:
-            self._set_podcast_indicator("pending")
-        else:
-            self._set_podcast_indicator("all_good")
-
-        # Reset running flag
+        self._update_podcast_indicator(
+            had_error,
+            to_download,
+            self._podcast_pending_urls,
+        )
         self._podcast_check_running = False
 
-        if not to_download and not self._podcast_pending_urls:
+        if not had_error and not to_download and not self._podcast_pending_urls:
             self.logEdit.appendPlainText(
                 "No eligible podcast episodes found for immediate download. Pending items will be rechecked at the next scheduled YT Podcasts check.",
             )
-        # Summarize results in the UI log
         self.logEdit.appendPlainText(
             f"Podcast check complete: {len(to_download)} queued, {len(self._podcast_pending_urls)} pending, error={had_error}",
         )
-        # Auto-refresh the Podcast Status dialog if it is visible so users see results immediately
         try:
             self._refresh_podcast_status_dialog()
         except (RuntimeError, AttributeError) as e:
-            # Don't let refresh errors interfere with normal operation; log them for debugging
             self.logEdit.appendPlainText(f"Error refreshing Podcast Status dialog: {e}")
             utils.log_exception(e, "Error refreshing Podcast Status dialog")
 
@@ -1631,130 +1689,6 @@ class MyWindow(QWidget):
         finally:
             super().closeEvent(event)
 
-    def _get_podcast_statuses(self) -> list[dict]:  # noqa: C901,PLR0912,PLR0915
-        """
-        Return a list of podcast status dictionaries.
-
-        {podcast, latest_date, status, url}
-        """
-        statuses: list[dict] = []
-        playlists_path = utils.get_playlist_file_for_source("audio_playlists")
-        if not playlists_path:
-            return statuses
-        try:
-            with Path(playlists_path).open("r", encoding="utf-8") as f:
-                lines = [
-                    ln.strip()
-                    for ln in f
-                    if ln.strip() and not ln.strip().startswith("#")
-                ]
-        except (OSError, UnicodeDecodeError) as exc:
-            utils.log_exception(exc, "Failed to read podcast playlist file")
-            return statuses
-
-        # read archive ids
-        archive_path = "C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt"
-        archived_ids: set[str] = set()
-        if Path(archive_path).exists():
-            try:
-                with Path(archive_path).open("r", encoding="utf-8") as af:
-                    for line in af:
-                        parts = line.strip().split()
-                        if parts:
-                            archived_ids.add(parts[-1])
-            except (OSError, UnicodeDecodeError) as exc:
-                archived_ids = set()
-                utils.log_exception(exc, "Failed to read podcast archive IDs")
-
-        now_ts = datetime.now(tz=timezone.utc).timestamp()
-        for url in lines:
-            try:
-                # Limit to the latest episode to avoid long blocking operations
-                info = utils.extract_playlist_info(url, playlistend=1)
-                title = info.get("title") or info.get("uploader") or url
-                entries = info.get("entries", [info])
-                if not entries:
-                    statuses.append(
-                        {
-                            "podcast": title,
-                            "latest_date": "(none)",
-                            "status": "No episodes",
-                            "url": url,
-                        },
-                    )
-                    continue
-                latest = entries[0]
-                vid = latest.get("id") or latest.get("url")
-                ts = latest.get("timestamp")
-                webpage = latest.get("webpage_url") or latest.get("url")
-                if not ts and latest.get("upload_date"):
-                    try:
-                        ts = (
-                            datetime.strptime(
-                                latest.get("upload_date"),
-                                "%Y%m%d",
-                            )
-                            .replace(tzinfo=timezone.utc)
-                            .timestamp()
-                        )
-                    except (ValueError, TypeError) as exc:
-                        ts = None
-                        utils.log_exception(
-                            exc,
-                            "Failed to parse upload_date for podcast status check",
-                        )
-                latest_date = (
-                    datetime.fromtimestamp(ts, tz=timezone.utc).strftime(
-                        "%Y-%m-%d %H:%M:%S",
-                    )
-                    if ts
-                    else "(unknown)"
-                )
-                # Determine status
-                if vid and vid in archived_ids:
-                    status = "Downloaded"
-                elif ts and ts > now_ts:
-                    # Scheduled for the future -> Upcoming
-                    status = "Upcoming"
-                # If very new (<24h), check SponsorBlock
-                elif ts and (now_ts - ts) < (24 * 60 * 60):
-                    site = utils.detect_site_from_urls(
-                        [latest.get("webpage_url") or url],
-                    )
-                    if site == "youtube":
-                        has_sb = check_sponsorblock_for_video_id(vid)
-                        status = "Ready" if has_sb else "Pending SponsorBlock"
-                    else:
-                        status = "Ready"
-                else:
-                    status = "Ready"
-
-                entry = {
-                    "podcast": title,
-                    "latest_date": latest_date,
-                    "status": status,
-                    "url": url,
-                    "latest_url": webpage,
-                    "latest_ts": ts,
-                }
-                if ts and ts > now_ts:
-                    entry["recheck_ts"] = ts
-                # Update cache immediately
-                if webpage:
-                    self._cache_put(url, webpage, ts)
-                statuses.append(entry)
-            except YDL_EXTRACTION_ERRORS as e:
-                utils.log_exception(e, f"Error fetching podcast status for {url}")
-                statuses.append(
-                    {
-                        "podcast": url,
-                        "latest_date": "(error)",
-                        "status": f"Error: {e}",
-                        "url": url,
-                    },
-                )
-        return statuses
-
     # --- Hourly automated YT Podcasts checks ---
     def _schedule_hourly_podcast_checks(self) -> None:
         """Schedule the initial single-shot to fire at the next :15 past the hour, then start recurring hourly checks."""
@@ -1766,7 +1700,7 @@ class MyWindow(QWidget):
         delay_ms = int((target - now).total_seconds() * 1000)
         QTimer.singleShot(delay_ms, self._start_hourly_podcast_timer)
         self.logEdit.appendPlainText(
-            f"Scheduled hourly YT Podcasts checks beginning {target.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"Scheduled hourly YT Podcasts checks beginning {target.astimezone().strftime('%Y-%m-%d %H:%M:%S')}",
         )
 
     def _start_hourly_podcast_timer(self) -> None:
@@ -1824,24 +1758,15 @@ class MyWindow(QWidget):
             self.buttonUpdate.setStyleSheet("color: red;")
 
 
-# def is_firefox_running():
-#     """Check if Firefox is already running."""
-#     for process in psutil.process_iter(["name"]):
-#         if process.info["name"] == "firefox.exe":
-#             return True
-#     return False
-
-
 if __name__ == "__main__":
-    startfile(r"E:\vid storage")  # noqa: S606
-    dirname = Path(__file__).parent
+    _storage = Path(VIDEO_STORAGE_DIR)
+    if _storage.exists():
+        startfile(str(_storage))  # noqa: S606
+    if getattr(sys, "frozen", False):
+        dirname = Path(sys.executable).parent
+    else:
+        dirname = Path(__file__).parent
     QDir.addSearchPath("icons", str(dirname / "resources" / "icons"))
-
-    # Open Firefox
-    # if not is_firefox_running():
-    #     subprocess.Popen(
-    #         [r"C:/Program Files/Mozilla Firefox/firefox.exe", "https://www.youtube.com"]
-    #     )
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
@@ -1851,9 +1776,36 @@ if __name__ == "__main__":
     window = MyWindow()
     window.show()
 
+    if needs_first_run():
+        _wizard = FirstRunWizard(window)
+        _wizard.exec()
+
+    if not shutil.which("ffmpeg"):
+        QMessageBox.warning(
+            None,
+            "FFmpeg not found",
+            "FFmpeg is not installed or not on PATH.\nAudio and podcast downloads will fail.",
+        )
+
+    deno_exe = Path(VENV_SCRIPTS_DIR) / "deno.exe"
+    if not deno_exe.exists():
+        if getattr(sys, "frozen", False):
+            _deno_msg = f"Deno not found at {deno_exe}.\nYouTube downloads may fail."
+        else:
+            _deno_msg = f"Deno not found at {deno_exe}.\nRun `uv sync` to install it."
+        QMessageBox.warning(None, "Deno not found", _deno_msg)
+
     app.exec()
 
-# TODO: add way of seeing history info in app?
 # TODO: look into Android Faithful showing up in the basic misc folder
-# TODO: size control for error logs
+# TODO: size control for error logs (low priority)
 # TODO: settings for making things more general, especially folder locations. Also, make sure no paths are hardcoded that should be config
+# TODO: make sure tfarchive.txt is checked first, always, for efficiency
+# TODO: look into the 5 Skipped every time audio_playlists is run
+# TODO: rename??? MeadowLark?
+# TODO: make it possible to update .env settings via the app
+# TODO: add auto-check for updates?
+# TODO: figure out playlists for fresh users
+# TODO: bug: icon not used when installed from installer
+# TODO: bug: upon initial setup, settings are not applied until restart but nothing prompts this
+# TODO: resizing makes Audio big (low priority)

@@ -6,12 +6,20 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "deno>=2.5.4",
+    "python-dotenv>=1.0.0",
     "hurry-filesize>=0.9",
     "keyring>=25.6.0",
     "pyqt6>=6.9.1",
+    "pytest-cov>=7.1.0",
     "requests>=2.32.5",
     "wakepy>=0.10.2.post1",
     "yt-dlp>=2025.7.21",
+]
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.0",
+    "ruff>=0.9.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -21,13 +29,42 @@ include = ["src*"]
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-    "T201",   # `print` found: Prevents print statements (prefers proper logging).
-    "D103",   # Missing docstring in public function: Requires comments for all functions.
-    "D212",   # Multi-line docstring summary should start at the first line.
-    "D413",   # Missing blank line after last section in docstring.
-    "E501",   # Line too long: Enforces the standard 88 or 120 character limit.
-    "ERA001", # Found commented-out code: Prevents "dead code" from cluttering files.
-    "TD002",  # Missing author in TODO: Requires `TODO(name):` format.
-    "TD003",  # Missing issue link on the line following a TODO.
+    "T201",   # `print` found
+    "D103",   # Missing docstring in public function
+    "D102",   # Missing docstring in public method (same rationale as D103)
+    "D203",   # Incompatible with D211 (no-blank-line-before-class)
+    "D212",   # Multi-line docstring summary should start at the first line
+    "D413",   # Missing blank line after last section in docstring
+    "E501",   # Line too long
+    "ERA001", # Found commented-out code
+    "TD002",  # Missing author in TODO
+    "TD003",  # Missing issue link on the line following a TODO
     "FIX002", # Line contains TODO
+    "COM812", # Trailing comma (conflicts with ruff formatter)
+    "S101",   # Use of assert — standard pytest pattern
+    "ANN001", # Missing type annotation for function argument
+    "ANN201", # Missing return type annotation for public function
+    "ANN204", # Missing return type annotation for special method
+    "RUF059", # Unpacked variable `_` never used — _ is a Python idiom
+    "ARG001", # Unused function argument — valid in callbacks/interfaces
+    "ARG002", # Unused method argument — valid in callbacks/interfaces
+    "FBT001", # Boolean-typed positional argument — valid API choice
+    "FBT002", # Boolean default positional argument — valid API choice
+    "SLF001", # Private member accessed — internal calls within same module
+    "ANN002", # Missing type annotation for *args
+    "ANN003", # Missing type annotation for **kwargs
+    "ANN202", # Missing return type for private function
+    "D100",   # Missing docstring in public module
+    "D101",   # Missing docstring in public class
+    "D107",   # Missing docstring in __init__
+    "D417",   # Missing argument description in docstring
+    "TRY003", # Long exception messages outside exception class — common pattern
+    "EM101",  # String literal in exception — common pattern
+    "PLR2004", # Magic value used in comparison — too broad to enforce
+    "PLR0913", # Too many arguments in function definition
+    "PLR0911", # Too many return statements
+    "FBT003",  # Boolean positional value in function call
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLC0415", "TRY002", "N818", "PT018", "N806", "RUF012"]

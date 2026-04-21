@@ -1,9 +1,59 @@
-"""Unit tests for live queue management in DownloadService."""
+"""Unit tests for live queue management — both standalone module and DownloadService wrappers."""
 
+from pathlib import Path
 from queue import Queue
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 from src.download_service import DownloadService
+from src.live_queue import add_to_live_queue, load_live_queue, save_live_queue
+
+# --- Standalone src/live_queue module tests ---
+
+
+@pytest.fixture
+def queue_file(tmp_path: Path) -> Path:
+    return tmp_path / "live_queue.txt"
+
+
+def test_load_missing_file_returns_empty(queue_file: Path) -> None:
+    assert load_live_queue(queue_file) == {}
+
+
+def test_round_trip_without_playlist_id(queue_file: Path) -> None:
+    entries = {"https://yt.com/watch?v=abc": ("youtube", None)}
+    save_live_queue(queue_file, entries)
+    assert load_live_queue(queue_file) == entries
+
+
+def test_round_trip_with_playlist_id(queue_file: Path) -> None:
+    entries = {"https://yt.com/watch?v=abc": ("youtube", "PLxyz")}
+    save_live_queue(queue_file, entries)
+    assert load_live_queue(queue_file) == entries
+
+
+def test_add_creates_entry(queue_file: Path) -> None:
+    add_to_live_queue(queue_file, "https://yt.com/watch?v=xyz", "youtube")
+    result = load_live_queue(queue_file)
+    assert result["https://yt.com/watch?v=xyz"] == ("youtube", None)
+
+
+def test_add_deduplicates(queue_file: Path) -> None:
+    add_to_live_queue(queue_file, "https://yt.com/watch?v=xyz", "youtube")
+    add_to_live_queue(queue_file, "https://yt.com/watch?v=xyz", "youtube", "PLabc")
+    result = load_live_queue(queue_file)
+    assert len(result) == 1
+    assert result["https://yt.com/watch?v=xyz"] == ("youtube", "PLabc")
+
+
+def test_load_skips_blank_lines(queue_file: Path) -> None:
+    queue_file.write_text("\nyoutube|https://yt.com/watch?v=abc\n\n", encoding="utf-8")
+    result = load_live_queue(queue_file)
+    assert len(result) == 1
+
+
+# --- DownloadService wrapper tests ---
 
 
 def make_service(**kwargs):
@@ -12,14 +62,17 @@ def make_service(**kwargs):
         ignore_archive_callback=kwargs.get("ignore_archive_callback", lambda: True),
         skip_download_callback=kwargs.get("skip_download_callback", lambda: False),
         label_output_set_text_callback=kwargs.get(
-            "label_output_set_text_callback", Mock()
+            "label_output_set_text_callback",
+            Mock(),
         ),
         log_edit_append_callback=kwargs.get("log_edit_append_callback", Mock()),
         bar_progress_set_range_callback=kwargs.get(
-            "bar_progress_set_range_callback", Mock()
+            "bar_progress_set_range_callback",
+            Mock(),
         ),
         bar_progress_set_value_callback=kwargs.get(
-            "bar_progress_set_value_callback", Mock()
+            "bar_progress_set_value_callback",
+            Mock(),
         ),
         handle_info_changed_callback=kwargs.get("handle_info_changed_callback", Mock()),
         handle_log_entry_callback=kwargs.get("handle_log_entry_callback", Mock()),
@@ -27,10 +80,12 @@ def make_service(**kwargs):
         do_updates_callback=kwargs.get("do_updates_callback", Mock()),
         add_to_live_queue_callback=kwargs.get("add_to_live_queue_callback", Mock()),
         qhook_factory=kwargs.get(
-            "qhook_factory", lambda: MagicMock(info_changed=MagicMock())
+            "qhook_factory",
+            lambda: MagicMock(info_changed=MagicMock()),
         ),
         qlogger_factory=kwargs.get(
-            "qlogger_factory", lambda: MagicMock(message_changed=MagicMock())
+            "qlogger_factory",
+            lambda: MagicMock(message_changed=MagicMock()),
         ),
     )
 
@@ -74,9 +129,13 @@ def test_save_live_queue_writes_playlist_id(tmp_path) -> None:
     service = make_service()
     service.live_queue_path = path
 
-    service.save_live_queue({"https://example.com/video": ("720playlists", "PLtest123")})
+    service.save_live_queue(
+        {"https://example.com/video": ("720playlists", "PLtest123")}
+    )
 
-    assert path.read_text().strip() == "720playlists|https://example.com/video|PLtest123"
+    assert (
+        path.read_text().strip() == "720playlists|https://example.com/video|PLtest123"
+    )
 
 
 def test_live_queue_round_trip_with_playlist_id(tmp_path) -> None:
@@ -124,7 +183,9 @@ def test_make_match_filter_records_live_url() -> None:
 
     assert "Skipping live" in result
     add_to_live_queue.assert_called_once_with(
-        "https://youtube.com/live", "audio_playlists", None
+        "https://youtube.com/live",
+        "audio_playlists",
+        None,
     )
     log_callback.assert_called_once()
 
@@ -145,12 +206,17 @@ def test_make_match_filter_captures_playlist_id() -> None:
     )
 
     add_to_live_queue.assert_called_once_with(
-        "https://youtube.com/watch?v=abc", "720playlists", "PLxyz789"
+        "https://youtube.com/watch?v=abc",
+        "720playlists",
+        "PLxyz789",
     )
 
 
 @patch("src.download_service.yt_dlp.YoutubeDL")
-@patch("src.download_service.utils.load_playlist_comments_for_source", return_value={"PLtest": "Taskmaster S21"})
+@patch(
+    "src.download_service.utils.load_playlist_comments_for_source",
+    return_value={"PLtest": "Taskmaster S21"},
+)
 @patch("src.download_service.utils.detect_site_from_urls", return_value="youtube")
 @patch(
     "src.download_service.utils.build_base_ydl_opts",
@@ -194,7 +260,10 @@ def test_check_live_queue_queues_ended_stream(
 
 
 @patch("src.download_service.yt_dlp.YoutubeDL")
-@patch("src.download_service.utils.load_playlist_comments_for_source", return_value={"PLtest": "Taskmaster S21"})
+@patch(
+    "src.download_service.utils.load_playlist_comments_for_source",
+    return_value={"PLtest": "Taskmaster S21"},
+)
 @patch("src.download_service.utils.detect_site_from_urls", return_value="youtube")
 @patch(
     "src.download_service.utils.build_base_ydl_opts",
@@ -324,7 +393,7 @@ def test_check_live_queue_saves_queue_after_processing(
     path = tmp_path / "live_queue.txt"
     path.write_text(
         "720playlists|https://youtube.com/watch?v=ended\n"
-        "720playlists|https://youtube.com/watch?v=still_live\n"
+        "720playlists|https://youtube.com/watch?v=still_live\n",
     )
 
     queue = MagicMock()
@@ -341,7 +410,7 @@ def test_check_live_queue_saves_queue_after_processing(
     )
     service.live_queue_path = path
 
-    def side_effect_info(url, download):  # noqa: ARG001
+    def side_effect_info(url, download):
         if "still_live" in url:
             return {"is_live": True, "live_status": "is_live"}
         return {"is_live": False, "live_status": None}

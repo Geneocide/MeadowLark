@@ -15,13 +15,19 @@ import yt_dlp
 
 import QYT
 import utils
+from src import live_queue
 from src.config import (
+    ARCHIVE_PATH,
+    COOKIES_FILE,
     LIVE_QUEUE_FILE,
     PLAYLISTS_720_FILE,
     PLAYLISTS_AUDIO_FILE,
     PLAYLISTS_FILE,
     YDL_EXTRACTION_ERRORS,
 )
+from src.match_filter import build_match_filter
+from src.playlist_utils import load_playlist_urls
+from src.podcast_filtering import load_downloaded_video_ids
 
 
 class DownloadService:
@@ -83,7 +89,7 @@ class DownloadService:
         self.qhook_factory = qhook_factory
         self.qlogger_factory = qlogger_factory
 
-        self.live_queue_path = Path(LIVE_QUEUE_FILE)
+        self.live_queue_path = LIVE_QUEUE_FILE
 
     def request_detected(self, urls: list, source: str) -> tuple[str, list, dict]:
         """
@@ -121,67 +127,53 @@ class DownloadService:
             return ("podcast_check", urls, ydl_opts)
         return ("queue", urls, ydl_opts)
 
-    def _load_playlist_urls(self, source: str) -> list | None:
-        """
-        Load playlist URLs from the appropriate file based on the source.
-
-        Args:
-            source (str): The source type (e.g., "1080playlists", "720playlists", "audio_playlists").
-
-        Returns:
-            list: List of URLs from the playlist file, or None if not a playlist source.
-        """
+    def _load_playlist_urls(self, source: str) -> list[str] | None:
+        """Load playlist URLs from the appropriate file based on the source."""
         playlist_files = {
             "1080playlists": PLAYLISTS_FILE,
             "720playlists": PLAYLISTS_720_FILE,
             "audio_playlists": PLAYLISTS_AUDIO_FILE,
         }
-        if source in playlist_files:
-            playlist_file = Path(playlist_files[source])
-            if playlist_file.exists():
-                with playlist_file.open("r", encoding="utf-8") as f:
-                    urls = [line.strip() for line in f if line.strip() and not line.startswith("#")]
-                return urls
-        return None
+        if source not in playlist_files:
+            return None
+        return load_playlist_urls(Path(playlist_files[source])) or None
 
     def get_options(self, urls: list, source: str) -> dict | None:
         """
         Build yt-dlp options dict based on URLs and source type.
 
-        Args:
-            urls: List of URLs to process.
-            source: The source type (e.g., "1080playlists", "audio").
-
-        Returns:
-            Dict of yt-dlp options, or None if download should be skipped/cancelled.
+        Returns None if the download should be skipped or there are no URLs.
         """
         if self.skip_download_callback():
             self.skip_downloading(urls, source)
             return None
 
-        # If a playlist file contained no URLs, bail out early to avoid errors
         if not urls:
             self.log_edit_append_callback(f"No URLs found for source: {source}")
             return None
 
         properties = utils.get_source_options(source)
+        self._add_archive_if_needed(properties)
+        self._add_match_filter_if_youtube(properties, urls, source)
+        self._strip_watch_later_list_param(urls)
+        return properties
 
-        # ignore archive checkbox
+    def _add_archive_if_needed(self, properties: dict) -> None:
+        """Add the download archive path to properties unless the user opted to ignore it."""
         if not self.ignore_archive_callback():
-            properties["download_archive"] = (
-                "C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt"
-            )
+            properties["download_archive"] = str(ARCHIVE_PATH)
 
-        # detect if YT
-        if "youtube.com" in urls[0]:
-            # Use a custom match_filter that records live videos for later
+    def _add_match_filter_if_youtube(
+        self, properties: dict, urls: list, source: str
+    ) -> None:
+        """Attach a custom match_filter for YouTube URLs to skip and queue live videos."""
+        if urls and "youtube.com" in urls[0]:
             properties["match_filter"] = self.make_match_filter(source)
 
-        # strip out unnecessary parts of URL if dropping from Watch Later
-        if "youtube.com/watch" in urls[0] and "&list=" in urls[0]:
+    def _strip_watch_later_list_param(self, urls: list) -> None:
+        """Remove the &list= parameter from a Watch Later URL in place."""
+        if urls and "youtube.com/watch" in urls[0] and "&list=" in urls[0]:
             urls[0] = urls[0].split("&list=")[0]
-
-        return properties
 
     def append_properties(self, ydl_opts: dict, properties: dict) -> dict | None:
         """
@@ -202,15 +194,8 @@ class DownloadService:
         self.label_output_set_text_callback("Skipping downloads.")
         qlogger = self.qlogger_factory()
         total_added = 0
-        archive_path = Path("C:/Users/etreq/OneDrive/Desktop/scripts/tfarchive.txt")
-        # Read existing IDs into a set
-        if archive_path.exists():
-            with archive_path.open("r", encoding="utf-8") as archive:
-                existing_ids = {
-                    line.strip().split()[-1] for line in archive if line.strip()
-                }
-        else:
-            existing_ids = set()
+        archive_path = ARCHIVE_PATH
+        existing_ids = load_downloaded_video_ids(str(ARCHIVE_PATH))
         for url in urls:
             # Use extract_flat="in_playlist" for playlists, True for single videos
             ydl_opts = {
@@ -235,75 +220,26 @@ class DownloadService:
         self.handle_queue_empty_callback()
 
     def make_match_filter(self, source: str) -> Callable:
-        """
-        Build a custom match_filter that skips live/upcoming videos and records them for later.
+        """Build a match_filter that skips live/upcoming videos and queues them."""
+        return build_match_filter(
+            source,
+            add_to_queue_fn=self.add_to_live_queue_callback,
+            log_fn=self.log_edit_append_callback,
+        )
 
-        Args:
-            source (str): The source type.
-
-        Returns:
-            Callable: The match_filter function.
-        """
-
-        def _mf(info: dict, incomplete: bool) -> str | None:  # noqa: ARG001,FBT001
-            try:
-                is_live = info.get("is_live")
-                live_status = info.get("live_status")
-                availability = info.get("availability")
-                if availability in ("needs_auth", "scheduled"):
-                    return f"Skipping: {availability}"
-                if is_live or live_status in ("is_live", "is_upcoming"):
-                    url = (
-                        info.get("webpage_url")
-                        or info.get("original_url")
-                        or info.get("url")
-                    )
-                    if url:
-                        playlist_id = info.get("playlist_id")
-                        self.add_to_live_queue_callback(url, source, playlist_id)
-                        self.log_edit_append_callback(
-                            f"Queued live for later: {url} [{source}]",
-                        )
-                    return "Skipping live; queued for later"
-            except (TypeError, AttributeError) as exc:
-                # If anything goes wrong, allow download to proceed rather than crash
-                utils.log_exception(exc, "Error in match_filter")
-                return None
-            return None
-
-        return _mf
-
-    def load_live_queue(self) -> dict[str, tuple[str, str | None]]:
+    def load_live_queue(self) -> live_queue.LiveQueueEntries:
         """Load live queue entries; returns {url: (source, playlist_id)}."""
-        entries: dict[str, tuple[str, str | None]] = {}
-        if self.live_queue_path.exists():
-            with self.live_queue_path.open("r", encoding="utf-8") as f:
-                for raw_line in f:
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-                    # stored as: source|url  or  source|url|playlist_id
-                    parts = line.split("|", 2)
-                    if len(parts) >= 2 and parts[1]:  # noqa: PLR2004
-                        playlist_id = parts[2] if len(parts) == 3 and parts[2] else None  # noqa: PLR2004
-                        entries[parts[1]] = (parts[0], playlist_id)
-        return entries
+        return live_queue.load_live_queue(self.live_queue_path)
 
-    def save_live_queue(self, entries: dict[str, tuple[str, str | None]]) -> None:
+    def save_live_queue(self, entries: live_queue.LiveQueueEntries) -> None:
         """Save the live queue entries to file."""
-        with self.live_queue_path.open("w", encoding="utf-8") as f:
-            for url, (source, playlist_id) in entries.items():
-                if playlist_id:
-                    f.write(f"{source}|{url}|{playlist_id}\n")
-                else:
-                    f.write(f"{source}|{url}\n")
+        live_queue.save_live_queue(self.live_queue_path, entries)
 
-    def add_to_live_queue(self, url: str, source: str, playlist_id: str | None = None) -> None:
+    def add_to_live_queue(
+        self, url: str, source: str, playlist_id: str | None = None
+    ) -> None:
         """Add a URL to the live queue."""
-        entries = self.load_live_queue()
-        # Avoid duplicates
-        entries[url] = (source, playlist_id)
-        self.save_live_queue(entries)
+        live_queue.add_to_live_queue(self.live_queue_path, url, source, playlist_id)
 
     def check_live_queue(self) -> None:
         """Check the live queue for ended lives and queue them for download."""
@@ -317,7 +253,7 @@ class DownloadService:
                     {
                         "quiet": True,
                         "skip_download": True,
-                        "cookiefile": r"resources\cookies.txt",
+                        "cookiefile": str(COOKIES_FILE),
                         "extract_flat": True,
                     },
                 ) as ydl:
@@ -344,7 +280,9 @@ class DownloadService:
                             "type": source,
                         }
                         if playlist_id:
-                            playlist_comments = utils.load_playlist_comments_for_source(source)
+                            playlist_comments = utils.load_playlist_comments_for_source(
+                                source
+                            )
                             if playlist_comments:
                                 qmeta["playlist_comments"] = playlist_comments
                                 qmeta["playlist_id"] = playlist_id
@@ -354,7 +292,7 @@ class DownloadService:
                         qhook.info_changed.connect(self.handle_info_changed_callback)
                         qlogger.message_changed.connect(self.handle_log_entry_callback)
                         self.bar_progress_set_range_callback(0, 1)
-            except YDL_EXTRACTION_ERRORS as e:
+            except YDL_EXTRACTION_ERRORS as e:  # noqa: PERF203
                 # If any error in checking, keep it for later
                 remaining[url] = (source, playlist_id)
                 self.log_edit_append_callback(

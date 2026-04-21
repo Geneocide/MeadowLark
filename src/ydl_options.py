@@ -5,10 +5,13 @@ from typing import Any
 from .config import (
     COOKIES_FILE,
     MAX_FRAGMENT_RETRIES,
+    PODCAST_MISC_OUTPUT_DIR,
     SOCKET_TIMEOUT_SECONDS,
     VENV_SCRIPTS_DIR,
+    VIDEO_STORAGE_DIR,
 )
-from .dict_utils import _default_postprocessors
+from .dict_utils import DEFAULT_POSTPROCESSORS
+from .qt_protocols import YdlLogger, YdlProgressHook
 
 # JavaScript runtimes configuration
 JS_RUNTIMES_CONFIG = {
@@ -18,7 +21,7 @@ JS_RUNTIMES_CONFIG = {
 }
 
 
-def build_base_ydl_opts(logger: Any, qhook: Any) -> dict[str, Any]:  # noqa: ANN401
+def build_base_ydl_opts(logger: YdlLogger, qhook: YdlProgressHook) -> dict[str, Any]:
     """
     Centralize common yt-dlp options used across the app.
 
@@ -38,7 +41,7 @@ def build_base_ydl_opts(logger: Any, qhook: Any) -> dict[str, Any]:  # noqa: ANN
         "mtime": True,
         # Custom match_filter will be set per-source by callers
         "cookiefile": str(COOKIES_FILE),
-        "postprocessors": _default_postprocessors(),
+        "postprocessors": list(DEFAULT_POSTPROCESSORS),
         "js_runtimes": JS_RUNTIMES_CONFIG,
         "remote_components": ["ejs:github"],
     }
@@ -60,18 +63,14 @@ def get_source_options(source: str) -> dict[str, Any]:
             "postprocessors": [
                 {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
             ],
-            "outtmpl": (
-                "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/misc/%(title)s.%(ext)s"
-            ),
+            "outtmpl": (PODCAST_MISC_OUTPUT_DIR / "%(title)s.%(ext)s").as_posix(),
         },
         "audio_playlists": {
             "format": "m4a/bestaudio/best",
             "postprocessors": [
                 {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
             ],
-            "outtmpl": (
-                "C:/Users/etreq/OneDrive/Desktop/scripts/manual podcasts/misc/%(title)s.%(ext)s"
-            ),
+            "outtmpl": (PODCAST_MISC_OUTPUT_DIR / "%(title)s.%(ext)s").as_posix(),
             "ignoreerrors": "only_download",
         },
         "720playlists": {
@@ -82,8 +81,10 @@ def get_source_options(source: str) -> dict[str, Any]:
             ),
             "merge_output_format": "mp4",
             "outtmpl": (
-                "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s"
-            ),
+                VIDEO_STORAGE_DIR
+                / "%(playlist)s"
+                / "%(playlist_index)s - %(title)s.%(ext)s"
+            ).as_posix(),
             "ignoreerrors": "only_download",
         },
         "1080playlists": {
@@ -94,8 +95,10 @@ def get_source_options(source: str) -> dict[str, Any]:
             ),
             "merge_output_format": "mp4",
             "outtmpl": (
-                "E:/vid storage/%(playlist)s/%(playlist_index)s - %(title)s.%(ext)s"
-            ),
+                VIDEO_STORAGE_DIR
+                / "%(playlist)s"
+                / "%(playlist_index)s - %(title)s.%(ext)s"
+            ).as_posix(),
             "ignoreerrors": "only_download",
         },
     }
@@ -120,8 +123,8 @@ def get_source_options(source: str) -> dict[str, Any]:
     return {
         "format": format_string,
         "merge_output_format": "mp4",
-        "outtmpl": "E:/vid storage/%(title)s.%(ext)s",
-        "postprocessors": _default_postprocessors(),
+        "outtmpl": (VIDEO_STORAGE_DIR / "%(title)s.%(ext)s").as_posix(),
+        "postprocessors": list(DEFAULT_POSTPROCESSORS),
     }
 
 
@@ -148,4 +151,6 @@ def get_postprocessors(source: str) -> list[dict[str, Any]]:
     Returns:
         A list of yt-dlp postprocessor dictionaries.
     """
-    return get_source_options(source).get("postprocessors", _default_postprocessors())
+    return get_source_options(source).get(
+        "postprocessors", list(DEFAULT_POSTPROCESSORS)
+    )

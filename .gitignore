@@ -5,4 +5,12 @@ __pycache__
 .DS_Store
 *.txt
 .qodo
+.claude/settings.json
+.claude/settings.local.json
 .sqlite
+*.lock
+.coverage
+.env
+dist/
+build/
+installer_output/

@@ -1,10 +1,10 @@
 import importlib.util
-import os
 import queue
 import sys
 
 # helper function to import the main module even though its filename contains a space
 import types
+from pathlib import Path
 
 import pytest
 
@@ -58,9 +58,9 @@ def import_vid_module():
     sys.modules.pop("src.download_executor", None)
     sys.modules.pop("src.ydl_utils", None)
 
-    path = r"c:\Users\etreq\dev\vid downloader\vid downloader.pyw"
+    path = str(Path(__file__).parent.parent / "vid downloader.pyw")
     # Ensure the repo root is on sys.path so imports like `import QYT` succeed
-    repo_root = os.path.dirname(path)
+    repo_root = str(Path(path).parent)
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
     spec = importlib.util.spec_from_file_location("vd", path)
@@ -233,6 +233,11 @@ def test_filter_audio_playlist_urls_with_private(monkeypatch):
         def _cache_put(self, url, latest_url, ts):
             pass
 
+        _episode_already_archived = vd.MyWindow._episode_already_archived
+        _skip_if_update_episode = vd.MyWindow._skip_if_update_episode
+        _skip_if_short_duration = vd.MyWindow._skip_if_short_duration
+        _classify_episode_by_age = vd.MyWindow._classify_episode_by_age
+
     win = DummyWin()
     to_download, pending, had_error, messages, statuses = (
         vd.MyWindow._filter_audio_playlist_urls(
@@ -314,6 +319,11 @@ def test_filter_audio_playlist_urls_skips_update(monkeypatch, tmp_path):
 
         def _cache_put(self, url, latest_url, ts):
             pass
+
+        _episode_already_archived = vd.MyWindow._episode_already_archived
+        _skip_if_update_episode = vd.MyWindow._skip_if_update_episode
+        _skip_if_short_duration = vd.MyWindow._skip_if_short_duration
+        _classify_episode_by_age = vd.MyWindow._classify_episode_by_age
 
     win = DummyWin()
     to_download, pending, had_error, messages, statuses = (

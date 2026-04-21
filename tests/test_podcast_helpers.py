@@ -1,5 +1,4 @@
 """Unit tests for podcast_helpers module."""
-# ruff: noqa: S101
 
 from unittest.mock import MagicMock, patch
 
@@ -84,7 +83,8 @@ class TestFetchLatestAccessibleEntry:
 
     @patch("src.podcast_helpers.yt_dlp.YoutubeDL")
     def test_retries_on_private_video_exception(
-        self, mock_ydl_class: MagicMock
+        self,
+        mock_ydl_class: MagicMock,
     ) -> None:
         """Test private video detected via exception, retry succeeds."""
         mock_ydl_instance = MagicMock()
@@ -110,7 +110,8 @@ class TestFetchLatestAccessibleEntry:
 
     @patch("src.podcast_helpers.yt_dlp.YoutubeDL")
     def test_raises_non_private_error_immediately(
-        self, mock_ydl_class: MagicMock
+        self,
+        mock_ydl_class: MagicMock,
     ) -> None:
         """Test that non-private errors are raised immediately."""
         mock_ydl_instance = MagicMock()
@@ -185,7 +186,8 @@ class TestFetchLatestAccessibleEntry:
 
     @patch("src.podcast_helpers.yt_dlp.YoutubeDL")
     def test_multiple_retries_on_private_videos(
-        self, mock_ydl_class: MagicMock
+        self,
+        mock_ydl_class: MagicMock,
     ) -> None:
         """Test that function retries multiple times for private videos."""
         mock_ydl_instance = MagicMock()

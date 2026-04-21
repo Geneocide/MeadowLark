@@ -26,7 +26,9 @@ class PlaylistExtractionError(VideoDownloaderError):
     MSG = "Failed to extract playlist information"
 
     def __init__(
-        self, message: str | None = None, original_exc: Exception | None = None
+        self,
+        message: str | None = None,
+        original_exc: Exception | None = None,
     ) -> None:
         """
         Initialize PlaylistExtractionError with optional message and original exception.
