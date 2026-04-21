@@ -27,11 +27,15 @@ jobs:
           Copy-Item "$($bin.FullName)\ffmpeg.exe"  dist\VidDownloader\
           Copy-Item "$($bin.FullName)\ffprobe.exe" dist\VidDownloader\
 
-      - name: Zip dist folder
+      - name: Build installer
         shell: pwsh
-        run: Compress-Archive -Path dist\VidDownloader -DestinationPath VidDownloader-${{ github.ref_name }}.zip
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            /DAppVersion=$version `
+            installer\setup.iss
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: VidDownloader-${{ github.ref_name }}.zip
+          files: installer_output/VidDownloader-Setup-*.exe

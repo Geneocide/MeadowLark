@@ -373,7 +373,7 @@ class MyWindow(QWidget):
             def _on_finished(
                 to_download: list,
                 pending: list,
-                had_error: bool,  # noqa: FBT001
+                had_error: bool,
                 messages: list[str],
                 statuses: list[str],
             ) -> None:
@@ -769,9 +769,9 @@ class MyWindow(QWidget):
                     # - (to_download, pending, had_error, messages)
                     # - (to_download, pending, had_error, messages, statuses)
                     if isinstance(result, tuple):
-                        if len(result) == 5:  # noqa: PLR2004
+                        if len(result) == 5:
                             to_download, pending, had_error, errors, statuses = result
-                        elif len(result) == 4:  # noqa: PLR2004
+                        elif len(result) == 4:
                             to_download, pending, had_error, errors = result
                         else:
                             to_download, pending, had_error = result
@@ -907,7 +907,7 @@ class MyWindow(QWidget):
             return True
         return False
 
-    def _skip_if_update_episode(  # noqa: PLR0913
+    def _skip_if_update_episode(
         self,
         entry: dict,
         vid: str,
@@ -936,7 +936,7 @@ class MyWindow(QWidget):
         )
         return True
 
-    def _skip_if_short_duration(  # noqa: PLR0913
+    def _skip_if_short_duration(
         self,
         entry: dict,
         vid: str,
@@ -967,7 +967,7 @@ class MyWindow(QWidget):
         )
         return True
 
-    def _classify_episode_by_age(  # noqa: PLR0913
+    def _classify_episode_by_age(
         self,
         vid: str,
         webpage: str,
@@ -1587,7 +1587,7 @@ class MyWindow(QWidget):
 
     def _update_podcast_indicator(
         self,
-        had_error: bool,  # noqa: FBT001
+        had_error: bool,
         to_download: list,
         pending_urls: set[str],
     ) -> None:
@@ -1601,11 +1601,11 @@ class MyWindow(QWidget):
         else:
             self._set_podcast_indicator("all_good")
 
-    def _on_podcast_check_finished(  # noqa: PLR0913
+    def _on_podcast_check_finished(
         self,
         to_download: list,
         pending: list,
-        had_error: bool,  # noqa: FBT001
+        had_error: bool,
         ydl_opts: dict,
         messages: list | None,
         statuses: list | None = None,
@@ -1807,5 +1807,3 @@ if __name__ == "__main__":
 # TODO: make it possible to update .env settings via the app
 # TODO: add auto-check for updates?
 # TODO: figure out playlists for fresh users
-# TODO: Optionally add Inno Setup to the workflow to produce a single-file installer instead of a zip?
-# TODO: figure out github CI issue

@@ -1,7 +1,6 @@
 ; installer/setup.iss
-#define AppName    "Vid Downloader"
-#define AppVersion "1.0.0"
-#define AppExe     "VidDownloader.exe"
+#define AppName "Vid Downloader"
+#define AppExe  "VidDownloader.exe"
 
 [Setup]
 AppName={#AppName}
