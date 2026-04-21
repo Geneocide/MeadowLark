@@ -1763,7 +1763,7 @@ if __name__ == "__main__":
     if _storage.exists():
         startfile(str(_storage))  # noqa: S606
     if getattr(sys, "frozen", False):
-        dirname = Path(sys.executable).parent
+        dirname = Path(sys._MEIPASS)  # type: ignore[attr-defined]
     else:
         dirname = Path(__file__).parent
     QDir.addSearchPath("icons", str(dirname / "resources" / "icons"))
@@ -1805,7 +1805,5 @@ if __name__ == "__main__":
 # TODO: rename??? MeadowLark?
 # TODO: make it possible to update .env settings via the app
 # TODO: add auto-check for updates?
-# TODO: figure out playlists for fresh users
-# TODO: bug: icon not used when installed from installer
-# TODO: bug: upon initial setup, settings are not applied until restart but nothing prompts this
+# TODO: figure out playlists for fresh users# TODO: bug: upon initial setup, settings are not applied until restart but nothing prompts this
 # TODO: resizing makes Audio big (low priority)
