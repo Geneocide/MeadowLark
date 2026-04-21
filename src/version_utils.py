@@ -11,7 +11,7 @@ APP_VERSION: str = "0.1.4"  # should auto update to the tag via CI
 _PYPI_API_TIMEOUT: int = 3
 _GITHUB_API_TIMEOUT: int = 5
 _GITHUB_RELEASES_URL: str = (
-    "https://api.github.com/repos/Geneocide/vid-downloader/releases"
+    "https://api.github.com/repos/Geneocide/MeadowLark/releases"
 )
 
 

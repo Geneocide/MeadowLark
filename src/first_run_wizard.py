@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-_APPDATA_DIR = Path.home() / "AppData" / "Roaming" / "VidDownloader"
+_APPDATA_DIR = Path.home() / "AppData" / "Roaming" / "MeadowLark"
 _USER_ENV = _APPDATA_DIR / ".env"
 
 
@@ -24,7 +24,7 @@ def needs_first_run() -> bool:
 class FirstRunWizard(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Welcome — Vid Downloader Setup")
+        self.setWindowTitle("Welcome — MeadowLark Setup")
         self.setMinimumWidth(500)
         self._video_dir = str(Path.home() / "Videos")
         self._podcast_dir = str(Path.home() / "Music" / "Podcasts")
@@ -35,7 +35,7 @@ class FirstRunWizard(QDialog):
 
         layout.addWidget(
             QLabel(
-                "<b>Welcome to Vid Downloader!</b><br><br>"
+                "<b>Welcome to MeadowLark!</b><br><br>"
                 "Where should downloaded videos be saved?",
             ),
         )

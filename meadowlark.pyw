@@ -1,5 +1,5 @@
 """
-Vid Downloader - A PyQt6-based GUI application for downloading and managing video and audio content from YouTube and other platforms using yt-dlp.
+MeadowLark - A PyQt6-based GUI application for downloading and managing video and audio content from YouTube and other platforms using yt-dlp.
 
 This application provides a user-friendly interface for batch downloading videos, playlists, and audio files with customizable options. It supports drag-and-drop, playlist selection, progress tracking, and automatic updates for yt-dlp.
 
@@ -156,7 +156,7 @@ def _make_podcast_status_entry(
 
 class MyWindow(QWidget):
     """
-    MyWindow - A PyQt6-based main window for the Vid Downloader application, providing a GUI for downloading and managing video and audio content from YouTube and other platforms.
+    MyWindow - A PyQt6-based main window for the MeadowLark application, providing a GUI for downloading and managing video and audio content from YouTube and other platforms.
 
     Features include playlist and audio download options, drag-and-drop support, progress tracking, log display, update checking, and integration with custom download queue and processing logic.
     """
@@ -168,14 +168,14 @@ class MyWindow(QWidget):
 
     def __init__(self) -> None:
         """
-        Vid Downloader is a PyQt6-based GUI application for downloading and managing video and audio content from YouTube and other platforms using yt-dlp.
+        MeadowLark is a PyQt6-based GUI application for downloading and managing video and audio content from YouTube and other platforms using yt-dlp.
 
         Provides a user-friendly interface for batch downloading videos, playlists, and audio files with customizable options. Features include drag-and-drop support, playlist selection, progress tracking, real-time logging, archive checking, automatic yt-dlp updates, and secure credential storage via keyring.
 
         Run this script to launch the GUI, queue downloads, monitor progress, and manage updates.
         """
         super().__init__()
-        self.setWindowTitle("Vid Downloader")
+        self.setWindowTitle("MeadowLark")
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
 
         self._setup_ui_layout()

@@ -1,15 +1,15 @@
 ; installer/setup.iss
-#define AppName "Vid Downloader"
-#define AppExe  "VidDownloader.exe"
+#define AppName "MeadowLark"
+#define AppExe  "MeadowLark.exe"
 
 [Setup]
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=Geneocide
-DefaultDirName={autopf}\VidDownloader
+DefaultDirName={autopf}\MeadowLark
 DefaultGroupName={#AppName}
 OutputDir=..\installer_output
-OutputBaseFilename=VidDownloader-Setup-{#AppVersion}
+OutputBaseFilename=MeadowLark-Setup-{#AppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -22,7 +22,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Files]
-Source: "..\dist\VidDownloader\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\MeadowLark\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#AppName}";       Filename: "{app}\{#AppExe}"

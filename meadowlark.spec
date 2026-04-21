@@ -2,7 +2,7 @@
 from PyInstaller.utils.hooks import collect_submodules
 
 a = Analysis(
-    ["vid downloader.pyw"],
+    ["meadowlark.pyw"],
     pathex=[],
     binaries=[
         (".venv/Scripts/deno.exe", "."),
@@ -28,7 +28,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="VidDownloader",
+    name="MeadowLark",
     debug=False,
     strip=False,
     upx=True,
@@ -44,5 +44,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="VidDownloader",
+    name="MeadowLark",
 )

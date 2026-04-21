@@ -26,7 +26,7 @@ jobs:
         run: uv sync --group dev
 
       - name: Build executable
-        run: uv run pyinstaller vid_downloader.spec
+        run: uv run pyinstaller meadowlark.spec
 
       - name: Download FFmpeg
         shell: pwsh
@@ -35,8 +35,8 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_tmp
           $bin = Get-ChildItem ffmpeg_tmp -Recurse -Filter "bin" -Directory | Select-Object -First 1
-          Copy-Item "$($bin.FullName)\ffmpeg.exe"  dist\VidDownloader\
-          Copy-Item "$($bin.FullName)\ffprobe.exe" dist\VidDownloader\
+          Copy-Item "$($bin.FullName)\ffmpeg.exe"  dist\MeadowLark\
+          Copy-Item "$($bin.FullName)\ffprobe.exe" dist\MeadowLark\
 
       - name: Build installer
         shell: pwsh
@@ -49,4 +49,4 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: installer_output/VidDownloader-Setup-*.exe
+          files: installer_output/MeadowLark-Setup-*.exe

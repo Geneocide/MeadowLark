@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from wakepy import keep
 
-_user_env = Path.home() / "AppData" / "Roaming" / "VidDownloader" / ".env"
+_user_env = Path.home() / "AppData" / "Roaming" / "MeadowLark" / ".env"
 load_dotenv(dotenv_path=_user_env if _user_env.exists() else None)
 load_dotenv()  # also load project .env in dev (won't override vars already set)
 

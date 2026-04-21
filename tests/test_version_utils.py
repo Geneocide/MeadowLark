@@ -152,9 +152,9 @@ def test_get_latest_app_release_returns_none_on_network_error() -> None:
 def test_is_app_update_available_detects_newer_version() -> None:
     release = {
         "tag_name": "v99.9.9",
-        "html_url": "https://github.com/Geneocide/vid-downloader/releases/tag/v99.9.9",
+        "html_url": "https://github.com/Geneocide/MeadowLark/releases/tag/v99.9.9",
         "assets": [
-            {"name": "VidDownloader-Setup-99.9.9.exe", "browser_download_url": "https://example.com/setup.exe"},
+            {"name": "MeadowLark-Setup-99.9.9.exe", "browser_download_url": "https://example.com/setup.exe"},
         ],
     }
     with patch("src.version_utils.get_latest_app_release", return_value=release):
@@ -167,13 +167,13 @@ def test_is_app_update_available_detects_newer_version() -> None:
 def test_is_app_update_available_falls_back_to_html_url_when_no_exe_asset() -> None:
     release = {
         "tag_name": "v99.9.9",
-        "html_url": "https://github.com/Geneocide/vid-downloader/releases/tag/v99.9.9",
+        "html_url": "https://github.com/Geneocide/MeadowLark/releases/tag/v99.9.9",
         "assets": [],
     }
     with patch("src.version_utils.get_latest_app_release", return_value=release):
         available, tag, url = is_app_update_available()
     assert available is True
-    assert url == "https://github.com/Geneocide/vid-downloader/releases/tag/v99.9.9"
+    assert url == "https://github.com/Geneocide/MeadowLark/releases/tag/v99.9.9"
 
 
 def test_is_app_update_available_returns_false_when_up_to_date() -> None:

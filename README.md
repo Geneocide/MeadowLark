@@ -1,4 +1,4 @@
-# Vid Downloader
+# MeadowLark
 
 A PyQt6 GUI for downloading videos, playlists, and podcasts via yt-dlp.
 
@@ -28,7 +28,7 @@ Then open `.env` and fill in the three required paths:
 ## Run
 
 ```sh
-uv run python "vid downloader.pyw"
+uv run python meadowlark.pyw
 ```
 
 ## Environment variable reference

@@ -58,7 +58,7 @@ def import_vid_module():
     sys.modules.pop("src.download_executor", None)
     sys.modules.pop("src.ydl_utils", None)
 
-    path = str(Path(__file__).parent.parent / "vid downloader.pyw")
+    path = str(Path(__file__).parent.parent / "meadowlark.pyw")
     # Ensure the repo root is on sys.path so imports like `import QYT` succeed
     repo_root = str(Path(path).parent)
     if repo_root not in sys.path:
