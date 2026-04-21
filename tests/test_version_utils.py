@@ -5,8 +5,11 @@ from unittest.mock import MagicMock, Mock, patch
 import requests
 
 from src.version_utils import (
+    APP_VERSION,
     get_current_yt_dlp_version,
+    get_latest_app_release,
     get_latest_yt_dlp_version,
+    is_app_update_available,
     is_yt_dlp_update_available,
     normalize_version,
 )
@@ -107,3 +110,84 @@ def test_is_yt_dlp_update_available_returns_false_when_up_to_date() -> None:
         assert available is False
         assert current == (2026, 2, 2)
         assert latest == (2026, 2, 2)
+
+
+# --- get_latest_app_release ---
+
+def test_get_latest_app_release_returns_first_release() -> None:
+    releases = [{"tag_name": "v0.2.0"}, {"tag_name": "v0.1.0"}]
+    response = Mock()
+    response.status_code = 200
+    response.json.return_value = releases
+    with patch("src.version_utils.requests.get", return_value=response):
+        result = get_latest_app_release()
+    assert result == {"tag_name": "v0.2.0"}
+
+
+def test_get_latest_app_release_returns_none_for_empty_list() -> None:
+    response = Mock()
+    response.status_code = 200
+    response.json.return_value = []
+    with patch("src.version_utils.requests.get", return_value=response):
+        assert get_latest_app_release() is None
+
+
+def test_get_latest_app_release_returns_none_for_non_200() -> None:
+    response = Mock()
+    response.status_code = 403
+    with patch("src.version_utils.requests.get", return_value=response):
+        assert get_latest_app_release() is None
+
+
+def test_get_latest_app_release_returns_none_on_network_error() -> None:
+    with patch(
+        "src.version_utils.requests.get",
+        side_effect=requests.exceptions.RequestException("timeout"),
+    ):
+        assert get_latest_app_release() is None
+
+
+# --- is_app_update_available ---
+
+def test_is_app_update_available_detects_newer_version() -> None:
+    release = {
+        "tag_name": "v99.9.9",
+        "html_url": "https://github.com/Geneocide/vid-downloader/releases/tag/v99.9.9",
+        "assets": [
+            {"name": "VidDownloader-Setup-99.9.9.exe", "browser_download_url": "https://example.com/setup.exe"},
+        ],
+    }
+    with patch("src.version_utils.get_latest_app_release", return_value=release):
+        available, tag, url = is_app_update_available()
+    assert available is True
+    assert tag == "v99.9.9"
+    assert url == "https://example.com/setup.exe"
+
+
+def test_is_app_update_available_falls_back_to_html_url_when_no_exe_asset() -> None:
+    release = {
+        "tag_name": "v99.9.9",
+        "html_url": "https://github.com/Geneocide/vid-downloader/releases/tag/v99.9.9",
+        "assets": [],
+    }
+    with patch("src.version_utils.get_latest_app_release", return_value=release):
+        available, tag, url = is_app_update_available()
+    assert available is True
+    assert url == "https://github.com/Geneocide/vid-downloader/releases/tag/v99.9.9"
+
+
+def test_is_app_update_available_returns_false_when_up_to_date() -> None:
+    release = {"tag_name": APP_VERSION, "html_url": "", "assets": []}
+    with patch("src.version_utils.get_latest_app_release", return_value=release):
+        available, tag, url = is_app_update_available()
+    assert available is False
+    assert tag is None
+    assert url is None
+
+
+def test_is_app_update_available_returns_false_on_api_failure() -> None:
+    with patch("src.version_utils.get_latest_app_release", return_value=None):
+        available, tag, url = is_app_update_available()
+    assert available is False
+    assert tag is None
+    assert url is None

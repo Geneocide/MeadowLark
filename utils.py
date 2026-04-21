@@ -34,6 +34,7 @@ from src.playlist_utils import (
 from src.version_utils import (
     get_current_yt_dlp_version,
     get_latest_yt_dlp_version,
+    is_app_update_available,
     is_yt_dlp_update_available,
     normalize_version,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "get_playlist_file_for_source",
     "get_postprocessors",
     "get_source_options",
+    "is_app_update_available",
     "is_primitive_technology",
     "is_yt_dlp_update_available",
     "load_playlist_comments_for_source",

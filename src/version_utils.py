@@ -1,4 +1,4 @@
-"""Version checking and comparison utilities for yt-dlp."""
+"""Version checking and comparison utilities for yt-dlp and the app itself."""
 
 import http
 import re
@@ -6,7 +6,13 @@ import re
 import requests
 import yt_dlp
 
+APP_VERSION: str = "0.1.4"  # should auto update to the tag via CI
+
 _PYPI_API_TIMEOUT: int = 3
+_GITHUB_API_TIMEOUT: int = 5
+_GITHUB_RELEASES_URL: str = (
+    "https://api.github.com/repos/Geneocide/vid-downloader/releases"
+)
 
 
 def normalize_version(version: str | None) -> tuple[int, ...]:
@@ -73,3 +79,49 @@ def is_yt_dlp_update_available() -> tuple[
     latest = normalize_version(get_latest_yt_dlp_version() or "")
     update = (current and latest) and (current != latest)
     return update, current or None, latest or None
+
+
+def get_latest_app_release() -> dict | None:
+    """
+    Fetch the most recent app release from GitHub (includes pre-releases).
+
+    Returns:
+        Release dict from the GitHub API, or None on any error.
+    """
+    try:
+        r = requests.get(_GITHUB_RELEASES_URL, timeout=_GITHUB_API_TIMEOUT)
+        if r.status_code == http.HTTPStatus.OK:
+            releases = r.json()
+            return releases[0] if releases else None
+        return None  # noqa: TRY300
+    except requests.exceptions.RequestException:
+        return None
+
+
+def is_app_update_available() -> tuple[bool, str | None, str | None]:
+    """
+    Check whether a newer app version is available on GitHub.
+
+    Returns:
+        Tuple of (update_available, latest_tag_name, download_url).
+        download_url is the first .exe asset URL, falling back to the release html_url.
+        Returns (False, None, None) on any API failure.
+    """
+    release = get_latest_app_release()
+    if release is None:
+        return False, None, None
+
+    tag = release.get("tag_name", "")
+    current = normalize_version(APP_VERSION)
+    latest = normalize_version(tag)
+
+    if not (current and latest) or latest <= current:
+        return False, None, None
+
+    assets: list[dict] = release.get("assets", [])
+    exe_asset = next((a for a in assets if a.get("name", "").endswith(".exe")), None)
+    download_url: str = (
+        exe_asset["browser_download_url"] if exe_asset else release.get("html_url", "")
+    )
+
+    return True, tag, download_url

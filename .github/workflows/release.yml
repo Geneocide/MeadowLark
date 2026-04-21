@@ -13,6 +13,15 @@ jobs:
 
       - uses: astral-sh/setup-uv@v3
 
+      - name: Stamp version from tag
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          uv version $version
+          (Get-Content src\version_utils.py) `
+            -replace 'APP_VERSION: str = ".*"', "APP_VERSION: str = `"$version`"" |
+            Set-Content src\version_utils.py
+
       - name: Install dependencies (incl. dev group for PyInstaller)
         run: uv sync --group dev
 

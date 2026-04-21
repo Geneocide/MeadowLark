@@ -184,6 +184,7 @@ class MyWindow(QWidget):
         self._setup_podcast_state()
 
         QShortcut(QKeySequence("Ctrl+H"), self).activated.connect(self._show_history)
+        QShortcut(QKeySequence("Ctrl+U"), self).activated.connect(self._start_app_update_check)
 
         self.playlist_comments = {}
 
@@ -741,6 +742,15 @@ class MyWindow(QWidget):
         # Cleanup any stored qhook/logger refs to allow GC now that downloads finished
         if hasattr(self, "_active_qhooks"):
             self._active_qhooks.clear()
+
+    class _AppUpdateWorker(QObject):
+        """Worker that checks GitHub Releases for a newer app version off the GUI thread."""
+
+        finished = pyqtSignal(bool, str, str)  # (update_available, latest_tag, download_url)
+
+        def run(self) -> None:
+            update_available, tag, url = utils.is_app_update_available()
+            self.finished.emit(bool(update_available), tag or "", url or "")
 
     class _PodcastCheckWorker(QObject):
         """Worker that runs podcast playlist expansion and SponsorBlock checks off the GUI thread."""
@@ -1730,6 +1740,28 @@ class MyWindow(QWidget):
         self.logEdit.appendPlainText("Running scheduled YT Podcasts check (hourly).")
         # Use the same code path as the button, but avoid showing GUI prompts
         self.request_detected([], "audio_playlists")
+
+    def _start_app_update_check(self) -> None:
+        """Start a background check for a newer app version (triggered by Ctrl+U)."""
+        self._app_update_worker = self._AppUpdateWorker()
+        self._app_update_thread = QThread(self)
+        self._app_update_worker.moveToThread(self._app_update_thread)
+        self._app_update_thread.started.connect(self._app_update_worker.run)
+        self._app_update_worker.finished.connect(self._on_app_update_result)
+        self._app_update_worker.finished.connect(self._app_update_thread.quit)
+        self._app_update_thread.start()
+
+    def _on_app_update_result(self, update_available: bool, latest_tag: str, download_url: str) -> None:
+        """Handle the result of the background app update check."""
+        if not update_available:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Update Available",
+            f"Version {latest_tag} is available. Download now?",
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            webbrowser.open(download_url)
 
     def do_updates(self) -> None:
         """
