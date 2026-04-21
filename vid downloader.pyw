@@ -49,7 +49,16 @@ from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 from hurry.filesize import size
-from PyQt6.QtCore import QDir, QObject, QPoint, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import (
+    QDir,
+    QObject,
+    QPoint,
+    QProcess,
+    Qt,
+    QThread,
+    QTimer,
+    pyqtSignal,
+)
 from PyQt6.QtGui import QCloseEvent, QFont, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
@@ -1778,7 +1787,10 @@ if __name__ == "__main__":
 
     if needs_first_run():
         _wizard = FirstRunWizard(window)
-        _wizard.exec()
+        if _wizard.exec() == QDialog.DialogCode.Accepted:
+            _restart_args = sys.argv[1:] if getattr(sys, "frozen", False) else sys.argv
+            QProcess.startDetached(sys.executable, _restart_args)
+            app.quit()
 
     if not shutil.which("ffmpeg"):
         QMessageBox.warning(
@@ -1805,5 +1817,5 @@ if __name__ == "__main__":
 # TODO: rename??? MeadowLark?
 # TODO: make it possible to update .env settings via the app
 # TODO: add auto-check for updates?
-# TODO: figure out playlists for fresh users# TODO: bug: upon initial setup, settings are not applied until restart but nothing prompts this
+# TODO: figure out playlists for fresh users
 # TODO: resizing makes Audio big (low priority)
