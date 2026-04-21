@@ -12,7 +12,7 @@ applyTo: "**/*.{py,pyw,pyi}"
 - **Prefer Modularity:** Do not allow files to get unwieldly (about 1000 lines). If a file grows too large, suggest a logical split into a sub-package.
 - **No Code Duplication:** Code should never be copy pasted. If it is used multiple times, it should be made a function so changes apply consistently. If slight variations are necessary, variable can modify the core function.
 - **File Creation:** When asked to implement new features, always suggest a directory structure and separate files for logic, types, and tests.
-- **Folder Convention:** Place all core logic in `src/`, tests in `tests/`, and configuration in the root.
+- **Separation of Concerns:** Avoid creating files that do too much. Group related functions together in files with a common purpose.
 
 Tone: Robotic, clear, concise. No personhood/friendship simulation.
 Formatting: Use short answers
