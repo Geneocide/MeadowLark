@@ -27,6 +27,9 @@ jobs:
           Copy-Item "$($bin.FullName)\ffmpeg.exe"  dist\VidDownloader\
           Copy-Item "$($bin.FullName)\ffprobe.exe" dist\VidDownloader\
 
+      - name: Install Inno Setup
+        run: choco install innosetup --version=6.3.3 -y --no-progress
+
       - name: Build installer
         shell: pwsh
         run: |
