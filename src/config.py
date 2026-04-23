@@ -143,6 +143,13 @@ PODCAST_LOOKAHEAD_MAX_ATTEMPTS: Final[int] = int(
     os.getenv("VID_DL_PODCAST_LOOKAHEAD_MAX_ATTEMPTS", "5"),
 )
 
+PODCAST_AUTO_CHECK: Final[bool] = (
+    os.getenv("VID_DL_PODCAST_AUTO_CHECK", "true").lower() == "true"
+)
+PODCAST_CHECK_INTERVAL_MINUTES: Final[int] = int(
+    os.getenv("VID_DL_PODCAST_CHECK_INTERVAL_MINUTES", "60"),
+)
+
 # ============================================================================
 # Display Configuration
 # ============================================================================
@@ -152,6 +159,12 @@ LABEL_OUTPUT_FONT_SIZE: Final[int] = int(
     os.getenv("VID_DL_LABEL_OUTPUT_FONT_SIZE", "16"),
 )
 LABEL_READY_TEXT: Final[str] = os.getenv("VID_DL_LABEL_READY_TEXT", "[ Ready ]")
+LABEL_DROP_1080: Final[str] = os.getenv("VID_DL_LABEL_DROP_1080", "1080")
+LABEL_DROP_720: Final[str] = os.getenv("VID_DL_LABEL_DROP_720", "720")
+LABEL_DROP_AUDIO: Final[str] = os.getenv("VID_DL_LABEL_DROP_AUDIO", "audio")
+LABEL_BTN_PLAYLISTS: Final[str] = os.getenv("VID_DL_LABEL_BTN_PLAYLISTS", "Playlists")
+LABEL_BTN_720: Final[str] = os.getenv("VID_DL_LABEL_BTN_720", "720 Playlists")
+LABEL_BTN_PODCASTS: Final[str] = os.getenv("VID_DL_LABEL_BTN_PODCASTS", "YT Podcasts")
 
 # ============================================================================
 # Post-Processing Configuration

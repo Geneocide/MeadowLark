@@ -4,6 +4,7 @@ from pathlib import Path
 
 from .config import PLAYLISTS_720_FILE, PLAYLISTS_AUDIO_FILE, PLAYLISTS_FILE
 from .logging_utils import log_exception
+from .settings_dialog import get_setting
 from .url_utils import extract_playlist_id
 
 
@@ -65,9 +66,9 @@ def get_playlist_file_for_source(source: str) -> str | None:
         File path string or None if source is not recognized.
     """
     mapping = {
-        "1080playlists": str(PLAYLISTS_FILE),
-        "720playlists": str(PLAYLISTS_720_FILE),
-        "audio_playlists": str(PLAYLISTS_AUDIO_FILE),
+        "1080playlists": get_setting("VID_DL_PLAYLISTS_FILE") or str(PLAYLISTS_FILE),
+        "720playlists": get_setting("VID_DL_PLAYLISTS_720_FILE") or str(PLAYLISTS_720_FILE),
+        "audio_playlists": get_setting("VID_DL_PLAYLISTS_AUDIO_FILE") or str(PLAYLISTS_AUDIO_FILE),
     }
     return mapping.get(source)
 

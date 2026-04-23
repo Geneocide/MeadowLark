@@ -33,6 +33,7 @@ Author: Gene
 """
 
 import contextlib
+import logging
 import os
 import queue
 import shutil
@@ -59,7 +60,14 @@ from PyQt6.QtCore import (
     QTimer,
     pyqtSignal,
 )
-from PyQt6.QtGui import QCloseEvent, QFont, QIcon, QKeySequence, QShortcut
+from PyQt6.QtGui import (
+    QCloseEvent,
+    QFont,
+    QIcon,
+    QKeySequence,
+    QSessionManager,
+    QShortcut,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -83,6 +91,13 @@ import utils
 from src import live_queue
 from src.config import (
     ARCHIVE_PATH,
+    COOKIES_FILE,
+    LABEL_BTN_720,
+    LABEL_BTN_PLAYLISTS,
+    LABEL_BTN_PODCASTS,
+    LABEL_DROP_1080,
+    LABEL_DROP_720,
+    LABEL_DROP_AUDIO,
     LABEL_OUTPUT_FONT_NAME,
     LABEL_OUTPUT_FONT_SIZE,
     LABEL_READY_TEXT,
@@ -91,12 +106,14 @@ from src.config import (
     PLAYLISTS_720_FILE,
     PLAYLISTS_AUDIO_FILE,
     PLAYLISTS_FILE,
+    PODCAST_AUTO_CHECK,
     PODCAST_MISC_OUTPUT_DIR,
     VENV_SCRIPTS_DIR,
     VIDEO_STORAGE_DIR,
     YDL_COMMON_ERRORS,
     YDL_EXTRACTION_ERRORS,
 )
+from src.settings_dialog import SettingsDialog, _init_runtime_settings, get_setting
 from src.first_run_wizard import FirstRunWizard, needs_first_run
 from src.history_dialog import HistoryDialog
 from src.match_filter import build_match_filter
@@ -110,7 +127,10 @@ from src.podcast_filtering import (
     parse_video_timestamp,
 )
 from src.podcast_helpers import fetch_latest_accessible_entry
+from src.url_utils import extract_playlist_id
 from UIClasses import DropLabel, PlaylistButton, PlaylistDialog
+
+logger = logging.getLogger(__name__)
 
 # Helper for podcast playlist handling -------------------------------------------------
 #
@@ -178,48 +198,35 @@ class MyWindow(QWidget):
         self.setWindowTitle("MeadowLark")
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
 
+        _init_runtime_settings()
+        self._settings_dialog: SettingsDialog | None = None
+        self._ready_text = LABEL_READY_TEXT
+
         self._setup_ui_layout()
         self._setup_queue_and_downloader()
         self._setup_timers()
         self._setup_podcast_state()
 
         QShortcut(QKeySequence("Ctrl+H"), self).activated.connect(self._show_history)
-        QShortcut(QKeySequence("Ctrl+U"), self).activated.connect(self._start_app_update_check)
+        QShortcut(QKeySequence("Ctrl+U"), self).activated.connect(
+            self._start_app_update_check
+        )
 
         self.playlist_comments = {}
 
         update_available, _, _ = utils.is_yt_dlp_update_available()
         self.buttonUpdate.setVisible(update_available)
 
-    def _setup_ui_layout(self) -> None:
-        """Create and arrange all UI widgets and layout."""
-        layout = QGridLayout()
-
-        self.buttonPlaylists = PlaylistButton(
-            "Playlists",
-            str(PLAYLISTS_FILE),
-        )
-        self.buttonPlaylists.clicked.connect(
-            lambda: self.playlist_button_clicked("1080playlists"),
-        )
-        self.button720Playlists = PlaylistButton(
-            "720 Playlists",
-            str(PLAYLISTS_720_FILE),
-        )
-        self.button720Playlists.clicked.connect(
-            lambda: self.playlist_button_clicked("720playlists"),
-        )
+    def _build_podcast_container(self) -> QWidget:
+        """Build the podcast button + indicator container widget."""
         self.buttonAudioPlaylists = PlaylistButton(
-            "YT Podcasts",
+            LABEL_BTN_PODCASTS,
             str(PLAYLISTS_AUDIO_FILE),
         )
-        # Make the Podcasts button smaller and add an adjacent status indicator
         self.buttonAudioPlaylists.setMaximumWidth(140)
         self.buttonAudioPlaylists.clicked.connect(
             lambda: self.playlist_button_clicked("audio_playlists"),
         )
-
-        # Podcast indicator: shows status (checking, pending, busy, ok, error)
         self.podcastIndicator = QPushButton("", self)
         self.podcastIndicator.setFixedSize(34, 34)
         self.podcastIndicator.setFlat(True)
@@ -228,7 +235,26 @@ class MyWindow(QWidget):
         )
         self.podcastIndicator.setToolTip("Podcast status")
         self.podcastIndicator.clicked.connect(self._show_podcast_status)
+        container = QWidget()
+        inner = QGridLayout()
+        inner.setContentsMargins(0, 0, 0, 0)
+        inner.addWidget(self.buttonAudioPlaylists, 0, 0)
+        inner.addWidget(self.podcastIndicator, 0, 1)
+        container.setLayout(inner)
+        return container
 
+    def _setup_ui_layout(self) -> None:
+        """Create and arrange all UI widgets and layout."""
+        layout = QGridLayout()
+
+        self.buttonPlaylists = PlaylistButton(LABEL_BTN_PLAYLISTS, str(PLAYLISTS_FILE))
+        self.buttonPlaylists.clicked.connect(
+            lambda: self.playlist_button_clicked("1080playlists"),
+        )
+        self.button720Playlists = PlaylistButton(LABEL_BTN_720, str(PLAYLISTS_720_FILE))
+        self.button720Playlists.clicked.connect(
+            lambda: self.playlist_button_clicked("720playlists"),
+        )
         self.checkIgnoreArchive = QCheckBox("Ignore Archive?")
         self.checkIgnoreArchive.setChecked(False)
         self.checkSkipDownload = QCheckBox("Skip Download")
@@ -236,10 +262,18 @@ class MyWindow(QWidget):
         self.buttonUpdate = QPushButton("⤓")
         self.buttonUpdate.clicked.connect(lambda: self.request_detected([], "Update"))
         self.buttonUpdate.setVisible(True)
-        self.label1080 = DropLabel("1080", "#424769", self.request_detected)
-        self.label720 = DropLabel("720", "#7077A1", self.request_detected)
-        self.labelAudio = DropLabel("audio", "#FF9843", self.request_detected)
-        self.labelOutput = QLabel(LABEL_READY_TEXT)
+        self.buttonSettings = QPushButton("⚙")
+        self.buttonSettings.clicked.connect(self._open_settings)
+        self.label1080 = DropLabel(
+            LABEL_DROP_1080, "#424769", self.request_detected, source_key="1080"
+        )
+        self.label720 = DropLabel(
+            LABEL_DROP_720, "#7077A1", self.request_detected, source_key="720"
+        )
+        self.labelAudio = DropLabel(
+            LABEL_DROP_AUDIO, "#FF9843", self.request_detected, source_key="audio"
+        )
+        self.labelOutput = QLabel(self._ready_text)
         self.labelOutput.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.labelOutput.setFont(QFont(LABEL_OUTPUT_FONT_NAME, LABEL_OUTPUT_FONT_SIZE))
         self.barProgress = QProgressBar()
@@ -248,23 +282,17 @@ class MyWindow(QWidget):
         layout.addWidget(self.checkSkipDownload, 0, 0)
         layout.addWidget(self.checkIgnoreArchive, 0, 1)
         layout.addWidget(self.buttonUpdate, 0, 2)
+        layout.addWidget(self.buttonSettings, 0, 3)
         layout.addWidget(self.buttonPlaylists, 1, 0)
         layout.addWidget(self.button720Playlists, 1, 1)
-        # Use a small container to hold the Podcasts button and the indicator
-        podcast_container = QWidget()
-        podcast_layout = QGridLayout()
-        podcast_layout.setContentsMargins(0, 0, 0, 0)
-        podcast_layout.addWidget(self.buttonAudioPlaylists, 0, 0)
-        podcast_layout.addWidget(self.podcastIndicator, 0, 1)
-        podcast_container.setLayout(podcast_layout)
-        layout.addWidget(podcast_container, 1, 2)
+        layout.addWidget(self._build_podcast_container(), 1, 2, 1, 2)
         layout.setColumnStretch(2, 1)
         layout.addWidget(self.label1080, 2, 0)
         layout.addWidget(self.label720, 2, 1)
-        layout.addWidget(self.labelAudio, 2, 2)
-        layout.addWidget(self.labelOutput, 3, 0, 1, 3)
-        layout.addWidget(self.barProgress, 4, 0, 1, 3)
-        layout.addWidget(self.logEdit, 5, 0, 1, 3)
+        layout.addWidget(self.labelAudio, 2, 2, 1, 2)
+        layout.addWidget(self.labelOutput, 3, 0, 1, 4)
+        layout.addWidget(self.barProgress, 4, 0, 1, 4)
+        layout.addWidget(self.logEdit, 5, 0, 1, 4)
 
         self.setLayout(layout)
 
@@ -290,7 +318,8 @@ class MyWindow(QWidget):
         self.check_live_queue()
 
         # Schedule hourly automated YT Podcasts check (runs at :15 past the hour)
-        self._schedule_hourly_podcast_checks()
+        if PODCAST_AUTO_CHECK:
+            self._schedule_hourly_podcast_checks()
 
     def _setup_podcast_state(self) -> None:
         """Initialize podcast-related attributes and state."""
@@ -373,7 +402,7 @@ class MyWindow(QWidget):
                 ),
             )
             thread.finished.connect(
-                lambda: self.labelOutput.setText(LABEL_READY_TEXT),
+                lambda: self.labelOutput.setText(self._ready_text),
             )
 
             # Store references to avoid GC while running
@@ -425,20 +454,22 @@ class MyWindow(QWidget):
 
     def _get_source_options(self, source: str) -> dict:
         """Get the yt-dlp options dict for the given source type."""
+        podcast_dir = Path(get_setting("VID_DL_PODCAST_MISC_OUTPUT_DIR") or str(PODCAST_MISC_OUTPUT_DIR))
+        video_dir = Path(get_setting("VID_DL_VIDEO_STORAGE_DIR") or str(VIDEO_STORAGE_DIR))
         source_options = {
             "audio": {
                 "format": "m4a/bestaudio/best",
                 "postprocessors": [
                     {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
                 ],
-                "outtmpl": (PODCAST_MISC_OUTPUT_DIR / "%(title)s.%(ext)s").as_posix(),
+                "outtmpl": (podcast_dir / "%(title)s.%(ext)s").as_posix(),
             },
             "audio_playlists": {
                 "format": "m4a/bestaudio/best",
                 "postprocessors": [
                     {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
                 ],
-                "outtmpl": (PODCAST_MISC_OUTPUT_DIR / "%(title)s.%(ext)s").as_posix(),
+                "outtmpl": (podcast_dir / "%(title)s.%(ext)s").as_posix(),
                 "ignoreerrors": "only_download",
             },
             "720playlists": {
@@ -450,7 +481,7 @@ class MyWindow(QWidget):
                 ),
                 "merge_output_format": "mp4",
                 "outtmpl": (
-                    VIDEO_STORAGE_DIR
+                    video_dir
                     / "%(playlist)s"
                     / "%(playlist_index)s - %(title)s.%(ext)s"
                 ).as_posix(),
@@ -465,7 +496,7 @@ class MyWindow(QWidget):
                 ),
                 "merge_output_format": "mp4",
                 "outtmpl": (
-                    VIDEO_STORAGE_DIR
+                    video_dir
                     / "%(playlist)s"
                     / "%(playlist_index)s - %(title)s.%(ext)s"
                 ).as_posix(),
@@ -495,7 +526,7 @@ class MyWindow(QWidget):
         return {
             "format": fmt,
             "merge_output_format": "mp4",
-            "outtmpl": (VIDEO_STORAGE_DIR / "%(title)s.%(ext)s").as_posix(),
+            "outtmpl": (video_dir / "%(title)s.%(ext)s").as_posix(),
             "match_filter": self.make_match_filter(source),
         }
 
@@ -715,7 +746,7 @@ class MyWindow(QWidget):
 
     def handle_queue_empty(self) -> None:
         """Update the output label to indicate that the download queue is ready and update podcast indicator if applicable."""
-        self.labelOutput.setText("[ Ready ]")
+        self.labelOutput.setText(self._ready_text)
         # If podcast downloads finished, reflect pending/all_good state
         if self._podcast_pending_urls:
             self._set_podcast_indicator("pending")
@@ -746,7 +777,9 @@ class MyWindow(QWidget):
     class _AppUpdateWorker(QObject):
         """Worker that checks GitHub Releases for a newer app version off the GUI thread."""
 
-        finished = pyqtSignal(bool, str, str)  # (update_available, latest_tag, download_url)
+        finished = pyqtSignal(
+            bool, str, str
+        )  # (update_available, latest_tag, download_url)
 
         def run(self) -> None:
             update_available, tag, url = utils.is_app_update_available()
@@ -871,7 +904,7 @@ class MyWindow(QWidget):
                     {
                         "quiet": True,
                         "skip_download": True,
-                        "cookiefile": r"resources\cookies.txt",
+                        "cookiefile": get_setting("VID_DL_COOKIES_FILE") or str(COOKIES_FILE),
                         "extract_flat": True,
                     },
                 ) as ydl:
@@ -1022,7 +1055,7 @@ class MyWindow(QWidget):
             pending.append(obj)
             status_entry["status"] = "Pending SponsorBlock"
 
-    def _filter_audio_playlist_urls(
+    def _filter_audio_playlist_urls(  # noqa: C901
         self,
         urls: list,
         ydl_opts: dict,
@@ -1055,6 +1088,7 @@ class MyWindow(QWidget):
         archive_path = ydl_opts.get("download_archive")
         existing_ids: set[str] = load_downloaded_video_ids(archive_path)
         now_ts = datetime.now(tz=timezone.utc).timestamp()
+        audio_pl_comments = utils.load_playlist_comments_for_source("audio_playlists")
 
         for url in urls:
             try:
@@ -1063,7 +1097,11 @@ class MyWindow(QWidget):
                     messages.append(
                         f"Latest episode for podcast {url} is private - using previous accessible video",
                     )
-                playlist_label = utils.resolve_playlist_label(info, url)
+                pl_id = extract_playlist_id(url)
+                if pl_id and pl_id in audio_pl_comments:
+                    playlist_label = utils.sanitize_for_path(audio_pl_comments[pl_id])
+                else:
+                    playlist_label = utils.resolve_playlist_label(info, url)
                 status_entry = _make_podcast_status_entry(playlist_label, url)
 
                 for entry in entries:
@@ -1559,7 +1597,7 @@ class MyWindow(QWidget):
         ydl_opts: dict,
     ) -> None:
         """Queue podcast downloads grouped by playlist label, one batch per label."""
-        base_dir = str(PODCAST_MISC_OUTPUT_DIR.parent)
+        base_dir = str(Path(get_setting("VID_DL_PODCAST_MISC_OUTPUT_DIR") or str(PODCAST_MISC_OUTPUT_DIR)).parent)
         groups: dict[str, list[str]] = {}
         for obj in to_download:
             try:
@@ -1708,6 +1746,11 @@ class MyWindow(QWidget):
         finally:
             super().closeEvent(event)
 
+    def _on_session_commit(self, manager: QSessionManager) -> None:
+        logger.error(
+            "SHUTDOWN: App closed by OS session event (hibernate/shutdown/logoff)"
+        )
+
     # --- Hourly automated YT Podcasts checks ---
     def _schedule_hourly_podcast_checks(self) -> None:
         """Schedule the initial single-shot to fire at the next :15 past the hour, then start recurring hourly checks."""
@@ -1723,12 +1766,14 @@ class MyWindow(QWidget):
         )
 
     def _start_hourly_podcast_timer(self) -> None:
-        # Run once immediately at the scheduled time, then start recurring hourly timer
+        # Run once immediately at the scheduled time, then start recurring hourly timer.
+        # Guard: _restart_podcast_timer may have already created an active timer via Settings.
         self._hourly_podcast_check()
-        self._podcast_hour_timer = QTimer(self)
-        self._podcast_hour_timer.setInterval(60 * 60 * 1000)  # 1 hour
-        self._podcast_hour_timer.timeout.connect(self._hourly_podcast_check)
-        self._podcast_hour_timer.start()
+        if not hasattr(self, "_podcast_hour_timer") or not self._podcast_hour_timer.isActive():
+            self._podcast_hour_timer = QTimer(self)
+            self._podcast_hour_timer.setInterval(60 * 60 * 1000)  # 1 hour
+            self._podcast_hour_timer.timeout.connect(self._hourly_podcast_check)
+            self._podcast_hour_timer.start()
 
     def _hourly_podcast_check(self) -> None:
         """Perform a scheduled YT Podcasts check. Skips if 'Ignore Archive?' is enabled to avoid prompting."""
@@ -1741,6 +1786,74 @@ class MyWindow(QWidget):
         # Use the same code path as the button, but avoid showing GUI prompts
         self.request_detected([], "audio_playlists")
 
+    def _open_settings(self) -> None:
+        """Open (or raise) the Settings dialog."""
+        if self._settings_dialog is None:
+            self._settings_dialog = SettingsDialog(self)
+            self._settings_dialog.settings_changed.connect(self.reload_settings)
+            self._settings_dialog.finished.connect(
+                lambda: setattr(self, "_settings_dialog", None)
+            )
+        self._settings_dialog.show()
+        self._settings_dialog.raise_()
+        self._settings_dialog.activateWindow()
+
+    def reload_settings(self, changes: dict) -> None:
+        """Apply live setting changes emitted by the Settings dialog."""
+        self._apply_label_changes(changes)
+        self._apply_path_changes(changes)
+        podcast_keys = {"VID_DL_PODCAST_AUTO_CHECK", "VID_DL_PODCAST_CHECK_INTERVAL_MINUTES"}
+        if podcast_keys & changes.keys():
+            self._restart_podcast_timer()
+
+    def _apply_label_changes(self, changes: dict) -> None:
+        """Update widget text from settings changes."""
+        if "VID_DL_LABEL_DROP_1080" in changes:
+            self.label1080.setText(changes["VID_DL_LABEL_DROP_1080"])
+            self.label1080.originalText = changes["VID_DL_LABEL_DROP_1080"]
+        if "VID_DL_LABEL_DROP_720" in changes:
+            self.label720.setText(changes["VID_DL_LABEL_DROP_720"])
+            self.label720.originalText = changes["VID_DL_LABEL_DROP_720"]
+        if "VID_DL_LABEL_DROP_AUDIO" in changes:
+            self.labelAudio.setText(changes["VID_DL_LABEL_DROP_AUDIO"])
+            self.labelAudio.originalText = changes["VID_DL_LABEL_DROP_AUDIO"]
+        if "VID_DL_LABEL_READY_TEXT" in changes:
+            self._ready_text = changes["VID_DL_LABEL_READY_TEXT"]
+            if self.labelOutput.text() != "Checking podcasts for SponsorBlock info...":
+                self.labelOutput.setText(self._ready_text)
+        if "VID_DL_LABEL_BTN_PLAYLISTS" in changes:
+            self.buttonPlaylists.setText(changes["VID_DL_LABEL_BTN_PLAYLISTS"])
+        if "VID_DL_LABEL_BTN_720" in changes:
+            self.button720Playlists.setText(changes["VID_DL_LABEL_BTN_720"])
+        if "VID_DL_LABEL_BTN_PODCASTS" in changes:
+            self.buttonAudioPlaylists.setText(changes["VID_DL_LABEL_BTN_PODCASTS"])
+
+    def _apply_path_changes(self, changes: dict) -> None:
+        """Update playlist paths from settings changes."""
+        if "VID_DL_PLAYLISTS_FILE" in changes:
+            self.buttonPlaylists.playlist_path = Path(changes["VID_DL_PLAYLISTS_FILE"])
+        if "VID_DL_PLAYLISTS_720_FILE" in changes:
+            self.button720Playlists.playlist_path = Path(changes["VID_DL_PLAYLISTS_720_FILE"])
+        if "VID_DL_PLAYLISTS_AUDIO_FILE" in changes:
+            self.buttonAudioPlaylists.playlist_path = Path(changes["VID_DL_PLAYLISTS_AUDIO_FILE"])
+
+    def _restart_podcast_timer(self) -> None:
+        """Stop the existing hourly podcast timer and restart it if auto-check is enabled."""
+        if hasattr(self, "_podcast_hour_timer"):
+            self._podcast_hour_timer.stop()
+        auto = get_setting("VID_DL_PODCAST_AUTO_CHECK")
+        if auto:
+            interval_min = int(get_setting("VID_DL_PODCAST_CHECK_INTERVAL_MINUTES") or 60)
+            self._podcast_hour_timer = QTimer(self)
+            self._podcast_hour_timer.setInterval(interval_min * 60 * 1000)
+            self._podcast_hour_timer.timeout.connect(self._hourly_podcast_check)
+            self._podcast_hour_timer.start()
+            self.logEdit.appendPlainText(
+                f"Podcast auto-check restarted: every {interval_min} min."
+            )
+        else:
+            self.logEdit.appendPlainText("Podcast auto-check disabled.")
+
     def _start_app_update_check(self) -> None:
         """Start a background check for a newer app version (triggered by Ctrl+U)."""
         self._app_update_worker = self._AppUpdateWorker()
@@ -1751,7 +1864,9 @@ class MyWindow(QWidget):
         self._app_update_worker.finished.connect(self._app_update_thread.quit)
         self._app_update_thread.start()
 
-    def _on_app_update_result(self, update_available: bool, latest_tag: str, download_url: str) -> None:
+    def _on_app_update_result(
+        self, update_available: bool, latest_tag: str, download_url: str
+    ) -> None:
         """Handle the result of the background app update check."""
         if not update_available:
             return
@@ -1815,6 +1930,7 @@ if __name__ == "__main__":
     app.setQuitOnLastWindowClosed(True)
 
     window = MyWindow()
+    app.commitDataRequest.connect(window._on_session_commit)
     window.show()
 
     if needs_first_run():
@@ -1841,13 +1957,8 @@ if __name__ == "__main__":
 
     app.exec()
 
-# TODO: look into Android Faithful showing up in the basic misc folder
 # TODO: size control for error logs (low priority)
-# TODO: settings for making things more general, especially folder locations. Also, make sure no paths are hardcoded that should be config
 # TODO: make sure tfarchive.txt is checked first, always, for efficiency
 # TODO: look into the 5 Skipped every time audio_playlists is run
-# TODO: rename??? MeadowLark?
-# TODO: make it possible to update .env settings via the app
-# TODO: add auto-check for updates?
-# TODO: figure out playlists for fresh users
 # TODO: resizing makes Audio big (low priority)
+# TODO: add error logging for QYTQueue.run()

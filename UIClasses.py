@@ -109,6 +109,7 @@ class DropLabel(QLabel):
         text: str,
         color: str,
         connection: Any,  # noqa: ANN401
+        source_key: str | None = None,
     ) -> None:
         """
         Initialize the label with custom text, background color, and a connection for the URLs dropped signal.
@@ -117,6 +118,7 @@ class DropLabel(QLabel):
             text (str): The label text.
             color (str): The background color.
             connection (callable): Slot to connect to the urls_dropped signal.
+            source_key (str | None): Stable routing key emitted on drop; defaults to text if not provided.
         """
         super().__init__(text)
         min_width = 150
@@ -124,6 +126,7 @@ class DropLabel(QLabel):
         font_family = "Arial"
         font_size = 32
         self.originalText = text
+        self.source_key = source_key if source_key is not None else text
         self.setStyleSheet(f"background-color:{color}")
         self.setMinimumSize(min_width, min_height)
         self.setAcceptDrops(True)
@@ -131,6 +134,8 @@ class DropLabel(QLabel):
         self.setFont(QFont(font_family, font_size))
         self.urls_dropped.connect(connection)
         self.timer = QTimer()
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self._revert_text)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> bool:  # noqa: N802
         """
@@ -144,6 +149,9 @@ class DropLabel(QLabel):
         else:
             event.ignore()
 
+    def _revert_text(self) -> None:
+        self.setText(self.originalText)
+
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
         """
         Handle the drop event by updating the label text, starting a timer to revert the text, and emitting the dropped URLs via the urls_dropped signal.
@@ -152,11 +160,9 @@ class DropLabel(QLabel):
             event (QDropEvent): The drop event containing the dropped data.
         """
         self.setText(self.ADDED_TEXT)
-        self.timer.setSingleShot(True)
-        self.timer.timeout.connect(lambda: self.setText(self.originalText))
         self.timer.start(2000)
         urls = event.mimeData().urls()
-        self.urls_dropped.emit([url.toString() for url in urls], self.originalText)
+        self.urls_dropped.emit([url.toString() for url in urls], self.source_key)
 
     # def dropEvent(self, event):
     #     def timeout():

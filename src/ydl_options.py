@@ -12,6 +12,7 @@ from .config import (
 )
 from .dict_utils import DEFAULT_POSTPROCESSORS
 from .qt_protocols import YdlLogger, YdlProgressHook
+from .settings_dialog import get_setting
 
 # JavaScript runtimes configuration
 JS_RUNTIMES_CONFIG = {
@@ -40,7 +41,7 @@ def build_base_ydl_opts(logger: YdlLogger, qhook: YdlProgressHook) -> dict[str, 
         "max_fragment_retries": MAX_FRAGMENT_RETRIES,
         "mtime": True,
         # Custom match_filter will be set per-source by callers
-        "cookiefile": str(COOKIES_FILE),
+        "cookiefile": get_setting("VID_DL_COOKIES_FILE") or str(COOKIES_FILE),
         "postprocessors": list(DEFAULT_POSTPROCESSORS),
         "js_runtimes": JS_RUNTIMES_CONFIG,
         "remote_components": ["ejs:github"],
