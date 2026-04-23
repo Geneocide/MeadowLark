@@ -97,7 +97,7 @@ HELP_TEXT: dict[str, str] = {
     ),
     "VID_DL_PODCAST_CHECK_INTERVAL_MINUTES": (
         "How often (in minutes) the app automatically checks podcast playlists.\n"
-        "Range: 5–1440 minutes (5 min to 24 hours)."
+        "Range: 5-1440 minutes (5 min to 24 hours)."
     ),
 }
 
@@ -139,12 +139,12 @@ def _init_runtime_settings() -> None:
     )
 
 
-def get_setting(key: str) -> Any:
+def get_setting(key: str) -> object:
     """Return the current runtime value for *key*, or None if not registered."""
     return _runtime.get(key)
 
 
-def _persist_setting(key: str, value: Any) -> None:
+def _persist_setting(key: str, value: object) -> None:
     """Write *key=value* to the AppData .env and update the in-memory store."""
     _APPDATA_DIR.mkdir(parents=True, exist_ok=True)
 

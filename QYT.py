@@ -392,11 +392,15 @@ class QYTQueue(QThread):
             while True:
                 item = self.downloadQueue.get()
                 self.message_changed.emit(f"------  Downloading  ------\n{item[0]}")
-                # Perform the download task
-                self.download(item[0], item[1])
-                self.message_changed.emit(
-                    f"------  Finished downloading  ------\n{item[0]}",
-                )
+                try:
+                    self.download(item[0], item[1])
+                except Exception as exc:
+                    utils.log_exception(exc, f"QYTQueue.run: unhandled error for {item[0]}")
+                    self.message_changed.emit(f"------  Download error  ------\n{item[0]}")
+                else:
+                    self.message_changed.emit(
+                        f"------  Finished downloading  ------\n{item[0]}",
+                    )
                 if self.downloadQueue.empty():
                     self.queue_empty.emit()
 
@@ -467,6 +471,9 @@ class QYTQueue(QThread):
                 # Extract title for logging
                 title = self.executor._extract_title(urls)
                 HistoryLogger.log(site, dtype, title, success=False)
+        except Exception as exc:
+            utils.log_exception(exc, f"QYTQueue.download: unexpected error for {urls}")
+            raise
         finally:
             for hook in options.get("progress_hooks", []):
                 if hasattr(hook, "infoChanged"):

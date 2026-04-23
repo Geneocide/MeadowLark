@@ -94,7 +94,8 @@ def format_timestamp_readable(ts: float | None) -> str:
     try:
         dt = datetime.fromtimestamp(ts, tz=timezone.utc)
         return dt.strftime("%Y-%m-%d")
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        utils.log_exception(exc, f"format_timestamp_readable: invalid timestamp {ts}")
         return "(unknown)"
 
 

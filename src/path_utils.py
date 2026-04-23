@@ -90,7 +90,8 @@ def resolve_playlist_label(info: dict, url: str) -> str:
             try:
                 segs = [s for s in (urlparse(url).path or "").split("/") if s]
                 label = segs[-1] if segs else url
-            except (ValueError, AttributeError, TypeError):
+            except (ValueError, AttributeError, TypeError) as exc:
+                log_exception(exc, f"resolve_playlist_label: failed to parse URL {url}")
                 label = url
     return sanitize_for_path(label)
 
