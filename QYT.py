@@ -394,9 +394,13 @@ class QYTQueue(QThread):
                 self.message_changed.emit(f"------  Downloading  ------\n{item[0]}")
                 try:
                     self.download(item[0], item[1])
-                except Exception as exc:
-                    utils.log_exception(exc, f"QYTQueue.run: unhandled error for {item[0]}")
-                    self.message_changed.emit(f"------  Download error  ------\n{item[0]}")
+                except (OSError, ValueError, ConnectionError, RuntimeError) as exc:
+                    utils.log_exception(
+                        exc, f"QYTQueue.run: unhandled error for {item[0]}"
+                    )
+                    self.message_changed.emit(
+                        f"------  Download error  ------\n{item[0]}"
+                    )
                 else:
                     self.message_changed.emit(
                         f"------  Finished downloading  ------\n{item[0]}",
