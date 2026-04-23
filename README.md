@@ -15,6 +15,7 @@ git clone <repo-url>
 cd "vid downloader"
 uv sync
 cp .env.example .env
+git config core.hooksPath .githooks
 ```
 
 Then open `.env` and fill in the three required paths:

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -e
+echo "Running ruff check before push..."
+uv run ruff check
