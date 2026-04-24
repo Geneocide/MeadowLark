@@ -128,6 +128,8 @@ def load_playlist_comments_for_source(source: str) -> dict[str, str]:
                 else:
                     if last_comment:
                         pl_id = extract_playlist_id(line)
+                        if not pl_id and not line.startswith("http"):
+                            pl_id = line  # bare playlist ID (e.g. PLRWvNQVqAeWIafhw3XHnmz_EHOp32qoZW)
                         if pl_id:
                             comments[pl_id] = last_comment
                     last_comment = None

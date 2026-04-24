@@ -374,6 +374,17 @@ def test_load_playlist_comments_blank_line_is_skipped(tmp_path: Path) -> None:
     assert result == {"PLabc123": "My Comment"}
 
 
+def test_load_playlist_comments_bare_playlist_id(tmp_path: Path) -> None:
+    playlist_file = tmp_path / "playlists.txt"
+    playlist_file.write_text("#Taskmaster S21\nPLRWvNQVqAeWIafhw3XHnmz_EHOp32qoZW\n")
+    with patch(
+        "src.playlist_utils.get_playlist_file_for_source",
+        return_value=str(playlist_file),
+    ):
+        result = load_playlist_comments_for_source("1080playlists")
+    assert result == {"PLRWvNQVqAeWIafhw3XHnmz_EHOp32qoZW": "Taskmaster S21"}
+
+
 def test_request_detected_skips_file_load_when_urls_provided(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
