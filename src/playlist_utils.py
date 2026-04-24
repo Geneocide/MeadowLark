@@ -73,6 +73,27 @@ def get_playlist_file_for_source(source: str) -> str | None:
     return mapping.get(source)
 
 
+_PLAYLIST_TEMPLATE = """\
+# MeadowLark Playlist File
+# Add one playlist per line. To give a playlist a name, put a #Name line directly above it.
+#
+# You can paste a full YouTube playlist URL:
+#   #My Favorite Series
+#   https://www.youtube.com/watch?v=xxxxxxxxxxx&list=PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+#
+# Or just the playlist ID (the part after "list=" in a YouTube URL):
+#   #Another Series
+#   PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+#
+# Lines that start with # are ignored by the app — remove the leading # to activate an entry.
+"""
+
+
+def _write_template_playlist_file(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_PLAYLIST_TEMPLATE, encoding="utf-8")
+
+
 def load_playlist_urls(path: Path) -> list[str]:
     """
     Return all non-blank, non-comment lines from a playlist file as raw URL strings.
@@ -80,6 +101,7 @@ def load_playlist_urls(path: Path) -> list[str]:
     Returns an empty list if the file does not exist or cannot be read.
     """
     if not path.exists():
+        _write_template_playlist_file(path)
         return []
     try:
         with path.open("r", encoding="utf-8") as f:
