@@ -40,9 +40,10 @@ def test_skip_downloading_appends_new_ids(tmp_path) -> None:
     archive_path = tmp_path / "tfarchive.txt"
     archive_path.write_text("youtube abc123\n")
 
-    with patch("src.download_service.ARCHIVE_PATH", archive_path), patch(
-        "src.download_service.yt_dlp.YoutubeDL"
-    ) as mock_ydl_class:
+    with (
+        patch("src.download_service.ARCHIVE_PATH", archive_path),
+        patch("src.download_service.yt_dlp.YoutubeDL") as mock_ydl_class,
+    ):
         mock_ydl_instance = MagicMock()
         mock_ydl_instance.extract_info.return_value = {
             "entries": [
@@ -69,9 +70,10 @@ def test_skip_downloading_creates_archive_if_missing(tmp_path) -> None:
 
     archive_path = tmp_path / "tfarchive.txt"
 
-    with patch("src.download_service.ARCHIVE_PATH", archive_path), patch(
-        "src.download_service.yt_dlp.YoutubeDL"
-    ) as mock_ydl_class:
+    with (
+        patch("src.download_service.ARCHIVE_PATH", archive_path),
+        patch("src.download_service.yt_dlp.YoutubeDL") as mock_ydl_class,
+    ):
         mock_ydl_instance = MagicMock()
         mock_ydl_instance.extract_info.return_value = {
             "entries": [{"id": "newid"}],

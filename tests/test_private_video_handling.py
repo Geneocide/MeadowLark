@@ -230,7 +230,7 @@ def test_filter_audio_playlist_urls_with_private(monkeypatch):
         def _check_sponsorblock_for_video_id(self, vid):
             return False
 
-        def _cache_put(self, url, latest_url, ts):
+        def _cache_put(self, url, latest_url, ts, *, video_id=None):
             pass
 
         _episode_already_archived = vd.MyWindow._episode_already_archived
@@ -317,7 +317,7 @@ def test_filter_audio_playlist_urls_skips_update(monkeypatch, tmp_path):
         def _check_sponsorblock_for_video_id(self, vid):
             return False
 
-        def _cache_put(self, url, latest_url, ts):
+        def _cache_put(self, url, latest_url, ts, *, video_id=None):
             pass
 
         _episode_already_archived = vd.MyWindow._episode_already_archived

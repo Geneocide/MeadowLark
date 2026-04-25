@@ -95,8 +95,8 @@ from src.config import (
     LABEL_BTN_720,
     LABEL_BTN_PLAYLISTS,
     LABEL_BTN_PODCASTS,
-    LABEL_DROP_1080,
     LABEL_DROP_720,
+    LABEL_DROP_1080,
     LABEL_DROP_AUDIO,
     LABEL_OUTPUT_FONT_NAME,
     LABEL_OUTPUT_FONT_SIZE,
@@ -113,7 +113,6 @@ from src.config import (
     YDL_COMMON_ERRORS,
     YDL_EXTRACTION_ERRORS,
 )
-from src.settings_dialog import SettingsDialog, _init_runtime_settings, get_setting
 from src.first_run_wizard import FirstRunWizard, needs_first_run
 from src.history_dialog import HistoryDialog
 from src.match_filter import build_match_filter
@@ -127,6 +126,7 @@ from src.podcast_filtering import (
     parse_video_timestamp,
 )
 from src.podcast_helpers import fetch_latest_accessible_entry
+from src.settings_dialog import SettingsDialog, _init_runtime_settings, get_setting
 from src.url_utils import extract_playlist_id
 from UIClasses import DropLabel, PlaylistButton, PlaylistDialog
 
@@ -454,8 +454,13 @@ class MyWindow(QWidget):
 
     def _get_source_options(self, source: str) -> dict:
         """Get the yt-dlp options dict for the given source type."""
-        podcast_dir = Path(get_setting("VID_DL_PODCAST_MISC_OUTPUT_DIR") or str(PODCAST_MISC_OUTPUT_DIR))
-        video_dir = Path(get_setting("VID_DL_VIDEO_STORAGE_DIR") or str(VIDEO_STORAGE_DIR))
+        podcast_dir = Path(
+            get_setting("VID_DL_PODCAST_MISC_OUTPUT_DIR")
+            or str(PODCAST_MISC_OUTPUT_DIR)
+        )
+        video_dir = Path(
+            get_setting("VID_DL_VIDEO_STORAGE_DIR") or str(VIDEO_STORAGE_DIR)
+        )
         source_options = {
             "audio": {
                 "format": "m4a/bestaudio/best",
@@ -904,7 +909,8 @@ class MyWindow(QWidget):
                     {
                         "quiet": True,
                         "skip_download": True,
-                        "cookiefile": get_setting("VID_DL_COOKIES_FILE") or str(COOKIES_FILE),
+                        "cookiefile": get_setting("VID_DL_COOKIES_FILE")
+                        or str(COOKIES_FILE),
                         "extract_flat": True,
                     },
                 ) as ydl:
@@ -1055,7 +1061,7 @@ class MyWindow(QWidget):
             pending.append(obj)
             status_entry["status"] = "Pending SponsorBlock"
 
-    def _filter_audio_playlist_urls(  # noqa: C901
+    def _filter_audio_playlist_urls(  # noqa: C901, PLR0912, PLR0915
         self,
         urls: list,
         ydl_opts: dict,
@@ -1092,6 +1098,28 @@ class MyWindow(QWidget):
 
         for url in urls:
             try:
+                if archive_path and existing_ids:
+                    cached = self._cache_get_fresh_entry(url)
+                    if cached is not None:
+                        cached_vid = cached.get("video_id")
+                        if cached_vid and cached_vid in existing_ids:
+                            pl_id = extract_playlist_id(url)
+                            if pl_id and pl_id in audio_pl_comments:
+                                playlist_label = utils.sanitize_for_path(
+                                    audio_pl_comments[pl_id]
+                                )
+                            else:
+                                playlist_label = url
+                            status_entry = _make_podcast_status_entry(
+                                playlist_label,
+                                url,
+                                status="Downloaded",
+                                latest_url=cached.get("latest_url"),
+                                latest_ts=cached.get("latest_ts"),
+                            )
+                            statuses.append(status_entry)
+                            continue
+
                 entries, skipped, info = fetch_latest_accessible_entry(url)
                 if skipped:
                     messages.append(
@@ -1104,6 +1132,7 @@ class MyWindow(QWidget):
                     playlist_label = utils.resolve_playlist_label(info, url)
                 status_entry = _make_podcast_status_entry(playlist_label, url)
 
+                vid: str | None = None
                 for entry in entries:
                     vid = entry.get("id") or entry.get("url")
                     webpage = entry.get("webpage_url") or entry.get("url")
@@ -1153,6 +1182,7 @@ class MyWindow(QWidget):
                     url,
                     status_entry.get("latest_url"),
                     status_entry.get("latest_ts"),
+                    video_id=vid,
                 )
                 statuses.append(status_entry)
             except YDL_EXTRACTION_ERRORS as e:
@@ -1301,6 +1331,8 @@ class MyWindow(QWidget):
         playlist_url: str,
         latest_url: str | None,
         latest_ts: int | None,
+        *,
+        video_id: str | None = None,
     ) -> None:
         """Store or update a cache entry for a podcast's latest URL."""
         if not playlist_url or not latest_url:
@@ -1309,6 +1341,7 @@ class MyWindow(QWidget):
             "latest_url": latest_url,
             "latest_ts": latest_ts,
             "fetched_at": time.time(),
+            "video_id": video_id,
         }
 
     def _cache_get_fresh(self, playlist_url: str) -> str | None:
@@ -1320,6 +1353,15 @@ class MyWindow(QWidget):
         if (time.time() - entry.get("fetched_at", 0)) > self.CACHE_TTL_SECONDS:
             return None
         return entry.get("latest_url")
+
+    def _cache_get_fresh_entry(self, playlist_url: str) -> dict | None:
+        """Return the raw cache dict for playlist_url if present and within TTL."""
+        entry = self._podcast_latest_url_cache.get(playlist_url)
+        if not entry:
+            return None
+        if (time.time() - entry.get("fetched_at", 0)) > self.CACHE_TTL_SECONDS:
+            return None
+        return entry
 
     def _on_podcast_status_context_menu(self, pos: QPoint) -> None:
         """Handle right-click context menu on Podcast Status table."""
@@ -1597,7 +1639,12 @@ class MyWindow(QWidget):
         ydl_opts: dict,
     ) -> None:
         """Queue podcast downloads grouped by playlist label, one batch per label."""
-        base_dir = str(Path(get_setting("VID_DL_PODCAST_MISC_OUTPUT_DIR") or str(PODCAST_MISC_OUTPUT_DIR)).parent)
+        base_dir = str(
+            Path(
+                get_setting("VID_DL_PODCAST_MISC_OUTPUT_DIR")
+                or str(PODCAST_MISC_OUTPUT_DIR)
+            ).parent
+        )
         groups: dict[str, list[str]] = {}
         for obj in to_download:
             try:
@@ -1769,7 +1816,10 @@ class MyWindow(QWidget):
         # Run once immediately at the scheduled time, then start recurring hourly timer.
         # Guard: _restart_podcast_timer may have already created an active timer via Settings.
         self._hourly_podcast_check()
-        if not hasattr(self, "_podcast_hour_timer") or not self._podcast_hour_timer.isActive():
+        if (
+            not hasattr(self, "_podcast_hour_timer")
+            or not self._podcast_hour_timer.isActive()
+        ):
             self._podcast_hour_timer = QTimer(self)
             self._podcast_hour_timer.setInterval(60 * 60 * 1000)  # 1 hour
             self._podcast_hour_timer.timeout.connect(self._hourly_podcast_check)
@@ -1802,7 +1852,10 @@ class MyWindow(QWidget):
         """Apply live setting changes emitted by the Settings dialog."""
         self._apply_label_changes(changes)
         self._apply_path_changes(changes)
-        podcast_keys = {"VID_DL_PODCAST_AUTO_CHECK", "VID_DL_PODCAST_CHECK_INTERVAL_MINUTES"}
+        podcast_keys = {
+            "VID_DL_PODCAST_AUTO_CHECK",
+            "VID_DL_PODCAST_CHECK_INTERVAL_MINUTES",
+        }
         if podcast_keys & changes.keys():
             self._restart_podcast_timer()
 
@@ -1833,9 +1886,13 @@ class MyWindow(QWidget):
         if "VID_DL_PLAYLISTS_FILE" in changes:
             self.buttonPlaylists.playlist_path = Path(changes["VID_DL_PLAYLISTS_FILE"])
         if "VID_DL_PLAYLISTS_720_FILE" in changes:
-            self.button720Playlists.playlist_path = Path(changes["VID_DL_PLAYLISTS_720_FILE"])
+            self.button720Playlists.playlist_path = Path(
+                changes["VID_DL_PLAYLISTS_720_FILE"]
+            )
         if "VID_DL_PLAYLISTS_AUDIO_FILE" in changes:
-            self.buttonAudioPlaylists.playlist_path = Path(changes["VID_DL_PLAYLISTS_AUDIO_FILE"])
+            self.buttonAudioPlaylists.playlist_path = Path(
+                changes["VID_DL_PLAYLISTS_AUDIO_FILE"]
+            )
 
     def _restart_podcast_timer(self) -> None:
         """Stop the existing hourly podcast timer and restart it if auto-check is enabled."""
@@ -1843,7 +1900,9 @@ class MyWindow(QWidget):
             self._podcast_hour_timer.stop()
         auto = get_setting("VID_DL_PODCAST_AUTO_CHECK")
         if auto:
-            interval_min = int(get_setting("VID_DL_PODCAST_CHECK_INTERVAL_MINUTES") or 60)
+            interval_min = int(
+                get_setting("VID_DL_PODCAST_CHECK_INTERVAL_MINUTES") or 60
+            )
             self._podcast_hour_timer = QTimer(self)
             self._podcast_hour_timer.setInterval(interval_min * 60 * 1000)
             self._podcast_hour_timer.timeout.connect(self._hourly_podcast_check)
@@ -1958,7 +2017,6 @@ if __name__ == "__main__":
     app.exec()
 
 # TODO: size control for error logs (low priority)
-# TODO: make sure tfarchive.txt is checked first, always, for efficiency
 # TODO: look into the 5 Skipped every time audio_playlists is run
 # TODO: resizing makes Audio big (low priority)
-# TODO: add error logging for QYTQueue.run()
+# TODO: make a basic interface for the archive file

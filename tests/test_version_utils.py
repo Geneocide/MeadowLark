@@ -114,6 +114,7 @@ def test_is_yt_dlp_update_available_returns_false_when_up_to_date() -> None:
 
 # --- get_latest_app_release ---
 
+
 def test_get_latest_app_release_returns_first_release() -> None:
     releases = [{"tag_name": "v0.2.0"}, {"tag_name": "v0.1.0"}]
     response = Mock()
@@ -149,12 +150,16 @@ def test_get_latest_app_release_returns_none_on_network_error() -> None:
 
 # --- is_app_update_available ---
 
+
 def test_is_app_update_available_detects_newer_version() -> None:
     release = {
         "tag_name": "v99.9.9",
         "html_url": "https://github.com/Geneocide/MeadowLark/releases/tag/v99.9.9",
         "assets": [
-            {"name": "MeadowLark-Setup-99.9.9.exe", "browser_download_url": "https://example.com/setup.exe"},
+            {
+                "name": "MeadowLark-Setup-99.9.9.exe",
+                "browser_download_url": "https://example.com/setup.exe",
+            },
         ],
     }
     with patch("src.version_utils.get_latest_app_release", return_value=release):

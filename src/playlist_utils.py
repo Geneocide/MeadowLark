@@ -67,8 +67,10 @@ def get_playlist_file_for_source(source: str) -> str | None:
     """
     mapping = {
         "1080playlists": get_setting("VID_DL_PLAYLISTS_FILE") or str(PLAYLISTS_FILE),
-        "720playlists": get_setting("VID_DL_PLAYLISTS_720_FILE") or str(PLAYLISTS_720_FILE),
-        "audio_playlists": get_setting("VID_DL_PLAYLISTS_AUDIO_FILE") or str(PLAYLISTS_AUDIO_FILE),
+        "720playlists": get_setting("VID_DL_PLAYLISTS_720_FILE")
+        or str(PLAYLISTS_720_FILE),
+        "audio_playlists": get_setting("VID_DL_PLAYLISTS_AUDIO_FILE")
+        or str(PLAYLISTS_AUDIO_FILE),
     }
     return mapping.get(source)
 
