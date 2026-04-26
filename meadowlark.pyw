@@ -302,6 +302,7 @@ class MyWindow(QWidget):
         self.downloader = QYT.QYTQueue(self.downloadQueue)
         self.downloader.message_changed.connect(self.handle_log_entry)
         self.downloader.queue_empty.connect(self.handle_queue_empty)
+        self.downloader.history_entry_added.connect(self._on_history_entry_added)
         self.downloader.start()
 
     def _setup_timers(self) -> None:
@@ -986,7 +987,7 @@ class MyWindow(QWidget):
             messages,
         )
         status_entry["status"] = "Skipped (Update)"
-        QYT.HistoryLogger.log_skip(
+        QYT.HistoryLogger().log_skip(
             site=utils.detect_site_from_urls([webpage]),
             dtype="audio_playlists",
             title=title,
@@ -1017,7 +1018,7 @@ class MyWindow(QWidget):
             reason="Short duration (<3 min)",
         )
         status_entry["status"] = "Skipped Short"
-        QYT.HistoryLogger.log_skip(
+        QYT.HistoryLogger().log_skip(
             site=utils.detect_site_from_urls([webpage]),
             dtype="audio_playlists",
             title=title,
@@ -1322,6 +1323,11 @@ class MyWindow(QWidget):
 
     def _on_history_dialog_destroyed(self) -> None:
         self._history_dialog = None
+
+    def _on_history_entry_added(self, record: dict) -> None:
+        dialog = getattr(self, "_history_dialog", None)
+        if dialog and dialog.isVisible():
+            dialog.prepend_row(record)
 
     # Cache TTL: 6 hours
     CACHE_TTL_SECONDS = 6 * 60 * 60
@@ -2019,4 +2025,5 @@ if __name__ == "__main__":
 # TODO: size control for error logs (low priority)
 # TODO: look into the 5 Skipped every time audio_playlists is run
 # TODO: resizing makes Audio big (low priority)
-# TODO: make a basic interface for the archive file
+# TODO: make a basic interface for the archive file. Maybe a good idea merging w/ the History window, add an option to allow users to remove individual videos from the archive.
+# TODO: add a feature to allow changes to the output format.

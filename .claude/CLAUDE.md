@@ -14,3 +14,8 @@
 - Modularize files exceeding 1000 lines.
 - Zero code duplication; use functions with variables for variations.
 - Feature implementation: Suggest directory structure (`src/`, `tests/`).
+
+# Workflow
+- After completing any code changes, YOU MUST delegate verification to the specialized QA agent.
+- Instruction: "Use the @qa-boundary-tester to review these changes for edge cases, write new tests when appropriate, and run pytest and Ruff compliance checks before asking me to commit."
+- Also run a ruff check after code changes

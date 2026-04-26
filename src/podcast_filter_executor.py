@@ -153,7 +153,7 @@ class PodcastFilterExecutor:
             self.messages,
         )
         site = utils.detect_site_from_urls([webpage])
-        QYT.HistoryLogger.log_skip(
+        QYT.HistoryLogger().log_skip(
             site=site,
             dtype="audio_playlists",
             title=title,
@@ -192,7 +192,7 @@ class PodcastFilterExecutor:
             reason="Short duration (<3 min)",
         )
         site = utils.detect_site_from_urls([webpage])
-        QYT.HistoryLogger.log_skip(
+        QYT.HistoryLogger().log_skip(
             site=site,
             dtype="audio_playlists",
             title=title,

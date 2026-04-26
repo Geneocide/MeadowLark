@@ -165,7 +165,7 @@ class TestHistoryLogger:
         mock_path.open.return_value.__enter__ = MagicMock(return_value=mock_file)
         mock_path.open.return_value.__exit__ = MagicMock(return_value=None)
 
-        HistoryLogger.log("youtube", "1080", "Test Video", success=True)
+        HistoryLogger().log("youtube", "1080", "Test Video", success=True)
 
         mock_file.write.assert_called_once()
         written_content = mock_file.write.call_args[0][0]
@@ -181,7 +181,7 @@ class TestHistoryLogger:
         mock_path.open.return_value.__enter__ = MagicMock(return_value=mock_file)
         mock_path.open.return_value.__exit__ = MagicMock(return_value=None)
 
-        HistoryLogger.log(
+        HistoryLogger().log(
             "youtube",
             "1080",
             "Test Video",
@@ -203,7 +203,7 @@ class TestHistoryLogger:
         mock_path.open.return_value.__enter__ = MagicMock(return_value=mock_file)
         mock_path.open.return_value.__exit__ = MagicMock(return_value=None)
 
-        HistoryLogger.log_skip(
+        HistoryLogger().log_skip(
             "youtube",
             "audio_playlists",
             "Short Episode",

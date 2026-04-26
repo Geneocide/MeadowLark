@@ -2,6 +2,7 @@
 
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
 from queue import Queue
 
@@ -145,6 +146,9 @@ class HistoryLogger:
 
     HISTORY_PATH = HISTORY_LOG_PATH
 
+    def __init__(self, on_log: Callable[[dict], None] | None = None) -> None:
+        self._on_log = on_log
+
     @staticmethod
     def _format_entry(
         dt: str,
@@ -191,8 +195,8 @@ class HistoryLogger:
             # Never allow history logging to crash downloading, but record it
             utils.log_exception(exc, "HistoryLogger failed to write to history_log.txt")
 
-    @staticmethod
     def log(
+        self,
         site: str,
         dtype: str,
         title: str,
@@ -213,9 +217,13 @@ class HistoryLogger:
         dt = get_local_timestamp()
         result = "SUCCESS" if success else "FAIL"
         HistoryLogger._write_history_entry(dt, site, dtype, title, result, url)
+        if self._on_log is not None:
+            try:
+                self._on_log({"dt": dt, "site": site, "dtype": dtype, "title": title, "result": result, "url": url})
+            except (RuntimeError, AttributeError, TypeError, OSError) as exc:
+                utils.log_exception(exc, "HistoryLogger: on_log callback failed")
 
-    @staticmethod
-    def log_skip(site: str, dtype: str, title: str, reason: str) -> None:
+    def log_skip(self, site: str, dtype: str, title: str, reason: str) -> None:
         """
         Log a skip result to history_log.txt with timestamp.
 
@@ -228,6 +236,11 @@ class HistoryLogger:
         dt = get_local_timestamp()
         result = f"SKIPPED ({reason})"
         HistoryLogger._write_history_entry(dt, site, dtype, title, result)
+        if self._on_log is not None:
+            try:
+                self._on_log({"dt": dt, "site": site, "dtype": dtype, "title": title, "result": result, "url": None})
+            except (RuntimeError, AttributeError, TypeError, OSError) as exc:
+                utils.log_exception(exc, "HistoryLogger: on_log callback failed")
 
 
 _HISTORY_RE = re.compile(
@@ -281,7 +294,7 @@ class HistoryHook:
     first 'finished' event for cases without merging (e.g., audio-only).
     """
 
-    def __init__(self, meta: dict | None) -> None:
+    def __init__(self, meta: dict | None, logger: HistoryLogger | None = None) -> None:
         """
         .
 
@@ -289,9 +302,11 @@ class HistoryHook:
 
         Args:
             meta: Optional metadata dict with 'site' and 'type' keys.
+            logger: Optional HistoryLogger instance; a plain one is created if omitted.
         """
         self.meta = meta or {}
         self._seen_ids: set[str] = set()
+        self._logger = logger or HistoryLogger()
 
     def _infer_site(self, info: dict) -> str:
         site = (self.meta.get("site") or "").strip().lower()
@@ -348,11 +363,11 @@ class HistoryHook:
             if status == "postprocessing":
                 # Prefer logging when a merge or audio-extract postprocessor finishes
                 if "merger" in postproc or "ffmpegextractaudio" in postproc:
-                    HistoryLogger.log(site, dtype, title, success=True, url=url)
+                    self._logger.log(site, dtype, title, success=True, url=url)
                     self._seen_ids.add(vid)
             elif status == "finished":
                 # Fallback for non-merged items (e.g., audio-only) or if no postprocessing runs
-                HistoryLogger.log(site, dtype, title, success=True, url=url)
+                self._logger.log(site, dtype, title, success=True, url=url)
                 self._seen_ids.add(vid)
         except (AttributeError, TypeError, OSError) as exc:
             # Never let history logging break the download, but capture it
@@ -372,6 +387,7 @@ class QYTQueue(QThread):
 
     message_changed = pyqtSignal(str)
     queue_empty = pyqtSignal()
+    history_entry_added = pyqtSignal(dict)
 
     def __init__(self, download_queue: Queue) -> None:
         """
@@ -456,8 +472,9 @@ class QYTQueue(QThread):
         """
         try:
             # Ensure history hook is attached with metadata
+            history_logger = HistoryLogger(on_log=self.history_entry_added.emit)
             progress_hooks = list(options.get("progress_hooks", []))
-            progress_hooks.append(HistoryHook(options.get("qmeta")))
+            progress_hooks.append(HistoryHook(options.get("qmeta"), logger=history_logger))
             options["progress_hooks"] = progress_hooks
 
             # Delegate download to executor
@@ -474,7 +491,7 @@ class QYTQueue(QThread):
                 dtype = meta.get("type", meta.get("source", "unknown"))
                 # Extract title for logging
                 title = self.executor._extract_title(urls)
-                HistoryLogger.log(site, dtype, title, success=False)
+                history_logger.log(site, dtype, title, success=False)
         except Exception as exc:
             utils.log_exception(exc, f"QYTQueue.download: unexpected error for {urls}")
             raise
