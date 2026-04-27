@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 import utils
+from src.settings_dialog import get_setting
 
 
 class PlaylistDialog(QDialog):
@@ -44,7 +45,8 @@ class PlaylistDialog(QDialog):
         super().__init__(parent)
 
         self.setWindowTitle(self.tr("Playlist Dialog"))
-        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        if get_setting("VID_DL_ALWAYS_ON_TOP"):
+            self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
 
         label = QLabel(
             self.tr(

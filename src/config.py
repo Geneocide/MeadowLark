@@ -146,6 +146,9 @@ PODCAST_LOOKAHEAD_MAX_ATTEMPTS: Final[int] = int(
 PODCAST_AUTO_CHECK: Final[bool] = (
     os.getenv("VID_DL_PODCAST_AUTO_CHECK", "true").lower() == "true"
 )
+ALWAYS_ON_TOP: Final[bool] = (
+    os.getenv("VID_DL_ALWAYS_ON_TOP", "true").lower() == "true"
+)
 PODCAST_CHECK_INTERVAL_MINUTES: Final[int] = int(
     os.getenv("VID_DL_PODCAST_CHECK_INTERVAL_MINUTES", "60"),
 )

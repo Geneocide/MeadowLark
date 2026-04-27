@@ -90,6 +90,7 @@ import QYT
 import utils
 from src import live_queue
 from src.config import (
+    ALWAYS_ON_TOP,
     ARCHIVE_PATH,
     COOKIES_FILE,
     LABEL_BTN_720,
@@ -196,7 +197,8 @@ class MyWindow(QWidget):
         """
         super().__init__()
         self.setWindowTitle("MeadowLark")
-        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        if ALWAYS_ON_TOP:
+            self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
 
         _init_runtime_settings()
         self._settings_dialog: SettingsDialog | None = None
@@ -1781,6 +1783,17 @@ class MyWindow(QWidget):
         }
         if podcast_keys & changes.keys():
             self._restart_podcast_timer()
+        if "VID_DL_ALWAYS_ON_TOP" in changes:
+            self._apply_always_on_top(changes["VID_DL_ALWAYS_ON_TOP"])
+
+    def _apply_always_on_top(self, enabled: bool) -> None:
+        flags = self.windowFlags()
+        if enabled:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        else:
+            flags &= ~Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
+        self.show()  # setWindowFlags hides the window; must re-show
 
     def _apply_label_changes(self, changes: dict) -> None:
         """Update widget text from settings changes."""
@@ -1947,5 +1960,3 @@ if __name__ == "__main__":
 # TODO: size control for error logs (low priority)
 # TODO: resizing makes Audio big (low priority)
 # TODO: make sure tests don't leave logs in the real error log
-# TODO: make a setting to allow user to toggle Always on Top
-# TODO: add a message if the user checks for an update and is already up to date

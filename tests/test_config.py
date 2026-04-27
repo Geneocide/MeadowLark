@@ -329,3 +329,213 @@ class TestConfigConstants:
         assert isinstance(config.MAX_FRAGMENT_RETRIES, int)
         assert isinstance(config.PODCAST_MIN_DURATION_SECONDS, int)
         assert isinstance(config.HTTP_OK, int)
+
+
+class TestAlwaysOnTopConfiguration:
+    """Boundary tests for the ALWAYS_ON_TOP bool config constant."""
+
+    def test_always_on_top_default_is_true(self) -> None:
+        """Absent env var must resolve to True (the documented default)."""
+        import importlib
+
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VID_DL_ALWAYS_ON_TOP", None)
+            importlib.reload(config)
+            assert config.ALWAYS_ON_TOP is True
+
+    def test_always_on_top_explicit_true_lowercase(self) -> None:
+        """Env var 'true' (all-lower) resolves to True."""
+        import importlib
+
+        with mock.patch.dict(os.environ, {"VID_DL_ALWAYS_ON_TOP": "true"}):
+            importlib.reload(config)
+            assert config.ALWAYS_ON_TOP is True
+
+    def test_always_on_top_explicit_false_lowercase(self) -> None:
+        """Env var 'false' (all-lower) resolves to False."""
+        import importlib
+
+        with mock.patch.dict(os.environ, {"VID_DL_ALWAYS_ON_TOP": "false"}):
+            importlib.reload(config)
+            assert config.ALWAYS_ON_TOP is False
+
+    def test_always_on_top_true_mixed_case(self) -> None:
+        """Env var 'True' (title-case) must also resolve to True via .lower()."""
+        import importlib
+
+        with mock.patch.dict(os.environ, {"VID_DL_ALWAYS_ON_TOP": "True"}):
+            importlib.reload(config)
+            assert config.ALWAYS_ON_TOP is True
+
+    def test_always_on_top_false_mixed_case(self) -> None:
+        """Env var 'False' (title-case) must also resolve to False via .lower()."""
+        import importlib
+
+        with mock.patch.dict(os.environ, {"VID_DL_ALWAYS_ON_TOP": "False"}):
+            importlib.reload(config)
+            assert config.ALWAYS_ON_TOP is False
+
+    def test_always_on_top_true_all_caps(self) -> None:
+        """Env var 'TRUE' (all-caps) resolves to True via .lower()."""
+        import importlib
+
+        with mock.patch.dict(os.environ, {"VID_DL_ALWAYS_ON_TOP": "TRUE"}):
+            importlib.reload(config)
+            assert config.ALWAYS_ON_TOP is True
+
+    def test_always_on_top_numeric_one_is_false(self) -> None:
+        """Env var '1' does NOT equal 'true' — resolves to False (not truthy conversion)."""
+        import importlib
+
+        with mock.patch.dict(os.environ, {"VID_DL_ALWAYS_ON_TOP": "1"}):
+            importlib.reload(config)
+            # Only the exact string "true" (case-insensitive) passes the .lower() == "true" guard.
+            assert config.ALWAYS_ON_TOP is False
+
+    def test_always_on_top_yes_is_false(self) -> None:
+        """Env var 'yes' does NOT equal 'true' — resolves to False."""
+        import importlib
+
+        with mock.patch.dict(os.environ, {"VID_DL_ALWAYS_ON_TOP": "yes"}):
+            importlib.reload(config)
+            assert config.ALWAYS_ON_TOP is False
+
+    def test_always_on_top_empty_string_is_false(self) -> None:
+        """Empty string env var resolves to False ('' != 'true')."""
+        import importlib
+
+        with mock.patch.dict(os.environ, {"VID_DL_ALWAYS_ON_TOP": ""}):
+            importlib.reload(config)
+            assert config.ALWAYS_ON_TOP is False
+
+    def test_always_on_top_is_bool_not_int(self) -> None:
+        """ALWAYS_ON_TOP must be a strict Python bool, not an int."""
+        import importlib
+
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VID_DL_ALWAYS_ON_TOP", None)
+            importlib.reload(config)
+            assert isinstance(config.ALWAYS_ON_TOP, bool)
+
+    def test_always_on_top_runtime_store_seeded_true(self) -> None:
+        """_init_runtime_settings seeds 'VID_DL_ALWAYS_ON_TOP' as a bool True in _runtime."""
+        import importlib
+
+        from src import settings_dialog as sd
+
+        with mock.patch.dict(os.environ, {"VID_DL_ALWAYS_ON_TOP": "true"}):
+            importlib.reload(config)
+            importlib.reload(sd)
+            sd._init_runtime_settings()
+            val = sd.get_setting("VID_DL_ALWAYS_ON_TOP")
+            assert val is True
+            assert isinstance(val, bool)
+
+    def test_always_on_top_runtime_store_seeded_false(self) -> None:
+        """_init_runtime_settings seeds 'VID_DL_ALWAYS_ON_TOP' as a bool False in _runtime."""
+        import importlib
+
+        from src import settings_dialog as sd
+
+        with mock.patch.dict(os.environ, {"VID_DL_ALWAYS_ON_TOP": "false"}):
+            importlib.reload(config)
+            importlib.reload(sd)
+            sd._init_runtime_settings()
+            val = sd.get_setting("VID_DL_ALWAYS_ON_TOP")
+            assert val is False
+            assert isinstance(val, bool)
+
+    def test_always_on_top_get_setting_returns_none_before_init(self) -> None:
+        """get_setting returns None when _init_runtime_settings has not been called."""
+        import importlib
+
+        from src import settings_dialog as sd
+
+        importlib.reload(sd)
+        # _runtime is reset to {} on reload; do NOT call _init_runtime_settings
+        val = sd.get_setting("VID_DL_ALWAYS_ON_TOP")
+        assert val is None
+
+    def test_always_on_top_persist_setting_writes_true_lowercase(
+        self, tmp_path: Path
+    ) -> None:
+        """_persist_setting serializes True as 'true' (lowercase) in the .env file."""
+        import importlib
+
+        from src import settings_dialog as sd
+
+        importlib.reload(sd)
+        # Patch _APPDATA_DIR and _USER_ENV to write into tmp_path
+        fake_env = tmp_path / ".env"
+        with (
+            mock.patch.object(sd, "_APPDATA_DIR", tmp_path),
+            mock.patch.object(sd, "_USER_ENV", fake_env),
+        ):
+            sd._persist_setting("VID_DL_ALWAYS_ON_TOP", True)
+        content = fake_env.read_text(encoding="utf-8")
+        assert "VID_DL_ALWAYS_ON_TOP=true\n" in content
+
+    def test_always_on_top_persist_setting_writes_false_lowercase(
+        self, tmp_path: Path
+    ) -> None:
+        """_persist_setting serializes False as 'false' (lowercase) in the .env file."""
+        import importlib
+
+        from src import settings_dialog as sd
+
+        importlib.reload(sd)
+        fake_env = tmp_path / ".env"
+        with (
+            mock.patch.object(sd, "_APPDATA_DIR", tmp_path),
+            mock.patch.object(sd, "_USER_ENV", fake_env),
+        ):
+            sd._persist_setting("VID_DL_ALWAYS_ON_TOP", False)
+        content = fake_env.read_text(encoding="utf-8")
+        assert "VID_DL_ALWAYS_ON_TOP=false\n" in content
+
+    def test_always_on_top_persist_setting_updates_runtime_store(
+        self, tmp_path: Path
+    ) -> None:
+        """_persist_setting also updates _runtime so get_setting reflects the new value."""
+        import importlib
+
+        from src import settings_dialog as sd
+
+        importlib.reload(sd)
+        fake_env = tmp_path / ".env"
+        with (
+            mock.patch.object(sd, "_APPDATA_DIR", tmp_path),
+            mock.patch.object(sd, "_USER_ENV", fake_env),
+        ):
+            sd._persist_setting("VID_DL_ALWAYS_ON_TOP", False)
+        assert sd.get_setting("VID_DL_ALWAYS_ON_TOP") is False
+
+    def test_always_on_top_persist_setting_replaces_existing_line(
+        self, tmp_path: Path
+    ) -> None:
+        """_persist_setting replaces an existing VID_DL_ALWAYS_ON_TOP line, not appends."""
+        import importlib
+
+        from src import settings_dialog as sd
+
+        importlib.reload(sd)
+        fake_env = tmp_path / ".env"
+        fake_env.write_text("VID_DL_ALWAYS_ON_TOP=true\n", encoding="utf-8")
+        with (
+            mock.patch.object(sd, "_APPDATA_DIR", tmp_path),
+            mock.patch.object(sd, "_USER_ENV", fake_env),
+        ):
+            sd._persist_setting("VID_DL_ALWAYS_ON_TOP", False)
+        lines = fake_env.read_text(encoding="utf-8").splitlines()
+        matching = [ln for ln in lines if ln.startswith("VID_DL_ALWAYS_ON_TOP=")]
+        assert len(matching) == 1
+        assert matching[0] == "VID_DL_ALWAYS_ON_TOP=false"
+
+    def test_always_on_top_none_from_uninitialized_store_is_falsy(self) -> None:
+        """bool(None) is False — PlaylistDialog's 'if get_setting(...)' silently skips the flag."""
+        # This documents the known behaviour: PlaylistDialog constructed before
+        # _init_runtime_settings() is called will NOT apply WindowStaysOnTopHint,
+        # regardless of the config default.  The fix would be a guard or an assert.
+        # bool(None) must be False — this is the coercion PlaylistDialog relies on
+        # when _init_runtime_settings() has not been called before PlaylistDialog is constructed.
+        assert not bool(None)

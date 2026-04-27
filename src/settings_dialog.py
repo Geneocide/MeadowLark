@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .config import (
+    ALWAYS_ON_TOP,
     COOKIES_FILE,
     DEFAULT_AUDIO_FORMAT,
     DEFAULT_VIDEO_FORMAT,
@@ -120,6 +121,10 @@ HELP_TEXT: dict[str, str] = {
         "Format for downloaded audio and podcast files.\n"
         ".m4a gives the best quality-to-size ratio for most listeners."
     ),
+    "VID_DL_ALWAYS_ON_TOP": (
+        "Keep the app window above all other windows.\n"
+        "Changes take effect immediately."
+    ),
 }
 
 # ============================================================================
@@ -158,6 +163,7 @@ def _init_runtime_settings() -> None:
             "VID_DL_PODCAST_CHECK_INTERVAL_MINUTES": PODCAST_CHECK_INTERVAL_MINUTES,
             "VID_DL_VIDEO_FORMAT": DEFAULT_VIDEO_FORMAT,
             "VID_DL_AUDIO_FORMAT": DEFAULT_AUDIO_FORMAT,
+            "VID_DL_ALWAYS_ON_TOP": ALWAYS_ON_TOP,
         }
     )
 
@@ -426,6 +432,16 @@ class SettingsDialog(QDialog):
             row.addWidget(help_btn)
             self._edits[key] = edit
             form.addRow(QLabel(lbl), _wrap(row))
+
+        aot_check = QCheckBox(self)
+        aot_check.setChecked(bool(get_setting("VID_DL_ALWAYS_ON_TOP")))
+        help_aot = _make_help_button("VID_DL_ALWAYS_ON_TOP", self)
+        aot_row = QHBoxLayout()
+        aot_row.addWidget(aot_check)
+        aot_row.addWidget(help_aot)
+        aot_row.addStretch()
+        self._edits["VID_DL_ALWAYS_ON_TOP"] = aot_check
+        form.addRow(QLabel("Always on top:"), _wrap(aot_row))
 
         tab.setLayout(form)
         return tab
