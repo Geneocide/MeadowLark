@@ -151,7 +151,7 @@ class TestTry720FallbackFormatString:
             assert "ext=m4a" in opts["format"], f"ext=m4a missing for vfmt={vfmt!r}"
 
     def test_format_selector_uses_webm_streams_for_webm_vfmt(self) -> None:
-        """webm target requests VP9/Opus streams to avoid codec mismatch on remux."""
+        """Webm target requests VP9/Opus streams to avoid codec mismatch on remux."""
         opts = _run_fallback_and_capture_options("webm", "m4a", {})
         assert "ext=webm" in opts["format"]
         assert "ext=mp4" not in opts["format"]
@@ -502,7 +502,8 @@ class TestRemuxvideoKeyInFallback:
         assert remuxer["preferedformat"] == "mkv"
 
     def test_remuxer_preferedformat_typo_is_correct_ydl_key(self) -> None:
-        """Guard the intentional 'preferedformat' spelling used by yt-dlp.
+        """
+        Guard the intentional 'preferedformat' spelling used by yt-dlp.
 
         yt-dlp uses 'preferedformat' (one 'r') — not 'preferredformat'.
         If the key is correctly spelled, yt-dlp silently ignores it.

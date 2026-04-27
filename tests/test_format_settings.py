@@ -107,7 +107,7 @@ class TestGetSourceOptionsFormatPropagation:
             assert "ext=m4a" in opts["format"], f"ext=m4a missing for vfmt={vfmt!r}"
 
     def test_720playlists_format_selector_webm_for_webm_vfmt(self) -> None:
-        """webm target uses native VP9/Opus webm streams to avoid codec mismatch."""
+        """Webm target uses native VP9/Opus webm streams to avoid codec mismatch."""
         with _patch_formats("webm", "m4a"):
             opts = get_source_options("720playlists")
         assert "ext=webm" in opts["format"]
@@ -134,7 +134,7 @@ class TestGetSourceOptionsFormatPropagation:
             assert "ext=m4a" in opts["format"], f"ext=m4a missing for vfmt={vfmt!r}"
 
     def test_1080playlists_format_selector_webm_for_webm_vfmt(self) -> None:
-        """webm target uses native VP9/Opus webm streams to avoid codec mismatch."""
+        """Webm target uses native VP9/Opus webm streams to avoid codec mismatch."""
         with _patch_formats("webm", "m4a"):
             opts = get_source_options("1080playlists")
         assert "ext=webm" in opts["format"]
@@ -166,7 +166,7 @@ class TestGetSourceOptionsFormatPropagation:
             assert "ext=m4a" in opts["format"], f"ext=m4a missing for vfmt={vfmt!r}"
 
     def test_numeric_height_format_selector_webm_for_webm_vfmt(self) -> None:
-        """webm target uses native VP9/Opus webm streams to avoid codec mismatch."""
+        """Webm target uses native VP9/Opus webm streams to avoid codec mismatch."""
         with _patch_formats("webm", "m4a"):
             opts = get_source_options("480")
         assert "ext=webm" in opts["format"]
@@ -673,7 +673,8 @@ class TestRemuxvideoKeyPresence:
 
 
 class TestPreferedformatTypo:
-    """Guard that the intentionally misspelled yt-dlp key 'preferedformat' is used.
+    """
+    Guard that the intentionally misspelled yt-dlp key 'preferedformat' is used.
 
     yt-dlp uses the intentionally misspelled key 'preferedformat' (one 'r').
     If someone "fixes" the typo to 'preferredformat', yt-dlp silently ignores it.
@@ -705,7 +706,8 @@ class TestPreferedformatTypo:
 
 
 class TestPostprocessorOrdering:
-    """Guard postprocessor ordering: SponsorBlock before FFmpegVideoRemuxer.
+    """
+    Guard postprocessor ordering: SponsorBlock before FFmpegVideoRemuxer.
 
     For numeric/unknown sources the postprocessors list is:
         [SponsorBlock, ModifyChapters, FFmpegVideoRemuxer]
@@ -778,7 +780,8 @@ class TestPostprocessorOrdering:
 
 
 class TestNumericHeightBoundaries:
-    """Boundary tests for zero and negative numeric height source strings.
+    """
+    Boundary tests for zero and negative numeric height source strings.
 
     int("0") == 0 → falsy → falls through to generic 'bestvideo*+bestaudio/best'.
     int("-720") == -720 → truthy → embeds 'height=-720' which is invalid for yt-dlp.
