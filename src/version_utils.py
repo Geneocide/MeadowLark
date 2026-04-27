@@ -2,11 +2,44 @@
 
 import http
 import re
+from datetime import datetime
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 
 import requests
 import yt_dlp
 
-APP_VERSION: str = "0.1.4"  # should auto update to the tag via CI
+
+def _resolve_app_version() -> str:
+    try:
+        return _pkg_version("meadowlark")
+    except PackageNotFoundError:
+        return "dev"
+
+
+APP_VERSION: str = _resolve_app_version()
+GITHUB_REPO_URL: str = "https://github.com/Geneocide/MeadowLark"
+
+
+def get_publish_date() -> str | None:
+    """
+    Extract the publish date from the APP_VERSION string.
+
+    Expects version format like "0.1.4_2025-08-27" where the date is appended
+    after an underscore. If no date is found, returns None.
+
+    Returns:
+        Formatted date string (e.g., "August 27, 2025") or None.
+    """
+    if "_" not in APP_VERSION:
+        return None
+    date_part = APP_VERSION.split("_", 1)[-1]
+    try:
+        dt = datetime.strptime(date_part, "%Y-%m-%d").date()  # noqa: DTZ007
+        return dt.strftime("%B %d, %Y")
+    except ValueError:
+        return None
+
 
 _PYPI_API_TIMEOUT: int = 3
 _GITHUB_API_TIMEOUT: int = 5

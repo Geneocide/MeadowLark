@@ -1,9 +1,12 @@
 """Settings dialog for MeadowLark — runtime-mutable configuration backed by AppData .env."""
 
+import platform
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
+import PyQt6.QtCore
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -41,6 +44,13 @@ from .config import (
     PODCAST_CHECK_INTERVAL_MINUTES,
     PODCAST_MISC_OUTPUT_DIR,
     VIDEO_STORAGE_DIR,
+)
+from .version_utils import (
+    APP_VERSION,
+    GITHUB_REPO_URL,
+    get_current_yt_dlp_version,
+    get_publish_date,
+    is_app_update_available,
 )
 
 # ============================================================================
@@ -287,6 +297,12 @@ def _make_combo_row(
     return row, combo
 
 
+def _get_windows_release() -> str:
+    if platform.system() == "Windows" and sys.getwindowsversion().build >= 22000:
+        return "11"
+    return platform.release()
+
+
 # ============================================================================
 # Dialog
 # ============================================================================
@@ -309,6 +325,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._build_playlists_tab(), "Playlists")
         tabs.addTab(self._build_interface_tab(), "Interface")
         tabs.addTab(self._build_automation_tab(), "Automation")
+        tabs.addTab(self._build_about_tab(), "About")
 
         buttons = QDialogButtonBox(self)
         apply_btn = buttons.addButton("Apply", QDialogButtonBox.ButtonRole.ApplyRole)
@@ -446,6 +463,76 @@ class SettingsDialog(QDialog):
 
         tab.setLayout(form)
         return tab
+
+    def _build_about_tab(self) -> QWidget:
+        tab = QWidget()
+        form = QFormLayout(tab)
+
+        # Version info
+        version_value = QLabel(APP_VERSION)
+        version_value.setStyleSheet("font-weight: bold;")
+        form.addRow(QLabel("Version:"), version_value)
+
+        # Publish date
+        publish_date = get_publish_date() or "Unknown"
+        date_value = QLabel(publish_date)
+        form.addRow(QLabel("Published:"), date_value)
+
+        # GitHub link
+        link_label = QLabel(f'<a href="{GITHUB_REPO_URL}">{GITHUB_REPO_URL}</a>')
+        link_label.setOpenExternalLinks(True)
+        form.addRow(QLabel("Repository:"), link_label)
+
+        # Separator
+        form.addRow("", QLabel())
+
+        # Python version
+        py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        form.addRow(QLabel("Python:"), QLabel(py_version))
+
+        # yt-dlp version
+        ytdlp_version = get_current_yt_dlp_version() or "Not installed"
+        form.addRow(QLabel("yt-dlp:"), QLabel(ytdlp_version))
+
+        # Qt version
+        qt_version = PyQt6.QtCore.qVersion()
+        form.addRow(QLabel("Qt:"), QLabel(qt_version))
+
+        # Platform
+        platform_info = (
+            f"{platform.system()} {_get_windows_release()} ({platform.machine()})"
+        )
+        form.addRow(QLabel("Platform:"), QLabel(platform_info))
+
+        # Separator
+        form.addRow("", QLabel())
+
+        # License
+        form.addRow(QLabel("License:"), QLabel("MIT License"))
+
+        # Check for updates button
+        update_btn = QPushButton("Check for Updates", self)
+        update_btn.clicked.connect(self._check_for_updates)
+        form.addRow(QLabel("Updates:"), update_btn)
+
+        tab.setLayout(form)
+        return tab
+
+    def _check_for_updates(self) -> None:
+        """Check for app updates and show result to user."""
+        update_available, latest_tag, download_url = is_app_update_available()
+        if update_available:
+            QMessageBox.information(
+                self,
+                "Update Available",
+                f"A new version is available: {latest_tag}\n\nDownload: {download_url}",
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "No Updates",
+                "You are running the latest version.",
+            )
 
     # ------------------------------------------------------------------
     # Apply logic

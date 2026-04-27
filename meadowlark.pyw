@@ -1851,6 +1851,11 @@ class MyWindow(QWidget):
     ) -> None:
         """Handle the result of the background app update check."""
         if not update_available:
+            QMessageBox.information(
+                self,
+                "No Update Available",
+                "You are running the latest version.",
+            )
             return
         answer = QMessageBox.question(
             self,
@@ -1944,4 +1949,3 @@ if __name__ == "__main__":
 # TODO: make sure tests don't leave logs in the real error log
 # TODO: make a setting to allow user to toggle Always on Top
 # TODO: add a message if the user checks for an update and is already up to date
-# TODO: update the .env.example to include new settings

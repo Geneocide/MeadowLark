@@ -1,18 +1,73 @@
 """Unit tests for yt-dlp version and update utilities."""
 
+from importlib.metadata import PackageNotFoundError
 from unittest.mock import MagicMock, Mock, patch
 
 import requests
 
 from src.version_utils import (
     APP_VERSION,
+    _resolve_app_version,
     get_current_yt_dlp_version,
     get_latest_app_release,
     get_latest_yt_dlp_version,
+    get_publish_date,
     is_app_update_available,
     is_yt_dlp_update_available,
     normalize_version,
 )
+
+# --- _resolve_app_version ---
+
+
+def test_resolve_app_version_returns_package_version_when_installed() -> None:
+    with patch("src.version_utils._pkg_version", return_value="1.2.3"):
+        assert _resolve_app_version() == "1.2.3"
+
+
+def test_resolve_app_version_returns_dev_when_package_not_found() -> None:
+    with patch(
+        "src.version_utils._pkg_version",
+        side_effect=PackageNotFoundError("meadowlark"),
+    ):
+        assert _resolve_app_version() == "dev"
+
+
+def test_app_version_is_string() -> None:
+    assert isinstance(APP_VERSION, str)
+    assert len(APP_VERSION) > 0
+
+
+# --- get_publish_date ---
+
+
+def test_get_publish_date_returns_formatted_date_for_valid_version() -> None:
+    with patch("src.version_utils.APP_VERSION", "0.1.4_2025-08-27"):
+        assert get_publish_date() == "August 27, 2025"
+
+
+def test_get_publish_date_returns_none_when_no_underscore() -> None:
+    with patch("src.version_utils.APP_VERSION", "0.1.4"):
+        assert get_publish_date() is None
+
+
+def test_get_publish_date_returns_none_for_dev_version() -> None:
+    with patch("src.version_utils.APP_VERSION", "dev"):
+        assert get_publish_date() is None
+
+
+def test_get_publish_date_returns_none_for_malformed_date_suffix() -> None:
+    with patch("src.version_utils.APP_VERSION", "0.1.4_not-a-date"):
+        assert get_publish_date() is None
+
+
+def test_get_publish_date_returns_none_for_empty_suffix() -> None:
+    # Edge: underscore present but nothing after it
+    with patch("src.version_utils.APP_VERSION", "0.1.4_"):
+        assert get_publish_date() is None
+
+
+# --- normalize_version ---
 
 
 def test_normalize_version_parses_numeric_segments() -> None:
@@ -162,7 +217,10 @@ def test_is_app_update_available_detects_newer_version() -> None:
             },
         ],
     }
-    with patch("src.version_utils.get_latest_app_release", return_value=release):
+    with (
+        patch("src.version_utils.APP_VERSION", "0.1.0"),
+        patch("src.version_utils.get_latest_app_release", return_value=release),
+    ):
         available, tag, url = is_app_update_available()
     assert available is True
     assert tag == "v99.9.9"
@@ -175,7 +233,10 @@ def test_is_app_update_available_falls_back_to_html_url_when_no_exe_asset() -> N
         "html_url": "https://github.com/Geneocide/MeadowLark/releases/tag/v99.9.9",
         "assets": [],
     }
-    with patch("src.version_utils.get_latest_app_release", return_value=release):
+    with (
+        patch("src.version_utils.APP_VERSION", "0.1.0"),
+        patch("src.version_utils.get_latest_app_release", return_value=release),
+    ):
         available, tag, url = is_app_update_available()
     assert available is True
     assert url == "https://github.com/Geneocide/MeadowLark/releases/tag/v99.9.9"
