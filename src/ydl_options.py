@@ -1,5 +1,6 @@
 """Centralized yt-dlp option builders and constants."""
 
+from pathlib import Path
 from typing import Any
 
 from .config import (
@@ -48,6 +49,26 @@ def build_base_ydl_opts(logger: YdlLogger, qhook: YdlProgressHook) -> dict[str, 
     }
 
 
+def _build_video_format_selector(height: int | None, vfmt: str) -> str:
+    h = f"[height={height}]" if height else ""
+    if vfmt == "webm":
+        # Only allow webm-native streams: VP9/VP8 video + Opus/Vorbis audio.
+        # Mixed-codec fallbacks (e.g. VP9+AAC) cannot be stream-copied into webm
+        # and would trigger an ffmpeg postprocessing error.
+        # If the exact height has no VP9 stream, fall back to the best webm at
+        # any height up to the requested height rather than failing entirely.
+        lte = f"[height<={height}]" if height else ""
+        return (
+            f"bestvideo*{h}[ext=webm]+bestaudio[ext=webm]/"
+            f"bestvideo*{lte}[ext=webm]+bestaudio[ext=webm]"
+        )
+    return (
+        f"bestvideo*{h}[ext=mp4]+bestaudio[ext=m4a]/"
+        f"bestvideo*{h}+bestaudio/"
+        f"best{h}/best"
+    )
+
+
 def get_source_options(source: str) -> dict[str, Any]:
     """
     Return yt-dlp properties for a given source type.
@@ -58,45 +79,44 @@ def get_source_options(source: str) -> dict[str, Any]:
     Returns:
         A dictionary of yt-dlp options specific to the source.
     """
+    vfmt = str(get_setting("VID_DL_VIDEO_FORMAT") or "mp4")
+    afmt = str(get_setting("VID_DL_AUDIO_FORMAT") or "m4a")
+    video_dir = Path(get_setting("VID_DL_VIDEO_STORAGE_DIR") or str(VIDEO_STORAGE_DIR))
+    podcast_dir = Path(get_setting("VID_DL_PODCAST_MISC_OUTPUT_DIR") or str(PODCAST_MISC_OUTPUT_DIR))
+
     source_options = {
         "audio": {
-            "format": "m4a/bestaudio/best",
+            "format": f"{afmt}/bestaudio/best",
             "postprocessors": [
-                {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
+                {"key": "FFmpegExtractAudio", "preferredcodec": afmt},
             ],
-            "outtmpl": (PODCAST_MISC_OUTPUT_DIR / "%(title)s.%(ext)s").as_posix(),
+            "outtmpl": (podcast_dir / "%(title)s.%(ext)s").as_posix(),
         },
         "audio_playlists": {
-            "format": "m4a/bestaudio/best",
+            "format": f"{afmt}/bestaudio/best",
             "postprocessors": [
-                {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
+                {"key": "FFmpegExtractAudio", "preferredcodec": afmt},
             ],
-            "outtmpl": (PODCAST_MISC_OUTPUT_DIR / "%(title)s.%(ext)s").as_posix(),
+            "outtmpl": (podcast_dir / "%(title)s.%(ext)s").as_posix(),
             "ignoreerrors": "only_download",
         },
         "720playlists": {
-            "format": (
-                "bestvideo*[height=720][ext=mp4]+bestaudio[ext=m4a]/"
-                "bestvideo*[height=720]+bestaudio/"
-                "best[height=720]/best"
-            ),
-            "merge_output_format": "mp4",
+            "format": _build_video_format_selector(720, vfmt),
+            "merge_output_format": vfmt,
+            "postprocessors": [{"key": "FFmpegVideoRemuxer", "preferedformat": vfmt}],
             "outtmpl": (
-                VIDEO_STORAGE_DIR
+                video_dir
                 / "%(playlist)s"
                 / "%(playlist_index)s - %(title)s.%(ext)s"
             ).as_posix(),
             "ignoreerrors": "only_download",
         },
         "1080playlists": {
-            "format": (
-                "bestvideo*[height=1080][ext=mp4]+bestaudio[ext=m4a]/"
-                "bestvideo*[height=1080]+bestaudio/"
-                "best[height=1080]/best"
-            ),
-            "merge_output_format": "mp4",
+            "format": _build_video_format_selector(1080, vfmt),
+            "merge_output_format": vfmt,
+            "postprocessors": [{"key": "FFmpegVideoRemuxer", "preferedformat": vfmt}],
             "outtmpl": (
-                VIDEO_STORAGE_DIR
+                video_dir
                 / "%(playlist)s"
                 / "%(playlist_index)s - %(title)s.%(ext)s"
             ).as_posix(),
@@ -112,20 +132,19 @@ def get_source_options(source: str) -> dict[str, Any]:
     except ValueError:
         height = None
 
-    if height:
-        format_string = (
-            f"bestvideo*[height={height}][ext=mp4]+bestaudio[ext=m4a]/"
-            f"bestvideo*[height={height}]+bestaudio/"
-            f"best[height={height}]/best"
-        )
+    if height and height > 0:
+        format_string = _build_video_format_selector(height, vfmt)
     else:
         format_string = "bestvideo*+bestaudio/best"
 
     return {
         "format": format_string,
-        "merge_output_format": "mp4",
-        "outtmpl": (VIDEO_STORAGE_DIR / "%(title)s.%(ext)s").as_posix(),
-        "postprocessors": list(DEFAULT_POSTPROCESSORS),
+        "merge_output_format": vfmt,
+        "outtmpl": (video_dir / "%(title)s.%(ext)s").as_posix(),
+        "postprocessors": [
+            *DEFAULT_POSTPROCESSORS,
+            {"key": "FFmpegVideoRemuxer", "preferedformat": vfmt},
+        ],
     }
 
 

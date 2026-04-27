@@ -9,6 +9,8 @@ import utils
 
 from .config import YDL_EXTRACTION_ERRORS
 from .path_utils import rename_playlist_folders_from_comments
+from .settings_dialog import get_setting
+from .ydl_options import _build_video_format_selector
 from .ydl_utils import extract_playlist_info
 
 YoutubeDL = yt_dlp.YoutubeDL
@@ -101,13 +103,14 @@ class DownloadExecutor:
         """Try downloading at 720p if 1080p format unavailable."""
 
         def _modify(opts: dict) -> dict:
+            vfmt = str(get_setting("VID_DL_VIDEO_FORMAT") or "mp4")
             fallback = opts.copy()
-            fallback["format"] = (
-                "bestvideo*[height=720][ext=mp4]+bestaudio[ext=m4a]/"
-                "bestvideo*[height=720]+bestaudio/"
-                "best[height=720]/best"
-            )
-            fallback.setdefault("merge_output_format", "mp4")
+            fallback["format"] = _build_video_format_selector(720, vfmt)
+            fallback.setdefault("merge_output_format", vfmt)
+            pps = list(fallback.get("postprocessors") or [])
+            if not any(pp.get("key") == "FFmpegVideoRemuxer" for pp in pps):
+                pps.append({"key": "FFmpegVideoRemuxer", "preferedformat": vfmt})
+            fallback["postprocessors"] = pps
             fq = dict(fallback.get("qmeta", {}))
             fq["type"] = "720"
             fallback["qmeta"] = fq

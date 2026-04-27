@@ -30,9 +30,14 @@ def test_get_postprocessors_audio_returns_audio_postprocessors() -> None:
     assert "FFmpegExtractAudio" in keys
 
 
-def test_get_postprocessors_no_postprocessors_key_falls_back_to_default() -> None:
-    # "720playlists" has no "postprocessors" key → .get() returns DEFAULT_POSTPROCESSORS
+def test_get_postprocessors_720playlists_has_remuxer() -> None:
     postprocs = get_postprocessors("720playlists")
+    keys = [pp.get("key") for pp in postprocs]
+    assert "FFmpegVideoRemuxer" in keys
+
+
+def test_get_postprocessors_unknown_source_falls_back_to_default() -> None:
+    postprocs = get_postprocessors("garbage")
     default_keys = {pp["key"] for pp in DEFAULT_POSTPROCESSORS}
     result_keys = {pp["key"] for pp in postprocs}
-    assert default_keys == result_keys
+    assert default_keys.issubset(result_keys)

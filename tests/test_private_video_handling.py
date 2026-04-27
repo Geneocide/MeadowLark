@@ -5,6 +5,7 @@ import sys
 # helper function to import the main module even though its filename contains a space
 import types
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -326,13 +327,14 @@ def test_filter_audio_playlist_urls_skips_update(monkeypatch, tmp_path):
         _classify_episode_by_age = vd.MyWindow._classify_episode_by_age
 
     win = DummyWin()
-    to_download, pending, had_error, messages, statuses = (
-        vd.MyWindow._filter_audio_playlist_urls(
-            win,
-            ["http://fake-playlist"],
-            {"download_archive": str(archive_file)},
+    with patch("QYT.HistoryLogger.log_skip"):
+        to_download, pending, had_error, messages, statuses = (
+            vd.MyWindow._filter_audio_playlist_urls(
+                win,
+                ["http://fake-playlist"],
+                {"download_archive": str(archive_file)},
+            )
         )
-    )
     assert had_error is False
     assert to_download == []
     assert pending == []

@@ -7,6 +7,7 @@ from typing import Any
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -24,6 +25,8 @@ from PyQt6.QtWidgets import (
 
 from .config import (
     COOKIES_FILE,
+    DEFAULT_AUDIO_FORMAT,
+    DEFAULT_VIDEO_FORMAT,
     LABEL_BTN_720,
     LABEL_BTN_PLAYLISTS,
     LABEL_BTN_PODCASTS,
@@ -99,6 +102,14 @@ HELP_TEXT: dict[str, str] = {
         "How often (in minutes) the app automatically checks podcast playlists.\n"
         "Range: 5-1440 minutes (5 min to 24 hours)."
     ),
+    "VID_DL_VIDEO_FORMAT": (
+        "Container format for downloaded videos.\n"
+        ".mp4 works on the widest range of devices and players."
+    ),
+    "VID_DL_AUDIO_FORMAT": (
+        "Format for downloaded audio and podcast files.\n"
+        ".m4a gives the best quality-to-size ratio for most listeners."
+    ),
 }
 
 # ============================================================================
@@ -135,6 +146,8 @@ def _init_runtime_settings() -> None:
             "VID_DL_LABEL_BTN_PODCASTS": LABEL_BTN_PODCASTS,
             "VID_DL_PODCAST_AUTO_CHECK": PODCAST_AUTO_CHECK,
             "VID_DL_PODCAST_CHECK_INTERVAL_MINUTES": PODCAST_CHECK_INTERVAL_MINUTES,
+            "VID_DL_VIDEO_FORMAT": DEFAULT_VIDEO_FORMAT,
+            "VID_DL_AUDIO_FORMAT": DEFAULT_AUDIO_FORMAT,
         }
     )
 
@@ -239,6 +252,42 @@ def _make_file_row(
 
 
 # ============================================================================
+# Format options
+# ============================================================================
+
+VIDEO_FORMAT_OPTIONS: list[tuple[str, str]] = [
+    ("mp4", "plays everywhere, best compatibility"),
+    ("mkv", "flexible container, keeps all tracks"),
+    ("webm", "smaller files, optimized for the web"),
+]
+
+AUDIO_FORMAT_OPTIONS: list[tuple[str, str]] = [
+    ("m4a", "great quality, works on Apple devices"),
+    ("mp3", "universal, plays on everything"),
+    ("opus", "best quality at smallest file size"),
+    ("flac", "lossless, perfect quality, large files"),
+    ("wav", "uncompressed, maximum quality, very large"),
+]
+
+
+def _make_combo_row(
+    key: str, options: list[tuple[str, str]], parent: QWidget
+) -> tuple[QHBoxLayout, QComboBox]:
+    combo = QComboBox(parent)
+    current = str(get_setting(key) or "")
+    for value, description in options:
+        combo.addItem(f".{value} — {description}", userData=value)
+    idx = combo.findData(current)
+    if idx >= 0:
+        combo.setCurrentIndex(idx)
+    help_btn = _make_help_button(key, parent)
+    row = QHBoxLayout()
+    row.addWidget(combo)
+    row.addWidget(help_btn)
+    return row, combo
+
+
+# ============================================================================
 # Dialog
 # ============================================================================
 
@@ -289,6 +338,14 @@ class SettingsDialog(QDialog):
         )
         self._edits["VID_DL_PODCAST_MISC_OUTPUT_DIR"] = edit
         form.addRow(QLabel("Audio directory:"), _wrap(row))
+
+        row, combo = _make_combo_row("VID_DL_VIDEO_FORMAT", VIDEO_FORMAT_OPTIONS, self)
+        self._edits["VID_DL_VIDEO_FORMAT"] = combo
+        form.addRow(QLabel("Video format:"), _wrap(row))
+
+        row, combo = _make_combo_row("VID_DL_AUDIO_FORMAT", AUDIO_FORMAT_OPTIONS, self)
+        self._edits["VID_DL_AUDIO_FORMAT"] = combo
+        form.addRow(QLabel("Audio format:"), _wrap(row))
 
         tab.setLayout(form)
         return tab
@@ -401,6 +458,8 @@ class SettingsDialog(QDialog):
                 new_val: Any = widget.isChecked()
             elif isinstance(widget, QSpinBox):
                 new_val = widget.value()
+            elif isinstance(widget, QComboBox):
+                new_val = widget.currentData()
             else:
                 new_val = widget.text().strip()
 

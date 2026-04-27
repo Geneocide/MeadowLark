@@ -453,89 +453,6 @@ class MyWindow(QWidget):
                 self._podcast_check_running = False
                 self._set_podcast_indicator("error")
 
-    def _get_source_options(self, source: str) -> dict:
-        """Get the yt-dlp options dict for the given source type."""
-        podcast_dir = Path(
-            get_setting("VID_DL_PODCAST_MISC_OUTPUT_DIR")
-            or str(PODCAST_MISC_OUTPUT_DIR)
-        )
-        video_dir = Path(
-            get_setting("VID_DL_VIDEO_STORAGE_DIR") or str(VIDEO_STORAGE_DIR)
-        )
-        source_options = {
-            "audio": {
-                "format": "m4a/bestaudio/best",
-                "postprocessors": [
-                    {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
-                ],
-                "outtmpl": (podcast_dir / "%(title)s.%(ext)s").as_posix(),
-            },
-            "audio_playlists": {
-                "format": "m4a/bestaudio/best",
-                "postprocessors": [
-                    {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
-                ],
-                "outtmpl": (podcast_dir / "%(title)s.%(ext)s").as_posix(),
-                "ignoreerrors": "only_download",
-            },
-            "720playlists": {
-                # Prefer 720p mp4 video + m4a audio, else best 720p with any audio, else fallback best
-                "format": (
-                    "bestvideo*[height=720][ext=mp4]+bestaudio[ext=m4a]/"
-                    "bestvideo*[height=720]+bestaudio/"
-                    "best[height=720]/best"
-                ),
-                "merge_output_format": "mp4",
-                "outtmpl": (
-                    video_dir
-                    / "%(playlist)s"
-                    / "%(playlist_index)s - %(title)s.%(ext)s"
-                ).as_posix(),
-                "ignoreerrors": "only_download",
-            },
-            "1080playlists": {
-                # Prefer 1080p mp4 video + m4a audio, else best 1080p with any audio, else fallback best
-                "format": (
-                    "bestvideo*[height=1080][ext=mp4]+bestaudio[ext=m4a]/"
-                    "bestvideo*[height=1080]+bestaudio/"
-                    "best[height=1080]/best"
-                ),
-                "merge_output_format": "mp4",
-                "outtmpl": (
-                    video_dir
-                    / "%(playlist)s"
-                    / "%(playlist_index)s - %(title)s.%(ext)s"
-                ).as_posix(),
-                "ignoreerrors": "only_download",
-            },
-        }
-
-        if source in source_options:
-            options = source_options[source].copy()
-            if "playlists" in source:
-                # Use a custom match_filter that records live videos for later
-                options["match_filter"] = self.make_match_filter(source)
-            return options
-        # Build a format string that targets the requested height if source is numeric like "1080" or "720"
-        try:
-            height = int(source)
-        except ValueError:
-            height = None
-        if height:
-            fmt = (
-                f"bestvideo*[height={height}][ext=mp4]+bestaudio[ext=m4a]/"
-                f"bestvideo*[height={height}]+bestaudio/"
-                f"best[height={height}]/best"
-            )
-        else:
-            fmt = "bestvideo*+bestaudio/best"
-        return {
-            "format": fmt,
-            "merge_output_format": "mp4",
-            "outtmpl": (video_dir / "%(title)s.%(ext)s").as_posix(),
-            "match_filter": self.make_match_filter(source),
-        }
-
     def _handle_playlist_dialog(self, urls: list, source: str) -> dict | None:
         """Handle playlist dialog for individual playlists, return playlist_items or None to cancel."""
         if "list=" in urls[0] and "playlist" not in source:
@@ -705,7 +622,7 @@ class MyWindow(QWidget):
         properties.update(playlist_props)
 
         # Get source-specific options
-        source_props = self._get_source_options(source)
+        source_props = utils.get_source_options(source)
         properties.update(source_props)
 
         return properties
@@ -2023,7 +1940,8 @@ if __name__ == "__main__":
     app.exec()
 
 # TODO: size control for error logs (low priority)
-# TODO: look into the 5 Skipped every time audio_playlists is run
 # TODO: resizing makes Audio big (low priority)
-# TODO: make a basic interface for the archive file. Maybe a good idea merging w/ the History window, add an option to allow users to remove individual videos from the archive.
-# TODO: add a feature to allow changes to the output format.
+# TODO: make sure tests don't leave logs in the real error log
+# TODO: make a setting to allow user to toggle Always on Top
+# TODO: add a message if the user checks for an update and is already up to date
+# TODO: update the .env.example to include new settings

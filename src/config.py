@@ -174,6 +174,8 @@ DEFAULT_MERGE_OUTPUT_FORMAT: Final[str] = os.getenv(
     "VID_DL_MERGE_OUTPUT_FORMAT",
     "mp4",
 )
+DEFAULT_VIDEO_FORMAT: Final[str] = os.getenv("VID_DL_VIDEO_FORMAT", "mp4")
+DEFAULT_AUDIO_FORMAT: Final[str] = os.getenv("VID_DL_AUDIO_FORMAT", "m4a")
 
 # ============================================================================
 # Debug Configuration
