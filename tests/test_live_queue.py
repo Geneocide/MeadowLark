@@ -163,6 +163,20 @@ def test_add_to_live_queue_deduplicates(tmp_path) -> None:
     assert contents == ["audio_playlists|https://example.com/video"]
 
 
+def test_get_options_with_skip_playlist_dialog_flag_does_not_error() -> None:
+    """Verify DownloadService.get_options accepts skip_playlist_dialog without error."""
+    service = make_service()
+
+    options = service.get_options(
+        ["https://youtube.com/watch?v=123"],
+        "audio",
+        skip_playlist_dialog=True,
+    )
+
+    assert options is not None
+    assert isinstance(options, dict)
+
+
 def test_make_match_filter_records_live_url() -> None:
     add_to_live_queue = Mock()
     log_callback = Mock()
@@ -373,6 +387,87 @@ def test_check_live_queue_keeps_still_live_entry(
 
     queue.put.assert_not_called()
     assert path.read_text().strip() == "1080playlists|https://youtube.com/watch?v=live"
+
+
+@patch("src.download_service.yt_dlp.YoutubeDL")
+@patch("src.download_service.utils.load_playlist_comments_for_source", return_value={})
+@patch("src.download_service.utils.detect_site_from_urls", return_value="youtube")
+@patch(
+    "src.download_service.utils.build_base_ydl_opts",
+    return_value={"logger": None, "progress_hooks": []},
+)
+def test_check_live_queue_with_playlist_url_no_crash(
+    mock_build_base,
+    mock_detect_site,
+    mock_load_comments,
+    mock_ydl_class,
+    tmp_path,
+) -> None:
+    path = tmp_path / "live_queue.txt"
+    path.write_text("1080playlists|https://youtube.com/watch?v=ended&list=WL\n")
+
+    queue = MagicMock()
+    service = make_service(
+        download_queue=queue,
+        bar_progress_set_range_callback=Mock(),
+        handle_info_changed_callback=Mock(),
+        handle_log_entry_callback=Mock(),
+    )
+    service.live_queue_path = path
+
+    mock_instance = MagicMock()
+    mock_instance.extract_info.return_value = {"is_live": False, "live_status": None}
+    mock_ydl_class.return_value.__enter__.return_value = mock_instance
+
+    service.check_live_queue()
+
+    queue.put.assert_called_once()
+    assert path.read_text().strip() == ""
+
+
+@patch("src.download_service.yt_dlp.YoutubeDL")
+@patch(
+    "src.download_service.utils.build_base_ydl_opts",
+    return_value={"logger": None, "progress_hooks": []},
+)
+def test_check_live_queue_logs_all_error_types(
+    mock_build_base,
+    mock_ydl_class,
+    tmp_path,
+) -> None:
+    path = tmp_path / "live_queue.txt"
+    path.write_text(
+        "1080playlists|https://youtube.com/watch?v=ydl_error\n"
+        "1080playlists|https://youtube.com/watch?v=runtime_error\n"
+    )
+
+    queue = MagicMock()
+    log_callback = Mock()
+    service = make_service(
+        download_queue=queue,
+        log_edit_append_callback=log_callback,
+        bar_progress_set_range_callback=Mock(),
+        handle_info_changed_callback=Mock(),
+        handle_log_entry_callback=Mock(),
+    )
+    service.live_queue_path = path
+
+    def extract_info_side_effect(url, download):
+        if "ydl_error" in url:
+            raise OSError("extraction failed")
+        return {"is_live": False, "live_status": None}
+
+    mock_instance = MagicMock()
+    mock_instance.extract_info.side_effect = extract_info_side_effect
+    mock_ydl_class.return_value.__enter__.return_value = mock_instance
+    service.get_options = MagicMock(side_effect=RuntimeError("unexpected"))  # type: ignore[method-assign]
+
+    service.check_live_queue()
+
+    assert log_callback.call_count >= 2
+    remaining = path.read_text().strip().splitlines()
+    assert any("ydl_error" in line for line in remaining)
+    assert any("runtime_error" in line for line in remaining)
 
 
 @patch("src.download_service.yt_dlp.YoutubeDL")

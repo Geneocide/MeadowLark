@@ -3,6 +3,8 @@
 from queue import Queue
 from unittest.mock import MagicMock, Mock, patch
 
+import pytest
+
 from src.config import ARCHIVE_PATH, PODCAST_MISC_OUTPUT_DIR
 from src.download_service import DownloadService
 
@@ -67,6 +69,19 @@ def test_get_options_returns_none_for_empty_urls() -> None:
     assert service.get_options([], "audio") is None
     log_callback.assert_called_once()
     assert "No URLs found" in log_callback.call_args[0][0]
+
+
+def test_get_options_accepts_skip_playlist_dialog_flag() -> None:
+    service = make_service(ignore_archive_callback=lambda: True)
+
+    options = service.get_options(
+        ["https://youtube.com/watch?v=123"],
+        "audio",
+        skip_playlist_dialog=True,
+    )
+
+    assert isinstance(options, dict)
+    assert options["match_filter"] is not None
 
 
 def test_get_options_builds_youtube_source_options() -> None:
@@ -207,3 +222,103 @@ def test_check_live_queue_ydl_error_keeps_url_in_remaining() -> None:
     saved_remaining = service.save_live_queue.call_args[0][0]
     assert "https://youtube.com/watch?v=abc" in saved_remaining
     log_callback.assert_called()
+
+
+def test_check_live_queue_still_live_and_upcoming_preserved() -> None:
+    """Verify still-live and upcoming URLs are preserved in queue and saved."""
+    service = make_service()
+
+    queue_entries = {
+        "https://youtube.com/watch?v=still_live": ("1080playlists", None),
+        "https://youtube.com/watch?v=upcoming": ("720playlists", "PLtest"),
+    }
+    service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
+    service.save_live_queue = MagicMock()  # type: ignore[method-assign]
+
+    def extract_info_side_effect(url, download):
+        if "still_live" in url:
+            return {"is_live": True, "live_status": "is_live"}
+        if "upcoming" in url:
+            return {"is_live": False, "live_status": "is_upcoming"}
+        return {"is_live": False, "live_status": None}
+
+    with patch("src.download_service.yt_dlp.YoutubeDL") as MockYDL:
+        ydl_instance = MockYDL.return_value.__enter__.return_value
+        ydl_instance.extract_info.side_effect = extract_info_side_effect
+        service.check_live_queue()
+
+    saved_remaining = service.save_live_queue.call_args[0][0]
+    assert "https://youtube.com/watch?v=still_live" in saved_remaining
+    assert saved_remaining["https://youtube.com/watch?v=still_live"] == (
+        "1080playlists",
+        None,
+    )
+    assert "https://youtube.com/watch?v=upcoming" in saved_remaining
+    assert saved_remaining["https://youtube.com/watch?v=upcoming"] == (
+        "720playlists",
+        "PLtest",
+    )
+
+
+def test_check_live_queue_generic_exception_keeps_url_in_remaining() -> None:
+    log_callback = Mock()
+    service = make_service(log_edit_append_callback=log_callback)
+
+    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None)}
+    service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
+    service.save_live_queue = MagicMock()  # type: ignore[method-assign]
+    service.get_options = MagicMock(side_effect=TypeError("unexpected"))  # type: ignore[method-assign]
+
+    with patch("src.download_service.yt_dlp.YoutubeDL") as MockYDL:
+        ydl_instance = MockYDL.return_value.__enter__.return_value
+        ydl_instance.extract_info.return_value = {
+            "is_live": False,
+            "live_status": None,
+        }
+        service.check_live_queue()
+
+    saved_remaining = service.save_live_queue.call_args[0][0]
+    assert "https://youtube.com/watch?v=abc" in saved_remaining
+    log_callback.assert_called()
+
+
+def test_check_live_queue_runtime_error_keeps_url_in_remaining() -> None:
+    log_callback = Mock()
+    service = make_service(log_edit_append_callback=log_callback)
+
+    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None)}
+    service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
+    service.save_live_queue = MagicMock()  # type: ignore[method-assign]
+    service.get_options = MagicMock(side_effect=RuntimeError("qt-like failure"))  # type: ignore[method-assign]
+
+    with patch("src.download_service.yt_dlp.YoutubeDL") as MockYDL:
+        ydl_instance = MockYDL.return_value.__enter__.return_value
+        ydl_instance.extract_info.return_value = {
+            "is_live": False,
+            "live_status": None,
+        }
+        service.check_live_queue()
+
+    saved_remaining = service.save_live_queue.call_args[0][0]
+    assert "https://youtube.com/watch?v=abc" in saved_remaining
+    log_callback.assert_called()
+
+
+def test_check_live_queue_keyboard_interrupt_not_caught() -> None:
+    service = make_service()
+
+    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None)}
+    service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
+    service.save_live_queue = MagicMock()  # type: ignore[method-assign]
+    service.get_options = MagicMock(side_effect=KeyboardInterrupt())  # type: ignore[method-assign]
+
+    with patch("src.download_service.yt_dlp.YoutubeDL") as MockYDL:
+        ydl_instance = MockYDL.return_value.__enter__.return_value
+        ydl_instance.extract_info.return_value = {
+            "is_live": False,
+            "live_status": None,
+        }
+        with pytest.raises(KeyboardInterrupt):
+            service.check_live_queue()
+
+    service.save_live_queue.assert_not_called()

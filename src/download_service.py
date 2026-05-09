@@ -138,7 +138,12 @@ class DownloadService:
             return None
         return load_playlist_urls(Path(playlist_files[source])) or None
 
-    def get_options(self, urls: list, source: str) -> dict | None:
+    def get_options(
+        self,
+        urls: list,
+        source: str,
+        skip_playlist_dialog: bool = False,
+    ) -> dict | None:
         """
         Build yt-dlp options dict based on URLs and source type.
 
@@ -270,7 +275,11 @@ class DownloadService:
                     qhook = self.qhook_factory()
                     qlogger = self.qlogger_factory()
                     ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
-                    properties = self.get_options([url], source)
+                    properties = self.get_options(
+                        [url],
+                        source,
+                        skip_playlist_dialog=True,
+                    )
                     if properties:
                         # Don't re-apply match_filter: stream already confirmed ended
                         properties.pop("match_filter", None)
@@ -298,4 +307,11 @@ class DownloadService:
                 self.log_edit_append_callback(
                     f"Error checking live queue: {e}",
                 )
+                utils.log_exception(e, f"Error checking live queue: {url}")
+            except Exception as e:  # noqa: BLE001
+                remaining[url] = (source, playlist_id)
+                self.log_edit_append_callback(
+                    f"Unexpected error checking live queue: {e}",
+                )
+                utils.log_exception(e, f"Unexpected error checking live queue: {url}")
         self.save_live_queue(remaining)

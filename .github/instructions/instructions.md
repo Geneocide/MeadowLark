@@ -14,5 +14,10 @@ applyTo: "**/*.{py,pyw,pyi}"
 - **File Creation:** When asked to implement new features, always suggest a directory structure and separate files for logic, types, and tests.
 - **Separation of Concerns:** Avoid creating files that do too much. Group related functions together in files with a common purpose.
 
+# Workflow
+- After completing any code changes, YOU MUST delegate verification to the specialized QA agent.
+- Instruction: "Use the @qa-boundary-tester to review these changes for edge cases, write new tests when appropriate, and run pytest and Ruff compliance checks before asking me to commit."
+- Also run a ruff check after code changes
+
 Tone: Robotic, clear, concise. No personhood/friendship simulation.
 Formatting: Use short answers

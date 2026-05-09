@@ -583,13 +583,19 @@ class MyWindow(QWidget):
         )
         self.handle_queue_empty()
 
-    def get_options(self, urls: list, source: str) -> dict | None:
+    def get_options(
+        self,
+        urls: list,
+        source: str,
+        skip_playlist_dialog: bool = False,
+    ) -> dict | None:
         """
         Build yt-dlp options dict based on URLs and source type.
 
         Args:
             urls: List of URLs to process.
             source: The source type (e.g., "1080playlists", "audio").
+            skip_playlist_dialog: If True, bypass playlist dialog during live-queue check.
 
         Returns:
             Dict of yt-dlp options, or None if download should be skipped/cancelled.
@@ -617,11 +623,12 @@ class MyWindow(QWidget):
         # strip out unnecessary parts of URL if dropping from Watch Later
         urls = [url.split("&list=WL")[0] for url in urls]
 
-        # Handle individual playlist dialog
-        playlist_props = self._handle_playlist_dialog(urls, source)
-        if playlist_props is None:
-            return None  # cancelled
-        properties.update(playlist_props)
+        if not skip_playlist_dialog:
+            # Handle individual playlist dialog
+            playlist_props = self._handle_playlist_dialog(urls, source)
+            if playlist_props is None:
+                return None  # cancelled
+            properties.update(playlist_props)
 
         # Get source-specific options
         source_props = utils.get_source_options(source)
@@ -845,7 +852,11 @@ class MyWindow(QWidget):
                         f"Live ended, queued: {url} [{source}]",
                     )
                     qhook, qlogger, ydl_opts = self._create_download_context()
-                    properties = self.get_options([url], source)
+                    properties = self.get_options(
+                        [url],
+                        source,
+                        skip_playlist_dialog=True,
+                    )
                     if properties:
                         # Don't re-apply match_filter: stream already confirmed ended
                         properties.pop("match_filter", None)
@@ -865,12 +876,18 @@ class MyWindow(QWidget):
 
                         self.downloadQueue.put(([url], ydl_opts))
                         self._wire_download_signals(qhook, qlogger)
-            except YDL_EXTRACTION_ERRORS as e:
+            except YDL_EXTRACTION_ERRORS as e:  # noqa: PERF203
                 # If any error in checking, keep it for later
                 self.logEdit.appendPlainText(
                     f"Error checking live url {url}: {e}",
                 )
                 utils.log_exception(e, f"Error checking live url {url}")
+                remaining[url] = (source, playlist_id)
+            except Exception as e:  # noqa: BLE001
+                self.logEdit.appendPlainText(
+                    f"Unexpected error checking live url {url}: {e}",
+                )
+                utils.log_exception(e, f"Unexpected error checking live url {url}")
                 remaining[url] = (source, playlist_id)
         self.save_live_queue(remaining)
 
@@ -1960,3 +1977,5 @@ if __name__ == "__main__":
 # TODO: size control for error logs (low priority)
 # TODO: resizing makes Audio big (low priority)
 # TODO: make sure tests don't leave logs in the real error log
+# TODO: better cookie.txt explanation
+# TODO: settings to toggle mark as watched for YT
