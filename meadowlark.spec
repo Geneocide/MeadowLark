@@ -33,7 +33,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
-    icon="resources/icons/downFrog.ico",
+    icon="resources/icons/meadowlark.ico",
 )
 
 coll = COLLECT(

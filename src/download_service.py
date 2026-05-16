@@ -263,6 +263,9 @@ class DownloadService:
                     },
                 ) as ydl:
                     info = ydl.extract_info(url, download=False)
+                if info is None:
+                    remaining[url] = (source, playlist_id)
+                    continue
                 is_live = info.get("is_live")
                 live_status = info.get("live_status")
                 if is_live or live_status in ("is_live", "is_upcoming"):
@@ -301,7 +304,7 @@ class DownloadService:
                         qhook.info_changed.connect(self.handle_info_changed_callback)
                         qlogger.message_changed.connect(self.handle_log_entry_callback)
                         self.bar_progress_set_range_callback(0, 1)
-            except YDL_EXTRACTION_ERRORS as e:  # noqa: PERF203
+            except YDL_EXTRACTION_ERRORS as e:
                 # If any error in checking, keep it for later
                 remaining[url] = (source, playlist_id)
                 self.log_edit_append_callback(

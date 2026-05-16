@@ -364,6 +364,87 @@ def test_check_live_queue_does_not_apply_match_filter(
     "src.download_service.utils.build_base_ydl_opts",
     return_value={"logger": None, "progress_hooks": []},
 )
+def test_check_live_queue_extract_info_returns_none_keeps_entry_no_crash(
+    mock_build_base,
+    mock_ydl_class,
+    tmp_path,
+) -> None:
+    """extract_info returning None must not raise AttributeError; entry stays queued."""
+    path = tmp_path / "live_queue.txt"
+    path.write_text("1080playlists|https://youtube.com/watch?v=ghost\n")
+
+    queue = MagicMock()
+    service = make_service(download_queue=queue)
+    service.live_queue_path = path
+
+    mock_instance = MagicMock()
+    mock_instance.extract_info.return_value = None
+    mock_ydl_class.return_value.__enter__.return_value = mock_instance
+
+    service.check_live_queue()  # must not raise
+
+    queue.put.assert_not_called()
+    assert "ghost" in path.read_text()
+
+
+@patch("src.download_service.yt_dlp.YoutubeDL")
+@patch(
+    "src.download_service.utils.build_base_ydl_opts",
+    return_value={"logger": None, "progress_hooks": []},
+)
+def test_check_live_queue_extract_info_returns_none_mixed_entries(
+    mock_build_base,
+    mock_ydl_class,
+    tmp_path,
+) -> None:
+    """When one entry returns None and another is ended, only the ended one is queued."""
+    path = tmp_path / "live_queue.txt"
+    path.write_text(
+        "1080playlists|https://youtube.com/watch?v=ghost\n"
+        "1080playlists|https://youtube.com/watch?v=ended\n"
+    )
+
+    queue = MagicMock()
+    qhook = MagicMock(info_changed=MagicMock())
+    qlogger = MagicMock(message_changed=MagicMock())
+
+    service = make_service(
+        download_queue=queue,
+        qhook_factory=lambda: qhook,
+        qlogger_factory=lambda: qlogger,
+        bar_progress_set_range_callback=Mock(),
+        handle_info_changed_callback=Mock(),
+        handle_log_entry_callback=Mock(),
+    )
+    service.live_queue_path = path
+
+    def side_effect(url, download):
+        if "ghost" in url:
+            return None
+        return {"is_live": False, "live_status": None}
+
+    mock_instance = MagicMock()
+    mock_instance.extract_info.side_effect = side_effect
+    mock_ydl_class.return_value.__enter__.return_value = mock_instance
+
+    with patch(
+        "src.download_service.utils.load_playlist_comments_for_source", return_value={}
+    ), patch(
+        "src.download_service.utils.detect_site_from_urls", return_value="youtube"
+    ):
+        service.check_live_queue()
+
+    queue.put.assert_called_once()
+    remaining = path.read_text()
+    assert "ghost" in remaining
+    assert "ended" not in remaining
+
+
+@patch("src.download_service.yt_dlp.YoutubeDL")
+@patch(
+    "src.download_service.utils.build_base_ydl_opts",
+    return_value={"logger": None, "progress_hooks": []},
+)
 def test_check_live_queue_keeps_still_live_entry(
     mock_build_base,
     mock_ydl_class,

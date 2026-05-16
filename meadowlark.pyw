@@ -182,6 +182,8 @@ class MyWindow(QWidget):
     Features include playlist and audio download options, drag-and-drop support, progress tracking, log display, update checking, and integration with custom download queue and processing logic.
     """
 
+    live_queue_log = pyqtSignal(str)
+
     _BRAVE_PATHS: ClassVar[list[str]] = [
         r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
         r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
@@ -213,6 +215,8 @@ class MyWindow(QWidget):
         QShortcut(QKeySequence("Ctrl+U"), self).activated.connect(
             self._start_app_update_check
         )
+
+        self.live_queue_log.connect(self.handle_log_entry)
 
         self.playlist_comments = {}
 
@@ -780,7 +784,7 @@ class MyWindow(QWidget):
         return build_match_filter(
             source,
             add_to_queue_fn=self.add_to_live_queue,
-            log_fn=self.logEdit.appendPlainText,
+            log_fn=self.live_queue_log.emit,
         )
 
     def load_live_queue(self) -> live_queue.LiveQueueEntries:
@@ -842,6 +846,9 @@ class MyWindow(QWidget):
                     },
                 ) as ydl:
                     info = ydl.extract_info(url, download=False)
+                if info is None:
+                    remaining[url] = (source, playlist_id)
+                    continue
                 is_live = info.get("is_live")
                 live_status = info.get("live_status")
                 if is_live or live_status in ("is_live", "is_upcoming"):
@@ -876,7 +883,7 @@ class MyWindow(QWidget):
 
                         self.downloadQueue.put(([url], ydl_opts))
                         self._wire_download_signals(qhook, qlogger)
-            except YDL_EXTRACTION_ERRORS as e:  # noqa: PERF203
+            except YDL_EXTRACTION_ERRORS as e:
                 # If any error in checking, keep it for later
                 self.logEdit.appendPlainText(
                     f"Error checking live url {url}: {e}",
@@ -1943,7 +1950,7 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    app.setWindowIcon(QIcon("icons:downFrog.png"))
+    app.setWindowIcon(QIcon("icons:meadowlark.png"))
     app.setQuitOnLastWindowClosed(True)
 
     window = MyWindow()

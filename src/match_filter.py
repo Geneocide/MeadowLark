@@ -35,7 +35,7 @@ def build_match_filter(
                     add_to_queue_fn(url, source, playlist_id)
                     log_fn(f"Queued live for later: {url} [{source}]")
                 return "Skipping live; queued for later"
-        except (TypeError, AttributeError) as exc:
+        except Exception as exc:  # noqa: BLE001
             utils.log_exception(exc, "Error in match_filter")
             return None
         return None
