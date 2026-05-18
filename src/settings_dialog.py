@@ -28,6 +28,8 @@ from PyQt6.QtWidgets import (
 
 from .config import (
     ALWAYS_ON_TOP,
+    APP_UPDATE_AUTO_CHECK,
+    APP_UPDATE_LAST_CHECKED,
     COOKIES_FILE,
     DEFAULT_AUDIO_FORMAT,
     DEFAULT_VIDEO_FORMAT,
@@ -125,6 +127,10 @@ HELP_TEXT: dict[str, str] = {
         "Keep the app window above all other windows.\n"
         "Changes take effect immediately."
     ),
+    "VID_DL_APP_UPDATE_AUTO_CHECK": (
+        "When enabled, the app silently checks for a newer release once per week at startup.\n"
+        "If a new version is found you are prompted to download it. Disable to opt out."
+    ),
 }
 
 # ============================================================================
@@ -164,6 +170,8 @@ def _init_runtime_settings() -> None:
             "VID_DL_VIDEO_FORMAT": DEFAULT_VIDEO_FORMAT,
             "VID_DL_AUDIO_FORMAT": DEFAULT_AUDIO_FORMAT,
             "VID_DL_ALWAYS_ON_TOP": ALWAYS_ON_TOP,
+            "VID_DL_APP_UPDATE_AUTO_CHECK": APP_UPDATE_AUTO_CHECK,
+            "VID_DL_APP_UPDATE_LAST_CHECKED": APP_UPDATE_LAST_CHECKED,
         }
     )
 
@@ -442,6 +450,16 @@ class SettingsDialog(QDialog):
         aot_row.addStretch()
         self._edits["VID_DL_ALWAYS_ON_TOP"] = aot_check
         form.addRow(QLabel("Always on top:"), _wrap(aot_row))
+
+        auto_update_check = QCheckBox(self)
+        auto_update_check.setChecked(bool(get_setting("VID_DL_APP_UPDATE_AUTO_CHECK")))
+        help_update = _make_help_button("VID_DL_APP_UPDATE_AUTO_CHECK", self)
+        update_row = QHBoxLayout()
+        update_row.addWidget(auto_update_check)
+        update_row.addWidget(help_update)
+        update_row.addStretch()
+        self._edits["VID_DL_APP_UPDATE_AUTO_CHECK"] = auto_update_check
+        form.addRow(QLabel("Auto-check for app updates:"), _wrap(update_row))
 
         tab.setLayout(form)
         return tab

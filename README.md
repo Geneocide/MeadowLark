@@ -52,3 +52,5 @@ uv run python meadowlark.pyw
 | `VID_DL_LIVE_QUEUE_CHECK_INTERVAL_MINUTES` | `30` | Live queue polling interval |
 | `VID_DL_PODCAST_LOOKAHEAD_MAX_ATTEMPTS` | `5` | Max lookahead attempts for podcast fetching |
 | `VID_DL_MERGE_OUTPUT_FORMAT` | `mp4` | Merge output container format |
+| `VID_DL_APP_UPDATE_AUTO_CHECK` | `true` | Check for a new app release once per week at startup (set to `false` to opt out) |
+| `VID_DL_APP_UPDATE_LAST_CHECKED` | _(empty)_ | ISO date of the last automatic update check; written by the app, not normally set by hand |

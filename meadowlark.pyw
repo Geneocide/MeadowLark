@@ -42,7 +42,7 @@ import sys
 import time
 import webbrowser
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from os import startfile
 from pathlib import Path
 from typing import ClassVar
@@ -127,7 +127,12 @@ from src.podcast_filtering import (
     parse_video_timestamp,
 )
 from src.podcast_helpers import fetch_latest_accessible_entry
-from src.settings_dialog import SettingsDialog, _init_runtime_settings, get_setting
+from src.settings_dialog import (
+    SettingsDialog,
+    _init_runtime_settings,
+    _persist_setting,
+    get_setting,
+)
 from src.url_utils import extract_playlist_id
 from UIClasses import DropLabel, PlaylistButton, PlaylistDialog
 
@@ -222,6 +227,8 @@ class MyWindow(QWidget):
 
         update_available, _, _ = utils.is_yt_dlp_update_available()
         self.buttonUpdate.setVisible(update_available)
+
+        self._maybe_start_auto_app_update_check()
 
     def _build_podcast_container(self) -> QWidget:
         """Build the podcast button + indicator container widget."""
@@ -1873,26 +1880,57 @@ class MyWindow(QWidget):
         else:
             self.logEdit.appendPlainText("Podcast auto-check disabled.")
 
-    def _start_app_update_check(self) -> None:
-        """Start a background check for a newer app version (triggered by Ctrl+U)."""
+    def _start_app_update_check(self, auto: bool = False) -> None:
+        """Start a background check for a newer app version."""
         self._app_update_worker = self._AppUpdateWorker()
         self._app_update_thread = QThread(self)
         self._app_update_worker.moveToThread(self._app_update_thread)
         self._app_update_thread.started.connect(self._app_update_worker.run)
-        self._app_update_worker.finished.connect(self._on_app_update_result)
+        self._app_update_worker.finished.connect(
+            lambda avail, tag, url: self._on_app_update_result(avail, tag, url, auto=auto)
+        )
         self._app_update_worker.finished.connect(self._app_update_thread.quit)
         self._app_update_thread.start()
 
+    def _maybe_start_auto_app_update_check(self) -> None:
+        """Fire a background app-update check at most once per week if the setting is on."""
+        if not get_setting("VID_DL_APP_UPDATE_AUTO_CHECK"):
+            logger.info("Auto app update check disabled by setting")
+            return
+        last_checked = get_setting("VID_DL_APP_UPDATE_LAST_CHECKED")
+        if last_checked:
+            try:
+                last_dt = date.fromisoformat(str(last_checked))
+                if (date.today() - last_dt).days < 7:
+                    logger.info("Auto app update check skipped: last checked %s", last_checked)
+                    return
+            except ValueError:
+                pass
+        logger.info("Starting automatic app update check")
+        self._start_app_update_check(auto=True)
+
     def _on_app_update_result(
-        self, update_available: bool, latest_tag: str, download_url: str
+        self,
+        update_available: bool,
+        latest_tag: str,
+        download_url: str,
+        *,
+        auto: bool = False,
     ) -> None:
         """Handle the result of the background app update check."""
-        if not update_available:
-            QMessageBox.information(
-                self,
-                "No Update Available",
-                "You are running the latest version.",
+        if auto:
+            _persist_setting(
+                "VID_DL_APP_UPDATE_LAST_CHECKED", date.today().isoformat()
             )
+        if not update_available:
+            if not auto:
+                QMessageBox.information(
+                    self,
+                    "No Update Available",
+                    "You are running the latest version.",
+                )
+            else:
+                logger.info("Auto app update check: already on latest version")
             return
         answer = QMessageBox.question(
             self,
