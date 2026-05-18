@@ -1,5 +1,7 @@
 """
-Tests for the auto app-update check logic in meadowlark.pyw:
+Tests for the auto app-update check logic in meadowlark.pyw.
+
+Covers:
   - MyWindow._maybe_start_auto_app_update_check
   - MyWindow._on_app_update_result
   - config: APP_UPDATE_AUTO_CHECK, APP_UPDATE_LAST_CHECKED
@@ -10,8 +12,7 @@ import importlib
 import os
 from datetime import date, timedelta
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -21,14 +22,15 @@ import pytest
 
 
 def _make_window() -> MagicMock:
-    """Return a MagicMock that mimics a MyWindow instance.
+    """
+    Return a MagicMock that mimics a MyWindow instance.
 
     Only the attributes accessed by the two tested methods are wired up.
     Everything else is a plain MagicMock.
     """
     win = MagicMock()
     # Ensure the real method bodies execute (not the MagicMock auto-stubs)
-    import meadowlark  # noqa: PLC0415
+    import meadowlark
 
     win._maybe_start_auto_app_update_check = (
         meadowlark.MyWindow._maybe_start_auto_app_update_check.__get__(win)
@@ -58,7 +60,7 @@ class TestConfigAppUpdateAutoCheck:
     """Boundary tests for APP_UPDATE_AUTO_CHECK config constant."""
 
     def _reload(self) -> object:
-        from src import config  # noqa: PLC0415
+        from src import config
 
         importlib.reload(config)
         return config
@@ -82,19 +84,19 @@ class TestConfigAppUpdateAutoCheck:
             cfg = self._reload()
             assert cfg.APP_UPDATE_AUTO_CHECK is False
 
-    def test_auto_check_mixed_case_True(self) -> None:
+    def test_auto_check_mixed_case_true(self) -> None:
         """Env var 'True' (title-case) resolves to True via .lower()."""
         with patch.dict(os.environ, {"VID_DL_APP_UPDATE_AUTO_CHECK": "True"}):
             cfg = self._reload()
             assert cfg.APP_UPDATE_AUTO_CHECK is True
 
-    def test_auto_check_mixed_case_False(self) -> None:
+    def test_auto_check_mixed_case_false(self) -> None:
         """Env var 'False' (title-case) resolves to False via .lower()."""
         with patch.dict(os.environ, {"VID_DL_APP_UPDATE_AUTO_CHECK": "False"}):
             cfg = self._reload()
             assert cfg.APP_UPDATE_AUTO_CHECK is False
 
-    def test_auto_check_all_caps_TRUE(self) -> None:
+    def test_auto_check_all_caps_true(self) -> None:
         """Env var 'TRUE' resolves to True via .lower()."""
         with patch.dict(os.environ, {"VID_DL_APP_UPDATE_AUTO_CHECK": "TRUE"}):
             cfg = self._reload()
@@ -129,7 +131,7 @@ class TestConfigAppUpdateLastChecked:
     """Boundary tests for APP_UPDATE_LAST_CHECKED config constant."""
 
     def _reload(self) -> object:
-        from src import config  # noqa: PLC0415
+        from src import config
 
         importlib.reload(config)
         return config
@@ -174,7 +176,8 @@ class TestRuntimeSettingsSeeding:
     """Verify _init_runtime_settings seeds both new keys correctly."""
 
     def _reload_both(self) -> tuple:
-        from src import config, settings_dialog as sd  # noqa: PLC0415
+        from src import config
+        from src import settings_dialog as sd
 
         importlib.reload(config)
         importlib.reload(sd)
@@ -410,7 +413,8 @@ class TestMaybeStartAutoAppUpdateCheck:
         win._start_app_update_check.assert_called_once_with(auto=True)
 
     def test_last_checked_far_future_throttled(self) -> None:
-        """Last-checked date set in the far future → days < 7 (negative diff absorbed), throttled.
+        """
+        Last-checked date set in the far future → days < 7 (negative diff absorbed), throttled.
 
         date.fromisoformat("2099-01-01") - date.today() is a large positive number of days,
         so (today - future_date).days is a large negative, which is < 7 → throttled.
@@ -586,7 +590,7 @@ class TestOnAppUpdateResult:
 
     def test_auto_update_user_confirms_opens_browser(self) -> None:
         """auto=True + update + user clicks Yes → webbrowser.open called with url."""
-        from PyQt6.QtWidgets import QMessageBox  # noqa: PLC0415
+        from PyQt6.QtWidgets import QMessageBox
 
         win = _make_window()
         fake_date = MagicMock(wraps=date)
@@ -610,7 +614,7 @@ class TestOnAppUpdateResult:
 
     def test_auto_update_user_declines_no_browser(self) -> None:
         """auto=True + update + user clicks No → webbrowser.open NOT called."""
-        from PyQt6.QtWidgets import QMessageBox  # noqa: PLC0415
+        from PyQt6.QtWidgets import QMessageBox
 
         win = _make_window()
         fake_date = MagicMock(wraps=date)
@@ -692,7 +696,7 @@ class TestOnAppUpdateResult:
 
     def test_manual_update_user_confirms_opens_browser(self) -> None:
         """auto=False + update + user confirms → webbrowser.open called."""
-        from PyQt6.QtWidgets import QMessageBox  # noqa: PLC0415
+        from PyQt6.QtWidgets import QMessageBox
 
         win = _make_window()
         fake_date = MagicMock(wraps=date)
@@ -754,8 +758,7 @@ class TestOnAppUpdateResult:
 
 
 class TestAutoCheckIntegration:
-    """Integration: verify the date persisted by _on_app_update_result prevents
-    an immediate re-check when _maybe_start_auto_app_update_check is called again."""
+    """Integration: _on_app_update_result date-persist throttles the next _maybe_start_auto_app_update_check call."""
 
     def test_after_auto_check_no_update_next_call_is_throttled(self) -> None:
         """Simulates two startup calls: first fires, second (same day) is throttled."""
