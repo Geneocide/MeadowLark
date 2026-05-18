@@ -47,12 +47,14 @@ class DownloadExecutor:
             ydl.cache.remove()
             ydl.download(urls)
 
-    def _extract_title(self, urls: list) -> str:
+    def _extract_title(self, urls: list, options: dict | None = None) -> str:
         """
         Extract video title from first URL for error logging.
 
         Args:
             urls: List of URLs to extract from.
+            options: Optional yt-dlp options from the download context.
+                     ``cookiefile`` is forwarded so age-restricted lookups succeed.
 
         Returns:
             Video title or '(unknown)' if extraction fails.
@@ -61,8 +63,11 @@ class DownloadExecutor:
             return "(unknown)"
 
         title = urls[0]
+        extra_opts: dict | None = None
+        if options and (cookiefile := options.get("cookiefile")):
+            extra_opts = {"cookiefile": cookiefile}
         try:
-            info = extract_playlist_info(urls[0], ydl_class=YoutubeDL)
+            info = extract_playlist_info(urls[0], ydl_class=YoutubeDL, extra_opts=extra_opts)
             title = info.get("title", title)
         except YDL_EXTRACTION_ERRORS as exc:
             utils.log_exception(exc, "Failed to extract title for error logging")
@@ -205,7 +210,7 @@ class DownloadExecutor:
             OSError,
             ValueError,
         ) as e:
-            title = self._extract_title(urls)
+            title = self._extract_title(urls, options)
             error_str = str(e)
             meta = options.get("qmeta") or {}
             site = meta.get("site", "unknown")

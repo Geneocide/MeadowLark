@@ -22,8 +22,8 @@ def build_match_filter(
             is_live = info.get("is_live")
             live_status = info.get("live_status")
             availability = info.get("availability")
-            if availability in ("needs_auth", "scheduled"):
-                return f"Skipping: {availability}"
+            if availability == "scheduled":
+                return "Skipping: scheduled"
             if is_live or live_status in ("is_live", "is_upcoming"):
                 url = (
                     info.get("webpage_url")

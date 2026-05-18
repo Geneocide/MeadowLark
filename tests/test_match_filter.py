@@ -10,10 +10,10 @@ def _make_mf(source: str = "1080playlists") -> Callable[[dict, bool], str | None
     return build_match_filter(source, MagicMock(), MagicMock())
 
 
-def test_mf_skips_needs_auth() -> None:
+def test_mf_does_not_skip_needs_auth() -> None:
     mf = _make_mf()
     result = mf({"availability": "needs_auth"}, False)
-    assert result == "Skipping: needs_auth"
+    assert result is None
 
 
 def test_mf_skips_scheduled() -> None:
@@ -180,4 +180,90 @@ def test_mf_incomplete_true_nominal_video_returns_none() -> None:
     """incomplete=True should not change behavior for a non-live video."""
     mf = _make_mf()
     result = mf({"is_live": False, "live_status": "not_live"}, True)
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# New boundary / equivalence-partition tests added for the availability guard
+# refactor (needs_auth removed from skip list).
+# ---------------------------------------------------------------------------
+
+
+def test_mf_availability_none_is_not_skipped() -> None:
+    """Availability key present but value is None — must not skip."""
+    mf = _make_mf()
+    result = mf({"availability": None}, False)
+    assert result is None
+
+
+def test_mf_availability_empty_string_is_not_skipped() -> None:
+    """Availability is an empty string — must not skip (not equal to 'scheduled')."""
+    mf = _make_mf()
+    result = mf({"availability": ""}, False)
+    assert result is None
+
+
+def test_mf_availability_private_is_not_skipped() -> None:
+    """'private' availability must pass through; only 'scheduled' is blocked."""
+    mf = _make_mf()
+    result = mf({"availability": "private"}, False)
+    assert result is None
+
+
+def test_mf_availability_subscriber_only_is_not_skipped() -> None:
+    """'subscriber_only' availability must pass through."""
+    mf = _make_mf()
+    result = mf({"availability": "subscriber_only"}, False)
+    assert result is None
+
+
+def test_mf_availability_premium_only_is_not_skipped() -> None:
+    """'premium_only' availability must pass through."""
+    mf = _make_mf()
+    result = mf({"availability": "premium_only"}, False)
+    assert result is None
+
+
+def test_mf_needs_auth_and_is_live_queues_and_returns_skip_message() -> None:
+    """needs_auth + is_live: the live-queue logic must still fire (availability no longer short-circuits)."""
+    add_fn = MagicMock()
+    log_fn = MagicMock()
+    mf = build_match_filter("1080playlists", add_fn, log_fn)
+    result = mf(
+        {
+            "availability": "needs_auth",
+            "is_live": True,
+            "live_status": "is_live",
+            "webpage_url": "https://youtube.com/watch?v=auth_live",
+        },
+        False,
+    )
+    assert result == "Skipping live; queued for later"
+    add_fn.assert_called_once_with(
+        "https://youtube.com/watch?v=auth_live", "1080playlists", None
+    )
+
+
+def test_mf_scheduled_takes_priority_over_live_status() -> None:
+    """Scheduled availability must skip even when is_live is True."""
+    add_fn = MagicMock()
+    mf = build_match_filter("1080playlists", add_fn, MagicMock())
+    result = mf(
+        {
+            "availability": "scheduled",
+            "is_live": True,
+            "live_status": "is_live",
+            "webpage_url": "https://youtube.com/watch?v=sched",
+        },
+        False,
+    )
+    assert result == "Skipping: scheduled"
+    # scheduled short-circuits before the queue logic
+    add_fn.assert_not_called()
+
+
+def test_mf_availability_case_sensitive() -> None:
+    """'Scheduled' (capital S) must NOT match the 'scheduled' guard — case-sensitive."""
+    mf = _make_mf()
+    result = mf({"availability": "Scheduled"}, False)
     assert result is None

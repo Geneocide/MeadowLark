@@ -9,6 +9,7 @@ def extract_playlist_info(
     url: str,
     playlistend: int | None = None,
     ydl_class: type | None = None,
+    extra_opts: dict | None = None,
 ) -> dict:
     """
     Extract playlist/video info with standard quiet options.
@@ -17,6 +18,8 @@ def extract_playlist_info(
         url: The URL to extract info from.
         playlistend: Optional limit on number of entries to extract.
         ydl_class: Optional custom YoutubeDL class for injection.
+        extra_opts: Optional extra options merged after the quiet baseline
+            (e.g. ``{"cookiefile": "/path/to/cookies.txt"}``).
 
     Returns:
         Dictionary containing extracted info.
@@ -24,6 +27,8 @@ def extract_playlist_info(
     if ydl_class is None:
         ydl_class = yt_dlp.YoutubeDL
     opts: dict = {**_QUIET_YDL_OPTS}
+    if extra_opts:
+        opts.update(extra_opts)
     if playlistend:
         opts["playlistend"] = playlistend
     with ydl_class(opts) as ydl:

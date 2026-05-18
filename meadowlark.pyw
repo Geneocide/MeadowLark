@@ -1986,3 +1986,4 @@ if __name__ == "__main__":
 # TODO: make sure tests don't leave logs in the real error log
 # TODO: better cookie.txt explanation
 # TODO: settings to toggle mark as watched for YT
+# TODO: auto update check with opt out settings

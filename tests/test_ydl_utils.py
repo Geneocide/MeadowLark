@@ -76,6 +76,26 @@ def test_extract_playlist_info_uses_default_ydl_class_when_none() -> None:
     assert result == {"title": "default class"}
 
 
+def test_extract_playlist_info_with_extra_opts_merges_into_opts() -> None:
+    captured: list[dict] = []
+    factory = _make_ydl_factory({}, captured_opts=captured)
+    extract_playlist_info(
+        "https://example.com",
+        ydl_class=factory,
+        extra_opts={"cookiefile": "/cookies.txt", "custom_key": "custom_val"},
+    )
+    assert captured[0]["cookiefile"] == "/cookies.txt"
+    assert captured[0]["custom_key"] == "custom_val"
+    assert captured[0]["quiet"] is True
+
+
+def test_extract_playlist_info_extra_opts_none_leaves_baseline_intact() -> None:
+    captured: list[dict] = []
+    factory = _make_ydl_factory({}, captured_opts=captured)
+    extract_playlist_info("https://example.com", ydl_class=factory, extra_opts=None)
+    assert set(captured[0].keys()) == {"quiet", "no_warnings"}
+
+
 def test_extract_video_entries_uses_default_ydl_class_when_none() -> None:
     from unittest.mock import patch
 
@@ -87,3 +107,78 @@ def test_extract_video_entries_uses_default_ydl_class_when_none() -> None:
     with patch("src.ydl_utils.yt_dlp.YoutubeDL", return_value=mock_instance):
         entries = extract_video_entries("https://example.com")
     assert entries == [{"id": "v1"}]
+
+
+# ---------------------------------------------------------------------------
+# New boundary tests for extra_opts and playlistend edge cases.
+# ---------------------------------------------------------------------------
+
+
+def test_extract_playlist_info_extra_opts_empty_dict_does_not_merge() -> None:
+    """
+    extra_opts={} is falsy — the `if extra_opts:` guard skips the update.
+
+    Consequence: an empty dict passed by a caller is silently ignored, which
+    is consistent with the documented behaviour ("when provided, its keys are
+    merged"). Verify the baseline opts remain unchanged.
+    """
+    captured: list[dict] = []
+    factory = _make_ydl_factory({}, captured_opts=captured)
+    extract_playlist_info("https://example.com", ydl_class=factory, extra_opts={})
+    assert set(captured[0].keys()) == {"quiet", "no_warnings"}
+
+
+def test_extract_playlist_info_extra_opts_overrides_quiet_baseline() -> None:
+    """extra_opts applied after baseline — a conflicting key wins over _QUIET_YDL_OPTS."""
+    captured: list[dict] = []
+    factory = _make_ydl_factory({}, captured_opts=captured)
+    extract_playlist_info(
+        "https://example.com",
+        ydl_class=factory,
+        extra_opts={"quiet": False},
+    )
+    # extra_opts must win (applied after baseline via opts.update())
+    assert captured[0]["quiet"] is False
+    # no_warnings from baseline still present
+    assert captured[0]["no_warnings"] is True
+
+
+def test_extract_playlist_info_extra_opts_playlistend_overridden_by_explicit_arg() -> None:
+    """Explicit playlistend arg wins over any playlistend key in extra_opts (applied last)."""
+    captured: list[dict] = []
+    factory = _make_ydl_factory({}, captured_opts=captured)
+    extract_playlist_info(
+        "https://example.com",
+        playlistend=3,
+        ydl_class=factory,
+        extra_opts={"playlistend": 99},
+    )
+    # Explicit arg is applied after extra_opts, so it wins.
+    assert captured[0]["playlistend"] == 3
+
+
+def test_extract_playlist_info_playlistend_zero_does_not_set_key() -> None:
+    """
+    playlistend=0 is falsy — `if playlistend:` skips the assignment.
+
+    This is a latent boundary: callers passing 0 to mean 'no limit' get the
+    expected behaviour (no key set), but callers intending to pass 0 as a
+    real limit would be silently ignored. Document this boundary.
+    """
+    captured: list[dict] = []
+    factory = _make_ydl_factory({}, captured_opts=captured)
+    extract_playlist_info("https://example.com", playlistend=0, ydl_class=factory)
+    assert "playlistend" not in captured[0]
+
+
+def test_extract_playlist_info_extra_opts_adds_no_warnings_override() -> None:
+    """extra_opts can override no_warnings from the baseline."""
+    captured: list[dict] = []
+    factory = _make_ydl_factory({}, captured_opts=captured)
+    extract_playlist_info(
+        "https://example.com",
+        ydl_class=factory,
+        extra_opts={"no_warnings": False},
+    )
+    assert captured[0]["no_warnings"] is False
+    assert captured[0]["quiet"] is True

@@ -67,6 +67,37 @@ class TestExtractTitle:
         title = executor._extract_title(["https://example.com/invalid"])
         assert title == "https://example.com/invalid"
 
+    @patch("src.download_executor.extract_playlist_info")
+    def test_extract_title_passes_cookiefile_from_options(
+        self,
+        mock_extract_func: Mock,
+    ) -> None:
+        """Test that cookiefile from options is forwarded to extract_playlist_info."""
+        mock_extract_func.return_value = {"title": "Age Restricted Video"}
+
+        executor = DownloadExecutor()
+        options = {"cookiefile": "/path/to/cookies.txt", "format": "bestvideo+bestaudio"}
+        title = executor._extract_title(["https://example.com/video"], options)
+
+        assert title == "Age Restricted Video"
+        _, kwargs = mock_extract_func.call_args
+        assert kwargs.get("extra_opts") == {"cookiefile": "/path/to/cookies.txt"}
+
+    @patch("src.download_executor.extract_playlist_info")
+    def test_extract_title_no_extra_opts_when_no_cookiefile(
+        self,
+        mock_extract_func: Mock,
+    ) -> None:
+        """Test that extra_opts is None when options has no cookiefile."""
+        mock_extract_func.return_value = {"title": "Some Video"}
+
+        executor = DownloadExecutor()
+        options = {"format": "bestvideo+bestaudio"}
+        executor._extract_title(["https://example.com/video"], options)
+
+        _, kwargs = mock_extract_func.call_args
+        assert kwargs.get("extra_opts") is None
+
 
 class TestTry720Fallback:
     """Tests for 720p fallback strategy."""
@@ -639,3 +670,140 @@ class TestExecuteEdgeCases:
 
         # Verify cache.remove() was called
         mock_ydl_instance.cache.remove.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# New boundary tests for _extract_title cookiefile edge cases and the
+# execute() → _extract_title options-forwarding path.
+# ---------------------------------------------------------------------------
+
+
+class TestExtractTitleCookiefileBoundaries:
+    """Boundary tests for cookiefile handling in _extract_title."""
+
+    @patch("src.download_executor.extract_playlist_info")
+    def test_options_none_default_passes_no_extra_opts(
+        self, mock_extract: Mock
+    ) -> None:
+        """options=None (default) must not set extra_opts — backward compat."""
+        mock_extract.return_value = {"title": "Some Video"}
+        executor = DownloadExecutor()
+        title = executor._extract_title(["https://example.com/video"])
+        assert title == "Some Video"
+        _, kwargs = mock_extract.call_args
+        assert kwargs.get("extra_opts") is None
+
+    @patch("src.download_executor.extract_playlist_info")
+    def test_options_with_cookiefile_none_passes_no_extra_opts(
+        self, mock_extract: Mock
+    ) -> None:
+        """cookiefile=None in options — walrus produces None which is falsy, so no extra_opts."""
+        mock_extract.return_value = {"title": "Video"}
+        executor = DownloadExecutor()
+        executor._extract_title(["https://example.com/video"], {"cookiefile": None})
+        _, kwargs = mock_extract.call_args
+        assert kwargs.get("extra_opts") is None
+
+    @patch("src.download_executor.extract_playlist_info")
+    def test_options_with_cookiefile_empty_string_passes_no_extra_opts(
+        self, mock_extract: Mock
+    ) -> None:
+        """cookiefile="" is falsy — walrus short-circuits, extra_opts must remain None."""
+        mock_extract.return_value = {"title": "Video"}
+        executor = DownloadExecutor()
+        executor._extract_title(["https://example.com/video"], {"cookiefile": ""})
+        _, kwargs = mock_extract.call_args
+        assert kwargs.get("extra_opts") is None
+
+    @patch("src.download_executor.extract_playlist_info")
+    def test_options_empty_dict_passes_no_extra_opts(
+        self, mock_extract: Mock
+    ) -> None:
+        """options={} (no cookiefile key at all) — extra_opts must remain None."""
+        mock_extract.return_value = {"title": "Video"}
+        executor = DownloadExecutor()
+        executor._extract_title(["https://example.com/video"], {})
+        _, kwargs = mock_extract.call_args
+        assert kwargs.get("extra_opts") is None
+
+    @patch("src.download_executor.extract_playlist_info")
+    def test_options_cookiefile_whitespace_string_forwarded(
+        self, mock_extract: Mock
+    ) -> None:
+        """
+        Cookiefile containing only whitespace is truthy — it IS forwarded.
+
+        This documents the boundary: callers must sanitise the cookiefile value
+        themselves; _extract_title forwards any truthy string without validation.
+        """
+        mock_extract.return_value = {"title": "Video"}
+        executor = DownloadExecutor()
+        executor._extract_title(["https://example.com/video"], {"cookiefile": "   "})
+        _, kwargs = mock_extract.call_args
+        assert kwargs.get("extra_opts") == {"cookiefile": "   "}
+
+    @patch("src.download_executor.extract_playlist_info")
+    def test_options_with_other_keys_but_no_cookiefile_passes_no_extra_opts(
+        self, mock_extract: Mock
+    ) -> None:
+        """Options dict with many keys but no cookiefile must not produce extra_opts."""
+        mock_extract.return_value = {"title": "Video"}
+        executor = DownloadExecutor()
+        executor._extract_title(
+            ["https://example.com/video"],
+            {"format": "bestvideo+bestaudio", "merge_output_format": "mp4", "quiet": True},
+        )
+        _, kwargs = mock_extract.call_args
+        assert kwargs.get("extra_opts") is None
+
+
+class TestExecuteForwardsCookiefileOnError:
+    """Verify execute() passes options (including cookiefile) to _extract_title on error."""
+
+    @patch("src.download_executor.extract_playlist_info")
+    @patch("src.download_executor.YoutubeDL")
+    def test_execute_passes_options_to_extract_title_on_download_error(
+        self,
+        mock_ydl_class: Mock,
+        mock_extract: Mock,
+    ) -> None:
+        """When execute() catches a DownloadError, _extract_title receives options so age-restricted lookups succeed."""
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.download.side_effect = DownloadError("Auth required")
+        mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+        mock_extract.return_value = {"title": "Age Restricted Title"}
+
+        executor = DownloadExecutor()
+        options = {
+            "cookiefile": "/cookies.txt",
+            "qmeta": {"site": "youtube", "type": "audio"},
+        }
+        success, error = executor.execute(["https://youtube.com/watch?v=age"], options)
+
+        assert success is False
+        # extract_playlist_info was called with the cookiefile forwarded
+        mock_extract.assert_called_once()
+        _, kwargs = mock_extract.call_args
+        assert kwargs.get("extra_opts") == {"cookiefile": "/cookies.txt"}
+        # The resolved title appears in the error message
+        assert "Age Restricted Title" in error
+
+    @patch("src.download_executor.extract_playlist_info")
+    @patch("src.download_executor.YoutubeDL")
+    def test_execute_no_cookiefile_in_options_extra_opts_is_none(
+        self,
+        mock_ydl_class: Mock,
+        mock_extract: Mock,
+    ) -> None:
+        """execute() with no cookiefile in options must forward extra_opts=None."""
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.download.side_effect = DownloadError("fail")
+        mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+        mock_extract.return_value = {"title": "Plain Video"}
+
+        executor = DownloadExecutor()
+        options = {"qmeta": {"site": "youtube", "type": "audio"}}
+        executor.execute(["https://youtube.com/watch?v=x"], options)
+
+        _, kwargs = mock_extract.call_args
+        assert kwargs.get("extra_opts") is None
