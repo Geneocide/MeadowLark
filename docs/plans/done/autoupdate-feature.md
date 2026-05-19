@@ -14,7 +14,7 @@ Add three things to the existing `version_utils` module (same file that handles 
 
 ```python
 APP_VERSION: str = "0.1.0"   # keep in sync with pyproject.toml on each release
-_GITHUB_RELEASES_URL = "https://api.github.com/repos/Geneocide/vid-downloader/releases"
+_GITHUB_RELEASES_URL = "https://api.github.com/repos/TheGeneCode/vid-downloader/releases"
 _GITHUB_API_TIMEOUT: int = 5
 ```
 

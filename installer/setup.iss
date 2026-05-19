@@ -5,7 +5,7 @@
 [Setup]
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppPublisher=Geneocide
+AppPublisher=TheGene
 DefaultDirName={autopf}\MeadowLark
 DefaultGroupName={#AppName}
 OutputDir=..\installer_output

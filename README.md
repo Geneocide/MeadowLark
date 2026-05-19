@@ -58,7 +58,7 @@ It also handles:
 
 > **Windows 10/11 only.**
 
-1. Go to the [Releases page](https://github.com/Geneocide/MeadowLark/releases) and download `MeadowLark-Setup-{version}.exe`.
+1. Go to the [Releases page](https://github.com/TheGeneCode/MeadowLark/releases) and download `MeadowLark-Setup-{version}.exe`.
 2. Double-click the installer and follow the wizard. You can optionally create a desktop shortcut during setup.
 3. Launch MeadowLark from the Start Menu or your desktop shortcut.
 
@@ -235,7 +235,7 @@ To turn off automatic checks: **Settings → Interface → Auto-check for app up
 ## Developer Setup
 
 ```sh
-git clone https://github.com/Geneocide/MeadowLark
+git clone https://github.com/TheGeneCode/MeadowLark
 cd MeadowLark
 uv sync
 cp .env.example .env

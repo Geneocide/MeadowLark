@@ -2024,4 +2024,3 @@ if __name__ == "__main__":
 # TODO: size control for error logs (low priority)
 # TODO: resizing makes Audio big (low priority)
 # TODO: make sure tests don't leave logs in the real error log
-# TODO: better cookie.txt explanation

@@ -18,7 +18,7 @@ def _resolve_app_version() -> str:
 
 
 APP_VERSION: str = _resolve_app_version()
-GITHUB_REPO_URL: str = "https://github.com/Geneocide/MeadowLark"
+GITHUB_REPO_URL: str = "https://github.com/TheGeneCode/MeadowLark"
 
 
 def get_publish_date() -> str | None:
@@ -43,7 +43,9 @@ def get_publish_date() -> str | None:
 
 _PYPI_API_TIMEOUT: int = 3
 _GITHUB_API_TIMEOUT: int = 5
-_GITHUB_RELEASES_URL: str = "https://api.github.com/repos/Geneocide/MeadowLark/releases"
+_GITHUB_RELEASES_URL: str = (
+    "https://api.github.com/repos/TheGeneCode/MeadowLark/releases"
+)
 
 
 def normalize_version(version: str | None) -> tuple[int, ...]:
