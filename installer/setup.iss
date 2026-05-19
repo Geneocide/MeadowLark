@@ -3,6 +3,9 @@
 #define AppExe  "MeadowLark.exe"
 
 [Setup]
+; AppId matches the AppName Inno used implicitly before this was set — this means
+; existing installs are detected and upgraded in-place with no migration code needed.
+AppId=MeadowLark
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=TheGene
@@ -14,6 +17,7 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
+CloseApplications=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -31,6 +35,7 @@ Name: "{userdesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 [Registry]
 ; Add app directory to user PATH so ffmpeg.exe is found by shutil.which()
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Check: NeedsAddPath(ExpandConstant('{app}'))
+
 [Code]
 function NeedsAddPath(Param: string): boolean;
 var

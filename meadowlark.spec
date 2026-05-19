@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 a = Analysis(
     ["meadowlark.pyw"],
@@ -7,7 +7,7 @@ a = Analysis(
     binaries=[
         (".venv/Scripts/deno.exe", "."),
     ],
-    datas=[
+    datas=copy_metadata("meadowlark") + [
         ("resources", "resources"),
     ],
     hiddenimports=[
