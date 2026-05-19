@@ -1887,7 +1887,9 @@ class MyWindow(QWidget):
         self._app_update_worker.moveToThread(self._app_update_thread)
         self._app_update_thread.started.connect(self._app_update_worker.run)
         self._app_update_worker.finished.connect(
-            lambda avail, tag, url: self._on_app_update_result(avail, tag, url, auto=auto)
+            lambda avail, tag, url: self._on_app_update_result(
+                avail, tag, url, auto=auto
+            )
         )
         self._app_update_worker.finished.connect(self._app_update_thread.quit)
         self._app_update_thread.start()
@@ -1902,7 +1904,9 @@ class MyWindow(QWidget):
             try:
                 last_dt = date.fromisoformat(str(last_checked))
                 if (date.today() - last_dt).days < 7:
-                    logger.info("Auto app update check skipped: last checked %s", last_checked)
+                    logger.info(
+                        "Auto app update check skipped: last checked %s", last_checked
+                    )
                     return
             except ValueError:
                 pass
@@ -1919,9 +1923,7 @@ class MyWindow(QWidget):
     ) -> None:
         """Handle the result of the background app update check."""
         if auto:
-            _persist_setting(
-                "VID_DL_APP_UPDATE_LAST_CHECKED", date.today().isoformat()
-            )
+            _persist_setting("VID_DL_APP_UPDATE_LAST_CHECKED", date.today().isoformat())
         if not update_available:
             if not auto:
                 QMessageBox.information(
@@ -2023,5 +2025,3 @@ if __name__ == "__main__":
 # TODO: resizing makes Audio big (low priority)
 # TODO: make sure tests don't leave logs in the real error log
 # TODO: better cookie.txt explanation
-# TODO: settings to toggle mark as watched for YT
-# TODO: auto update check with opt out settings

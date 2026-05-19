@@ -40,6 +40,7 @@ from .config import (
     LABEL_DROP_1080,
     LABEL_DROP_AUDIO,
     LABEL_READY_TEXT,
+    MARK_WATCHED,
     PLAYLISTS_720_FILE,
     PLAYLISTS_AUDIO_FILE,
     PLAYLISTS_FILE,
@@ -131,6 +132,12 @@ HELP_TEXT: dict[str, str] = {
         "When enabled, the app silently checks for a newer release once per week at startup.\n"
         "If a new version is found you are prompted to download it. Disable to opt out."
     ),
+    "VID_DL_MARK_WATCHED": (
+        "When enabled, downloaded YouTube videos are automatically marked as watched\n"
+        "in your YouTube account.\n\n"
+        "Requires a cookies.txt file with an active YouTube login session.\n"
+        "Configure your cookies.txt path in the Playlists tab."
+    ),
 }
 
 # ============================================================================
@@ -172,6 +179,7 @@ def _init_runtime_settings() -> None:
             "VID_DL_ALWAYS_ON_TOP": ALWAYS_ON_TOP,
             "VID_DL_APP_UPDATE_AUTO_CHECK": APP_UPDATE_AUTO_CHECK,
             "VID_DL_APP_UPDATE_LAST_CHECKED": APP_UPDATE_LAST_CHECKED,
+            "VID_DL_MARK_WATCHED": MARK_WATCHED,
         }
     )
 
@@ -377,6 +385,16 @@ class SettingsDialog(QDialog):
         row, combo = _make_combo_row("VID_DL_AUDIO_FORMAT", AUDIO_FORMAT_OPTIONS, self)
         self._edits["VID_DL_AUDIO_FORMAT"] = combo
         form.addRow(QLabel("Audio format:"), _wrap(row))
+
+        mw_check = QCheckBox(self)
+        mw_check.setChecked(bool(get_setting("VID_DL_MARK_WATCHED")))
+        help_mw = _make_help_button("VID_DL_MARK_WATCHED", self)
+        mw_row = QHBoxLayout()
+        mw_row.addWidget(mw_check)
+        mw_row.addWidget(help_mw)
+        mw_row.addStretch()
+        self._edits["VID_DL_MARK_WATCHED"] = mw_check
+        form.addRow(QLabel("Mark watched on YouTube:"), _wrap(mw_row))
 
         tab.setLayout(form)
         return tab

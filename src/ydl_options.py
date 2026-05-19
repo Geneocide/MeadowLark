@@ -34,7 +34,7 @@ def build_base_ydl_opts(logger: YdlLogger, qhook: YdlProgressHook) -> dict[str, 
     Returns:
         Dictionary of base yt-dlp options suitable for most downloads.
     """
-    return {
+    opts: dict[str, Any] = {
         "logger": logger,
         "progress_hooks": [qhook],
         "windowsfilenames": True,
@@ -47,6 +47,9 @@ def build_base_ydl_opts(logger: YdlLogger, qhook: YdlProgressHook) -> dict[str, 
         "js_runtimes": JS_RUNTIMES_CONFIG,
         "remote_components": ["ejs:github"],
     }
+    if get_setting("VID_DL_MARK_WATCHED"):
+        opts["mark_watched"] = True
+    return opts
 
 
 def _build_video_format_selector(height: int | None, vfmt: str) -> str:

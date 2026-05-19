@@ -152,6 +152,9 @@ ALWAYS_ON_TOP: Final[bool] = (
 APP_UPDATE_AUTO_CHECK: Final[bool] = (
     os.getenv("VID_DL_APP_UPDATE_AUTO_CHECK", "true").lower() == "true"
 )
+MARK_WATCHED: Final[bool] = (
+    os.getenv("VID_DL_MARK_WATCHED", "false").lower() == "true"
+)
 APP_UPDATE_LAST_CHECKED: Final[str] = os.getenv("VID_DL_APP_UPDATE_LAST_CHECKED", "")
 PODCAST_CHECK_INTERVAL_MINUTES: Final[int] = int(
     os.getenv("VID_DL_PODCAST_CHECK_INTERVAL_MINUTES", "60"),
