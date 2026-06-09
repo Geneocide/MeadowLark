@@ -12,6 +12,7 @@ from src.podcast_filtering import (
     format_timestamp_readable,
     load_downloaded_video_ids,
     parse_scheduled_time_from_error,
+    parse_video_id_from_error,
     parse_video_timestamp,
 )
 
@@ -77,6 +78,126 @@ def test_parse_scheduled_time_from_error_scheduled() -> None:
 def test_parse_scheduled_time_from_error_invalid() -> None:
     err = "Unknown error message"
     assert parse_scheduled_time_from_error(err) is None
+
+
+def test_parse_video_id_from_error_premiere() -> None:
+    err = "ERROR: [youtube] dQw4w9WgXcQ: This live event will begin in 2 hours."
+    assert parse_video_id_from_error(err) == "dQw4w9WgXcQ"
+
+
+def test_parse_video_id_from_error_scheduled_date() -> None:
+    err = (
+        "ERROR: [youtube] abc_DEF-123: This live event will begin… "
+        "scheduled to begin 2025-12-25 10:00 UTC"
+    )
+    assert parse_video_id_from_error(err) == "abc_DEF-123"
+
+
+def test_parse_video_id_from_error_no_match() -> None:
+    err = "Unknown error message"
+    assert parse_video_id_from_error(err) is None
+
+
+def test_parse_video_id_from_error_ignores_playlist_tab() -> None:
+    err = "ERROR: [youtube:tab] PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx: blah"
+    assert parse_video_id_from_error(err) is None
+
+
+# ---------------------------------------------------------------------------
+# parse_video_id_from_error — boundary matrix for ID length and prefix variants
+# ---------------------------------------------------------------------------
+
+
+def test_parse_video_id_from_error_10_char_id_no_match() -> None:
+    """10-char ID is below the required 11 — must not be extracted."""
+    err = "ERROR: [youtube] 1234567890: some error"
+    # The regex requires exactly 11 chars; a 10-char ID followed by ':' must not match.
+    result = parse_video_id_from_error(err)
+    assert result is None
+
+
+def test_parse_video_id_from_error_12_char_id_no_match() -> None:
+    """
+    12-char ID is above the required 11 — must not be extracted as a whole token.
+
+    The regex `{11}` is greedy-fixed-length.  A 12-char run ``ABCDEFGHIJKLmore:``
+    does NOT end in ``:`` at position 11, so the pattern does not match the
+    12-char ID.  The ID following ``[youtube]`` must be exactly 11 chars.
+    """
+    err = "ERROR: [youtube] 123456789012: some error"
+    result = parse_video_id_from_error(err)
+    assert result is None
+
+
+def test_parse_video_id_from_error_no_trailing_colon_no_match() -> None:
+    """11-char ID with no trailing colon must not be extracted."""
+    err = "ERROR: [youtube] dQw4w9WgXcQ some error"
+    assert parse_video_id_from_error(err) is None
+
+
+def test_parse_video_id_from_error_empty_string_returns_none() -> None:
+    """Empty input must return None without raising."""
+    assert parse_video_id_from_error("") is None
+
+
+def test_parse_video_id_from_error_multiple_youtube_tags_returns_first() -> None:
+    """When two [youtube] patterns appear, the first 11-char ID is returned."""
+    err = (
+        "ERROR: [youtube] AAAAAAAAAAA: first error; "
+        "[youtube] BBBBBBBBBBB: second error"
+    )
+    assert parse_video_id_from_error(err) == "AAAAAAAAAAA"
+
+
+def test_parse_video_id_from_error_ignores_youtube_playlist_prefix() -> None:
+    """[youtube:playlist] prefix (not [youtube:tab]) must also be ignored."""
+    err = "ERROR: [youtube:playlist] PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx: blah"
+    assert parse_video_id_from_error(err) is None
+
+
+def test_parse_video_id_from_error_uppercase_youtube_prefix_no_match() -> None:
+    """[YOUTUBE] (uppercase) must not match — the pattern is case-sensitive."""
+    err = "ERROR: [YOUTUBE] dQw4w9WgXcQ: some error"
+    assert parse_video_id_from_error(err) is None
+
+
+def test_parse_video_id_from_error_id_with_hyphen_and_underscore() -> None:
+    """IDs that mix ``-`` and ``_`` must be captured correctly."""
+    err = "ERROR: [youtube] a-b_cD3EfGH: some premiere"
+    assert parse_video_id_from_error(err) == "a-b_cD3EfGH"
+
+
+# ---------------------------------------------------------------------------
+# parse_scheduled_time_from_error — additional boundary cases
+# ---------------------------------------------------------------------------
+
+
+def test_parse_scheduled_time_from_error_days_unit() -> None:
+    """'will begin in X days' must convert days to seconds correctly."""
+    from datetime import datetime, timezone
+
+    err = "This live event will begin in 3 days"
+    ts = parse_scheduled_time_from_error(err)
+    assert ts is not None
+    expected_min = datetime.now(tz=timezone.utc).timestamp() + 3 * 86400 - 5
+    expected_max = datetime.now(tz=timezone.utc).timestamp() + 3 * 86400 + 5
+    assert expected_min < ts < expected_max
+
+
+def test_parse_scheduled_time_from_error_full_datetime_with_utc_suffix() -> None:
+    """'scheduled to begin YYYY-MM-DD HH:MM:SS UTC' must parse correctly."""
+    from datetime import datetime, timezone
+
+    err = "This stream is scheduled to begin 2026-01-15 09:30:00 UTC"
+    ts = parse_scheduled_time_from_error(err)
+    assert ts is not None
+    expected = datetime(2026, 1, 15, 9, 30, 0, tzinfo=timezone.utc).timestamp()
+    assert ts == expected
+
+
+def test_parse_scheduled_time_from_error_empty_string_returns_none() -> None:
+    """Empty input must return None without raising."""
+    assert parse_scheduled_time_from_error("") is None
 
 
 @patch("src.podcast_filtering.requests.get")

@@ -124,6 +124,7 @@ from src.podcast_filtering import (
     format_timestamp_readable,
     load_downloaded_video_ids,
     parse_scheduled_time_from_error,
+    parse_video_id_from_error,
     parse_video_timestamp,
 )
 from src.podcast_helpers import fetch_latest_accessible_entry
@@ -134,6 +135,7 @@ from src.settings_dialog import (
     get_setting,
 )
 from src.url_utils import extract_playlist_id
+from src.ydl_utils import extract_playlist_info
 from UIClasses import DropLabel, PlaylistButton, PlaylistDialog
 
 logger = logging.getLogger(__name__)
@@ -178,6 +180,20 @@ def _make_podcast_status_entry(
         "url": url,
         **kwargs,
     }
+
+
+def _label_from_comments(url: str, audio_pl_comments: dict) -> str | None:
+    """
+    Return the user-assigned playlist label for ``url``, or ``None`` if unset.
+
+    Resolves offline using only the playlist id, so it is safe to call from
+    error paths (e.g. upcoming-premiere extraction failures) where yt-dlp
+    ``info`` was never fetched.  Callers supply their own fallback via ``or``.
+    """
+    pl_id = extract_playlist_id(url)
+    if pl_id and pl_id in audio_pl_comments:
+        return utils.sanitize_for_path(audio_pl_comments[pl_id])
+    return None
 
 
 class MyWindow(QWidget):
@@ -1054,13 +1070,9 @@ class MyWindow(QWidget):
                     if cached is not None:
                         cached_vid = cached.get("video_id")
                         if cached_vid and cached_vid in existing_ids:
-                            pl_id = extract_playlist_id(url)
-                            if pl_id and pl_id in audio_pl_comments:
-                                playlist_label = utils.sanitize_for_path(
-                                    audio_pl_comments[pl_id]
-                                )
-                            else:
-                                playlist_label = url
+                            playlist_label = (
+                                _label_from_comments(url, audio_pl_comments) or url
+                            )
                             status_entry = _make_podcast_status_entry(
                                 playlist_label,
                                 url,
@@ -1076,11 +1088,9 @@ class MyWindow(QWidget):
                     messages.append(
                         f"Latest episode for podcast {url} is private - using previous accessible video",
                     )
-                pl_id = extract_playlist_id(url)
-                if pl_id and pl_id in audio_pl_comments:
-                    playlist_label = utils.sanitize_for_path(audio_pl_comments[pl_id])
-                else:
-                    playlist_label = utils.resolve_playlist_label(info, url)
+                playlist_label = _label_from_comments(
+                    url, audio_pl_comments
+                ) or utils.resolve_playlist_label(info, url)
                 status_entry = _make_podcast_status_entry(playlist_label, url)
 
                 vid: str | None = None
@@ -1141,13 +1151,18 @@ class MyWindow(QWidget):
                 errstr = str(e)
                 scheduled_ts = parse_scheduled_time_from_error(errstr)
                 if scheduled_ts:
+                    vid = parse_video_id_from_error(errstr)
+                    extra: dict[str, object] = {"recheck_ts": scheduled_ts}
+                    if vid:
+                        extra["latest_url"] = f"https://www.youtube.com/watch?v={vid}"
+                        extra["latest_ts"] = scheduled_ts
                     statuses.append(
                         _make_podcast_status_entry(
-                            url,
+                            _label_from_comments(url, audio_pl_comments) or url,
                             url,
                             status="Upcoming",
                             latest_date="(scheduled)",
-                            recheck_ts=scheduled_ts,
+                            **extra,
                         ),
                     )
                     messages.append(
@@ -1158,7 +1173,7 @@ class MyWindow(QWidget):
                     messages.append(f"Error expanding playlist/url {url}: {e}")
                     statuses.append(
                         _make_podcast_status_entry(
-                            url,
+                            _label_from_comments(url, audio_pl_comments) or url,
                             url,
                             status=f"Error: {e}",
                             latest_date="(error)",
@@ -1329,45 +1344,77 @@ class MyWindow(QWidget):
             return
         row = index.row()
         menu = QMenu(table)
+
         action_open = menu.addAction("Open Latest Video in Browser")
+        action_open.triggered.connect(
+            lambda: self._guarded_status_action(
+                self._open_latest_for_row,
+                row,
+                error_label="open latest video",
+            ),
+        )
 
-        def _do_open() -> None:
-            statuses = getattr(self, "_podcast_last_statuses", [])
-            if 0 <= row < len(statuses):
-                st = statuses[row]
-                playlist_url = st.get("url")
-                label = st.get("podcast")
-                # Prefer status-provided latest_url (from cache populated by status generation)
-                latest_url = st.get("latest_url")
-                if not latest_url and playlist_url:
-                    latest_url = self._cache_get_fresh(playlist_url)
-                if latest_url:
-                    self._open_url_in_browser(latest_url, label)
-                else:
-                    # Fallback: resolve on-demand and cache
-                    resolved = self._resolve_latest_via_ytdlp(playlist_url)
-                    if resolved:
-                        self._cache_put(
-                            playlist_url,
-                            resolved["url"],
-                            resolved.get("ts"),
-                        )
-                        self._open_url_in_browser(resolved["url"], label)
-                    else:
-                        self.logEdit.appendPlainText(
-                            f"Could not resolve latest episode for {label or playlist_url}",
-                        )
-
-        action_open.triggered.connect(_do_open)
-
-        # new Download Now option for bypassing SponsorBlock wait
-        def _do_download_now() -> None:
-            self._download_podcast_now_action(row)
-
+        # Download Now bypasses the SponsorBlock wait
         action_download = menu.addAction("Download Now")
-        action_download.triggered.connect(_do_download_now)
+        action_download.triggered.connect(
+            lambda: self._guarded_status_action(
+                self._download_podcast_now_action,
+                row,
+                error_label="start download now",
+            ),
+        )
 
         menu.exec(table.viewport().mapToGlobal(pos))
+
+    def _guarded_status_action(
+        self,
+        action: Callable[[int], None],
+        row: int,
+        *,
+        error_label: str,
+    ) -> None:
+        """
+        Run a status-table action, logging any error instead of crashing.
+
+        Unhandled exceptions raised inside a Qt slot terminate the whole
+        process, so this boundary keeps a failed menu action from taking the
+        app down silently.
+        """
+        try:
+            action(row)
+        except Exception as exc:  # noqa: BLE001 - UI event boundary
+            self.logEdit.appendPlainText(f"Failed to {error_label}: {exc}")
+            utils.log_exception(exc, f"Error in status menu action: {error_label}")
+
+    def _open_latest_for_row(self, row: int) -> None:
+        """Open the latest episode for the podcast at ``row`` in a browser."""
+        statuses = getattr(self, "_podcast_last_statuses", [])
+        if not (0 <= row < len(statuses)):
+            return
+        st = statuses[row]
+        playlist_url = st.get("url")
+        label = st.get("podcast")
+        # Prefer status-provided latest_url (from cache populated by status generation)
+        latest_url = st.get("latest_url")
+        if not latest_url and playlist_url:
+            latest_url = self._cache_get_fresh(playlist_url)
+        if latest_url:
+            self._open_url_in_browser(latest_url, label)
+            return
+        # Fallback: resolve on-demand and cache (skip if we have no playlist URL)
+        resolved = self._resolve_latest_via_ytdlp(playlist_url) if playlist_url else None
+        if resolved:
+            self._cache_put(playlist_url, resolved["url"], resolved.get("ts"))
+            self._open_url_in_browser(resolved["url"], label)
+        else:
+            self.logEdit.appendPlainText(
+                f"Could not resolve latest episode for {label or playlist_url}",
+            )
+            if playlist_url:
+                self.logEdit.appendPlainText(
+                    f"Opening podcast page for {label or playlist_url} instead",
+                )
+                self._open_url_in_browser(playlist_url, label)
 
     def _resolve_latest_via_ytdlp(self, playlist_url: str) -> dict | None:
         """
@@ -1376,11 +1423,15 @@ class MyWindow(QWidget):
         Returns dict with {"url": webpage_url, "ts": timestamp} or None on error.
         """
         try:
-            info = utils.extract_playlist_info(playlist_url, playlistend=1)
-            entries = info.get("entries", [info])
-            if not entries:
+            info = extract_playlist_info(playlist_url, playlistend=1)
+            if not info:
                 return None
-            latest = entries[0]
+            entries = info.get("entries", [info])
+            # Upcoming/unavailable items can surface as a None entry (or the
+            # whole list may be empty); skip those instead of dereferencing None.
+            latest = next((e for e in entries if e), None)
+            if not latest:
+                return None
             webpage = latest.get("webpage_url") or latest.get("url")
             ts = latest.get("timestamp")
             if webpage:
@@ -1391,6 +1442,14 @@ class MyWindow(QWidget):
                 exc,
                 f"Failed to resolve latest episode via yt-dlp for {playlist_url}",
             )
+            # Upcoming premieres fail extraction but name the video in the error
+            # string; recover the watch URL so "Open Latest Video" still works.
+            vid = parse_video_id_from_error(str(exc))
+            if vid:
+                return {
+                    "url": f"https://www.youtube.com/watch?v={vid}",
+                    "ts": parse_scheduled_time_from_error(str(exc)),
+                }
             return None
 
     def _try_open_default_browser(self, url: str, label: str | None) -> bool:

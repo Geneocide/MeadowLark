@@ -173,6 +173,30 @@ def parse_scheduled_time_from_error(error_str: str) -> float | None:
     return None
 
 
+def parse_video_id_from_error(error_str: str) -> str | None:
+    """
+    Extract a YouTube video ID from a yt-dlp extraction error message.
+
+    Upcoming premieres / scheduled live events fail extraction before any
+    entry is yielded, but yt-dlp's error string still names the offending
+    video using its standard ``[youtube] <id>:`` prefix, e.g.::
+
+        ERROR: [youtube] dQw4w9WgXcQ: This live event will begin in 2 hours.
+
+    Video IDs are exactly 11 characters from ``[0-9A-Za-z_-]``. Requiring the
+    trailing colon and the ``[youtube]`` (not ``[youtube:tab]``) prefix keeps
+    this from matching 34-character playlist IDs.
+
+    Args:
+        error_str: Error message string from yt-dlp.
+
+    Returns:
+        The 11-character video ID, or None if no pattern matches.
+    """
+    match = re.search(r"\[youtube\]\s+([0-9A-Za-z_-]{11}):", error_str)
+    return match.group(1) if match else None
+
+
 def _try_parse_datetime(
     date_str: str,
     formats: tuple[str, ...],

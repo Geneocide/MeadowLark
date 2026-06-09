@@ -13,6 +13,26 @@ from src.exceptions import PodcastResolutionError
 from src.podcast_helpers import MAX_LOOKAHEAD
 
 
+def _restore_module(name: str, mod: types.ModuleType | None) -> None:
+    """
+    Restore (or remove) a saved module and its parent-package attribute.
+
+    exec_module re-imports popped submodules under the fake yt_dlp and rebinds
+    them on their parent package (e.g. src.ydl_utils on src).  Restoring only
+    sys.modules leaves a stale fake-bound attribute that breaks mock.patch
+    targets resolved via getattr-walk like "src.ydl_utils.yt_dlp.YoutubeDL".
+    """
+    if mod is None:
+        sys.modules.pop(name, None)
+        return
+    sys.modules[name] = mod
+    parent_name, _, child = name.rpartition(".")
+    if parent_name:
+        parent = sys.modules.get(parent_name)
+        if parent is not None:
+            setattr(parent, child, mod)
+
+
 def import_vid_module():
     # before loading the target module, provide a minimal fake yt_dlp so the
     # import statement inside the file succeeds.  Individual tests will
@@ -70,18 +90,10 @@ def import_vid_module():
     try:
         spec.loader.exec_module(vd)
     finally:
-        if old_yt_dlp is not None:
-            sys.modules["yt_dlp"] = old_yt_dlp
-        else:
-            sys.modules.pop("yt_dlp", None)
-        if old_yt_dlp_utils is not None:
-            sys.modules["yt_dlp.utils"] = old_yt_dlp_utils
-        else:
-            sys.modules.pop("yt_dlp.utils", None)
-        if old_src_download_executor is not None:
-            sys.modules["src.download_executor"] = old_src_download_executor
-        if old_src_ydl_utils is not None:
-            sys.modules["src.ydl_utils"] = old_src_ydl_utils
+        _restore_module("yt_dlp", old_yt_dlp)
+        _restore_module("yt_dlp.utils", old_yt_dlp_utils)
+        _restore_module("src.download_executor", old_src_download_executor)
+        _restore_module("src.ydl_utils", old_src_ydl_utils)
     return vd
 
 
