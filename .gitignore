@@ -20,6 +20,9 @@ scripts/*
 # Track the PO-token provider setup script (dev checkout + Phase 3 CI both run it);
 # the rest of scripts/ stays local-only.
 !scripts/setup_pot_provider.py
+# Track the yt-dlp channel checker -- test_ydl_player_client.py loads it from disk,
+# so CI's clean checkout needs it present or TestChannelChecker fails.
+!scripts/yt_dlp_channel.py
 docs/
 vendor/bgutil-pot-provider/server/node_modules/
 # Re-include the vendored lockfile that the global "*.lock" rule would exclude;
