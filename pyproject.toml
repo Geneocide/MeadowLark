@@ -1,6 +1,6 @@
 [project]
 name = "meadowlark"
-version = "0.3.6"
+version = "0.3.7"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -66,9 +66,16 @@ ignore = [
     "PLR0913", # Too many arguments in function definition
     "PLR0911", # Too many return statements
     "FBT003",  # Boolean positional value in function call
+    "ANN401",  # Dynamically typed `Any` — generic merges, Qt signal args, test helpers
+    "BLE001",  # Blind `except Exception` — intentional defensive top-level catches
+    "TRY300",  # Consider moving to `else` block — style preference
+    "C901",    # Function too complex — acceptable for this app's size
+    "DTZ007",  # Naive datetime from strptime — version dates are tz-naive by design
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["PLC0415", "TRY002", "N818", "PT018", "N806", "RUF012"]
+"tests/**" = ["PLC0415", "TRY002", "N818", "PT018", "N806", "RUF012", "N802", "N815"]
+# PyQt event-handler overrides (dragEnterEvent, dropEvent, ...) must match Qt's API.
+"UIClasses.py" = ["N802"]
 # Standalone dev/CLI tools, intentionally not an importable package.
 "scripts/**" = ["INP001"]

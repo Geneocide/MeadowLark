@@ -14,14 +14,14 @@ _user_env = Path.home() / "AppData" / "Roaming" / "MeadowLark" / ".env"
 load_dotenv(dotenv_path=_user_env if _user_env.exists() else None)
 load_dotenv()  # also load project .env in dev (won't override vars already set)
 
-import utils
-from src.config import (
+import utils  # noqa: E402  (imported after load_dotenv so env is set at import time)
+from src.config import (  # noqa: E402
     ERROR_LOG_PATH,
     HISTORY_LOG_PATH,
     LOGFILE_MIGRATION_ENABLED,
 )
-from src.download_executor import DownloadExecutor
-from src.logging_utils import get_local_timestamp
+from src.download_executor import DownloadExecutor  # noqa: E402
+from src.logging_utils import get_local_timestamp  # noqa: E402
 
 logging.basicConfig(
     filename=str(ERROR_LOG_PATH),

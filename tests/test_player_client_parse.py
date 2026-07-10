@@ -36,7 +36,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -51,7 +50,8 @@ def _mock_hook() -> MagicMock:
 
 def _build_opts(player_clients: str, mark_watched_setting: Any = False) -> dict[str, Any]:
     """
-    Call build_base_ydl_opts with:
+    Call build_base_ydl_opts with patched module globals.
+
     - src.ydl_options.YOUTUBE_PLAYER_CLIENTS patched to *player_clients*
     - src.ydl_options.get_setting returning *mark_watched_setting*
     """
@@ -142,7 +142,7 @@ def test_extractor_args_and_mark_watched_both_present_when_setting_true() -> Non
 
 
 def test_cookiefile_always_present(tmp_path: Any) -> None:
-    """cookiefile key must always be set regardless of player_client value (B3)."""
+    """Cookiefile key must always be set regardless of player_client value (B3)."""
     opts = _build_opts("web_safari,tv")
     assert "cookiefile" in opts
     assert opts["cookiefile"] is not None

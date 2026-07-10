@@ -65,7 +65,7 @@ def slugify_if_too_long(
     if len(tentative) <= max_total:
         return label
     base = re.sub(r"[^A-Za-z0-9]+", "-", label).strip("-")[:MIN_SLUG_LEN]
-    h = hashlib.sha1(label.encode("utf-8")).hexdigest()[:HASH_LENGTH]
+    h = hashlib.sha1(label.encode("utf-8"), usedforsecurity=False).hexdigest()[:HASH_LENGTH]
     slug = f"{base}-{h}" if base else h
     return slug or "misc"
 

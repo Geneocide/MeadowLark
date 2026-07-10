@@ -218,7 +218,7 @@ class PlaylistButton(QPushButton):
         """
         if event.button() == Qt.MouseButton.RightButton:
             if self.playlist_path.exists():
-                startfile(self.playlist_path)
+                startfile(self.playlist_path)  # noqa: S606  (os.startfile, no shell/subprocess)
             else:
                 msg = f"Playlist file not found: {self.playlist_path}"
                 utils.log_exception(
