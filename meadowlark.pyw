@@ -42,7 +42,7 @@ import sys
 import time
 import webbrowser
 from collections.abc import Callable
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from os import startfile
 from pathlib import Path
 from typing import ClassVar
@@ -128,6 +128,7 @@ from src.podcast_filtering import (
     parse_video_timestamp,
 )
 from src.podcast_helpers import fetch_latest_accessible_entry
+from src.pot_provider import check_pot_provider
 from src.settings_dialog import (
     SettingsDialog,
     _init_runtime_settings,
@@ -1060,7 +1061,7 @@ class MyWindow(QWidget):
         statuses: list[dict] = []
         archive_path = ydl_opts.get("download_archive")
         existing_ids: set[str] = load_downloaded_video_ids(archive_path)
-        now_ts = datetime.now(tz=timezone.utc).timestamp()
+        now_ts = datetime.now(tz=UTC).timestamp()
         audio_pl_comments = utils.load_playlist_comments_for_source("audio_playlists")
 
         for url in urls:
@@ -1617,7 +1618,7 @@ class MyWindow(QWidget):
                 rts = s.get("recheck_ts")
                 if rts and url:
                     self._podcast_recheck_times[url] = rts
-                    now_ts = datetime.now(tz=timezone.utc).timestamp()
+                    now_ts = datetime.now(tz=UTC).timestamp()
                     if rts > now_ts and url not in self._podcast_recheck_timers:
                         delay_ms = int((rts - now_ts) * 1000)
                         t = QTimer(self)
@@ -1642,7 +1643,7 @@ class MyWindow(QWidget):
                     if t:
                         with contextlib.suppress(Exception):
                             t.stop()
-            except (AttributeError, TypeError, KeyError, RuntimeError) as exc:  # noqa: PERF203
+            except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
                 utils.log_exception(
                     exc,
                     "Unexpected error while processing podcast statuses",
@@ -1816,7 +1817,7 @@ class MyWindow(QWidget):
     # --- Hourly automated YT Podcasts checks ---
     def _schedule_hourly_podcast_checks(self) -> None:
         """Schedule the initial single-shot to fire at the next :15 past the hour, then start recurring hourly checks."""
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         # Target minute is 15 past the hour
         target = now.replace(minute=15, second=0, microsecond=0)
         if now >= target:
@@ -2077,6 +2078,18 @@ if __name__ == "__main__":
         else:
             _deno_msg = f"Deno not found at {deno_exe}.\nRun `uv sync` to install it."
         QMessageBox.warning(None, "Deno not found", _deno_msg)
+
+    _pot = check_pot_provider()
+    if not _pot.ok:
+        QMessageBox.warning(
+            None,
+            "PO Token Providers: none",
+            "The YouTube PO-token provider is not fully set up "
+            f"(missing: {_pot.summary()}).\n\n"
+            "1080p downloads will fail with HTTP 403 "
+            '("unable to download video data"). Lower resolutions still work.\n\n'
+            "See the README PO-token setup section to fix this.",
+        )
 
     app.exec()
 

@@ -1,6 +1,6 @@
 """Comprehensive tests for PodcastFilterExecutor podcast filtering logic."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from src.podcast_filter_executor import PodcastFilterExecutor
@@ -37,9 +37,9 @@ class TestPodcastFilterExecutorInitialization:
 
     def test_init_sets_current_timestamp(self):
         """Test that executor captures current timestamp on init."""
-        before = datetime.now(tz=timezone.utc).timestamp()
+        before = datetime.now(tz=UTC).timestamp()
         executor = PodcastFilterExecutor()
-        after = datetime.now(tz=timezone.utc).timestamp()
+        after = datetime.now(tz=UTC).timestamp()
         assert before <= executor.now_ts <= after
 
 
@@ -466,8 +466,12 @@ class TestEvaluatePlaylistUrls:
     def test_timestamp_parsing_in_status_entry(self):
         """Test timestamp is parsed and formatted in status."""
         executor = PodcastFilterExecutor()
-        now = datetime.now(tz=timezone.utc)
-        ts = now.timestamp()
+        now = datetime.now(tz=UTC)
+        # 1 hour ago: deterministically in the past so this is "Ready", not
+        # "Upcoming". Using now.timestamp() directly was flaky — the executor
+        # samples now_ts before this line, so a sub-second-later timestamp reads
+        # as a future/upcoming episode under the high-resolution clock (Py 3.13+).
+        ts = now.timestamp() - 3600
         entries = [
             {
                 "id": "vid123",

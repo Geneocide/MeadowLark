@@ -1,6 +1,6 @@
 """Podcast filtering logic extraction for testable episode evaluation."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import QYT
@@ -46,7 +46,7 @@ class PodcastFilterExecutor:
         self.messages = messages if messages is not None else []
         self.bypass_sponsorblock_wait = bypass_sponsorblock_wait
         self.existing_ids = load_downloaded_video_ids(archive_path)
-        self.now_ts = datetime.now(tz=timezone.utc).timestamp()
+        self.now_ts = datetime.now(tz=UTC).timestamp()
 
     def evaluate_playlist_urls(
         self,

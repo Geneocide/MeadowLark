@@ -657,19 +657,27 @@ class TestExecuteEdgeCases:
         assert error == ""
 
     @patch("src.download_executor.YoutubeDL")
-    def test_execute_cache_cleared_on_each_attempt(
+    def test_execute_preserves_ydl_cache(
         self,
         mock_ydl_class: Mock,
     ) -> None:
-        """Test yt-dlp cache is cleared before each download attempt."""
+        """
+        yt-dlp cache must be preserved across downloads.
+
+        Wiping ~/.cache/yt-dlp before every run destroys the cached YouTube
+        JS-challenge solver library, forcing a fresh GitHub fetch each time and
+        turning a transient upstream failure into an unrecoverable
+        "Requested format is not available". The executor must never call
+        ``cache.remove()``.
+        """
         mock_ydl_instance = MagicMock()
         mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
 
         executor = DownloadExecutor()
         executor.execute(["url"], {"test": True})
 
-        # Verify cache.remove() was called
-        mock_ydl_instance.cache.remove.assert_called()
+        mock_ydl_instance.cache.remove.assert_not_called()
+        mock_ydl_instance.download.assert_called_once_with(["url"])
 
 
 # ---------------------------------------------------------------------------

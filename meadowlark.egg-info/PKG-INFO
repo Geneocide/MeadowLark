@@ -1,8 +1,8 @@
 Metadata-Version: 2.4
 Name: meadowlark
-Version: 0.3.2
+Version: 0.3.5
 Summary: Add your description here
-Requires-Python: >=3.10
+Requires-Python: >=3.11
 Description-Content-Type: text/markdown
 Requires-Dist: deno>=2.5.4
 Requires-Dist: python-dotenv>=1.0.0
@@ -12,7 +12,9 @@ Requires-Dist: pyqt6>=6.9.1
 Requires-Dist: pytest-cov>=7.1.0
 Requires-Dist: requests>=2.32.5
 Requires-Dist: wakepy>=0.10.2.post1
+Requires-Dist: bgutil-ytdlp-pot-provider>=1.3.1
 Requires-Dist: yt-dlp>=2025.7.21
+Requires-Dist: yt-dlp-ejs>=0.8.0
 
 # MeadowLark
 
@@ -227,6 +229,45 @@ Browser cookies expire eventually (usually after a few weeks to a few months). I
 
 ---
 
+## YouTube 1080p Downloads & the PO-Token Provider
+
+YouTube gates 1080p (and higher) video streams behind a per-video **GVS PO token** (yt-dlp [#12482](https://github.com/yt-dlp/yt-dlp/issues/12482)). Without that token, the app can still fetch the metadata and *lower* resolutions, but every 1080p download fails at the media stage with:
+
+```
+unable to download video data: HTTP Error 403: Forbidden
+```
+
+MeadowLark mints the token with the **[bgutil-ytdlp-pot-provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider)** plugin running in **script (Deno) mode**. The plugin is a pinned dependency (installed by `uv sync`), and the Deno runtime is auto-installed into `.venv/Scripts`. The provider's generate script is **vendored** into the repo under `vendor/bgutil-pot-provider/server` (pinned to the same version as the plugin); its Node dependencies (`node_modules`) are generated once by `scripts/setup_pot_provider.py`.
+
+### What the app checks at startup
+
+On launch MeadowLark probes the provider and, if anything is missing, shows a **"PO Token Providers: none"** warning naming the missing pieces. It looks for:
+
+| Component | Where |
+|---|---|
+| Provider plugin | importable `yt_dlp_plugins.extractor.getpot_bgutil_script` (from `uv sync`) |
+| Deno runtime ≥ 2.0 | `deno.exe` in `.venv/Scripts` (from `uv sync`) |
+| Generate script | `{server_home}/src/generate_once.ts` |
+| Script dependencies | `{server_home}/node_modules` |
+
+`server_home` defaults to the vendored `vendor/bgutil-pot-provider/server` (dev) or the bundled `bgutil-server` dir (frozen build), and is overridable with the `VID_DL_POT_SERVER_HOME` environment variable.
+
+### Setting up the provider server
+
+> **Installer users don't need this.** The packaged build (from `installer\setup.iss`) bundles the Deno runtime, the provider plugin, and the generate script **with its `node_modules` already built** into the app's `bgutil-server` folder, so 1080p works out of the box. The steps below are only for running MeadowLark **from source**.
+
+The generate script is already vendored in the repo, so setup is a single command:
+
+```sh
+uv run python scripts/setup_pot_provider.py
+```
+
+This runs `deno install` in `vendor/bgutil-pot-provider/server`, creating `node_modules` next to the vendored `src/generate_once.ts`. Run it once after `uv sync` (re-running is a no-op unless you pass `--force`). Then restart MeadowLark — the warning dialog should no longer appear, and 1080p downloads will succeed.
+
+> If you keep the provider somewhere else, point `VID_DL_POT_SERVER_HOME` at that `server` directory (the folder containing `src/generate_once.ts` and `node_modules`).
+
+---
+
 ## Download History
 
 MeadowLark keeps two logs in its AppData folder:
@@ -254,10 +295,13 @@ To turn off automatic checks: **Settings → Interface → Auto-check for app up
 git clone https://github.com/TheGeneCode/MeadowLark
 cd MeadowLark
 uv sync
+uv run python scripts/setup_pot_provider.py   # installs the vendored PO-token provider deps (needed for 1080p)
 cp .env.example .env
 git config core.hooksPath .githooks
 uv run python meadowlark.pyw
 ```
+
+> Skipping `setup_pot_provider.py` means 1080p downloads fail with HTTP 403 and the app shows a "PO Token Providers: none" warning at startup. See [YouTube 1080p Downloads](#youtube-1080p-downloads--the-po-token-provider).
 
 ### Prerequisites
 
@@ -292,3 +336,4 @@ Advanced users can override defaults by editing the `.env` file in `AppData\Roam
 | `VID_DL_APP_UPDATE_AUTO_CHECK` | `true` | Check for a new app release once per week at startup (set to `false` to opt out) |
 | `VID_DL_APP_UPDATE_LAST_CHECKED` | _(empty)_ | ISO date of the last automatic update check; written by the app, not normally set by hand |
 | `VID_DL_MARK_WATCHED` | `false` | Auto-mark downloaded YouTube videos as watched via cookies session (requires valid `cookies.txt`) |
+| `VID_DL_POT_SERVER_HOME` | `vendor/bgutil-pot-provider/server` (dev) / bundled `bgutil-server` (frozen) | PO-token provider server home (bgutil script-deno mode); must contain `src/generate_once.ts` and `node_modules` (run `scripts/setup_pot_provider.py`). See [YouTube 1080p Downloads](#youtube-1080p-downloads--the-po-token-provider). |

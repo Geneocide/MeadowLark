@@ -1,7 +1,7 @@
 """Podcast filtering and categorization helpers for episode processing."""
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +31,7 @@ def parse_video_timestamp(entry: dict[str, Any]) -> float | None:
         try:
             ts = (
                 datetime.strptime(entry.get("upload_date"), "%Y%m%d")
-                .replace(tzinfo=timezone.utc)
+                .replace(tzinfo=UTC)
                 .timestamp()
             )
         except (ValueError, TypeError) as exc:
@@ -92,7 +92,7 @@ def format_timestamp_readable(ts: float | None) -> str:
     if ts is None:
         return "(unknown)"
     try:
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        dt = datetime.fromtimestamp(ts, tz=UTC)
         return dt.strftime("%Y-%m-%d")
     except (OSError, ValueError) as exc:
         utils.log_exception(exc, f"format_timestamp_readable: invalid timestamp {ts}")
@@ -159,7 +159,7 @@ def parse_scheduled_time_from_error(error_str: str) -> float | None:
         value = int(match.group(1))
         unit = match.group(2).lower()
         multiplier = 3600 if "hour" in unit else 86400
-        return datetime.now(tz=timezone.utc).timestamp() + (value * multiplier)
+        return datetime.now(tz=UTC).timestamp() + (value * multiplier)
 
     # Try "scheduled to begin" with date patterns
     match = re.search(r"scheduled to begin (.+?)(?:\s+UTC)?$", error_str)
@@ -214,9 +214,9 @@ def _try_parse_datetime(
     for fmt in formats:
         try:
             return datetime.strptime(date_str, fmt).replace(
-                tzinfo=timezone.utc,
+                tzinfo=UTC,
             )
-        except ValueError:  # noqa: PERF203
+        except ValueError:
             continue
     return None
 
@@ -238,7 +238,7 @@ def check_sponsorblock_for_video_id(video_id: str) -> bool:
         if r.status_code == HTTP_OK:
             data = r.json()
             return bool(data)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         # Catch all exceptions to ensure API issues don't crash the download
         utils.log_exception(exc, "SponsorBlock API check failed")
     return False

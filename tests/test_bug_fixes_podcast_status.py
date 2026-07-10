@@ -109,11 +109,11 @@ def _make_stub_win(vd: types.ModuleType, *, statuses: list[dict] | None = None):
     logged_lines: list[str] = []
 
     class _LogEdit:
-        def appendPlainText(self, text: str) -> None:  # noqa: N802
+        def appendPlainText(self, text: str) -> None:
             logged_lines.append(text)
 
     class StubWin:
-        logEdit = _LogEdit()  # noqa: N815
+        logEdit = _LogEdit()
         _podcast_last_statuses: list[dict] = statuses if statuses is not None else []
         _podcast_latest_url_cache: dict = {}
         CACHE_TTL_SECONDS = vd.MyWindow.CACHE_TTL_SECONDS

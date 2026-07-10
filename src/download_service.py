@@ -311,7 +311,7 @@ class DownloadService:
                     f"Error checking live queue: {e}",
                 )
                 utils.log_exception(e, f"Error checking live queue: {url}")
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 remaining[url] = (source, playlist_id)
                 self.log_edit_append_callback(
                     f"Unexpected error checking live queue: {e}",

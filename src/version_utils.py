@@ -35,7 +35,7 @@ def get_publish_date() -> str | None:
         return None
     date_part = APP_VERSION.split("_", 1)[-1]
     try:
-        dt = datetime.strptime(date_part, "%Y-%m-%d").date()  # noqa: DTZ007
+        dt = datetime.strptime(date_part, "%Y-%m-%d").date()
         return dt.strftime("%B %d, %Y")
     except ValueError:
         return None
@@ -92,7 +92,7 @@ def get_latest_yt_dlp_version() -> str | None:
         r = requests.get("https://pypi.org/pypi/yt-dlp/json", timeout=_PYPI_API_TIMEOUT)
         if r.status_code == http.HTTPStatus.OK:
             return r.json()["info"]["version"]
-        return None  # noqa: TRY300
+        return None
     except requests.exceptions.RequestException:
         return None
 
@@ -126,7 +126,7 @@ def get_latest_app_release() -> dict | None:
         if r.status_code == http.HTTPStatus.OK:
             releases = r.json()
             return releases[0] if releases else None
-        return None  # noqa: TRY300
+        return None
     except requests.exceptions.RequestException:
         return None
 

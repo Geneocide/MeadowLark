@@ -23,7 +23,7 @@ def merge_dicts_recursive(
         - Other values are replaced by overrides.
     """
 
-    def _merge(a: Any, b: Any) -> Any:  # noqa: ANN401
+    def _merge(a: Any, b: Any) -> Any:
         if isinstance(a, dict) and isinstance(b, dict):
             out = dict(a)
             for k, v in b.items():

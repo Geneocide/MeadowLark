@@ -1,9 +1,9 @@
 [project]
 name = "meadowlark"
-version = "0.3.5"
+version = "0.3.6"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "deno>=2.5.4",
     "python-dotenv>=1.0.0",
@@ -13,7 +13,9 @@ dependencies = [
     "pytest-cov>=7.1.0",
     "requests>=2.32.5",
     "wakepy>=0.10.2.post1",
+    "bgutil-ytdlp-pot-provider>=1.3.1",
     "yt-dlp>=2025.7.21",
+    "yt-dlp-ejs>=0.8.0",
 ]
 
 [dependency-groups]
@@ -68,3 +70,5 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["PLC0415", "TRY002", "N818", "PT018", "N806", "RUF012"]
+# Standalone dev/CLI tools, intentionally not an importable package.
+"scripts/**" = ["INP001"]

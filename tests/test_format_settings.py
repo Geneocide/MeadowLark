@@ -219,7 +219,7 @@ class TestGetSourceOptionsFallback:
             ("mp4", ""),
         ],
     )
-    def test_audio_format_no_none_literal(self, vfmt: Any, afmt: Any) -> None:  # noqa: ANN401
+    def test_audio_format_no_none_literal(self, vfmt: Any, afmt: Any) -> None:
         with _patch_formats(vfmt, afmt):
             opts = get_source_options("audio")
         assert "None" not in opts["format"]
@@ -234,7 +234,7 @@ class TestGetSourceOptionsFallback:
             ("mp4", None),
         ],
     )
-    def test_audio_preferredcodec_no_none_literal(self, vfmt: Any, afmt: Any) -> None:  # noqa: ANN401
+    def test_audio_preferredcodec_no_none_literal(self, vfmt: Any, afmt: Any) -> None:
         with _patch_formats(vfmt, afmt):
             opts = get_source_options("audio")
         codec = opts["postprocessors"][0]["preferredcodec"]
@@ -242,13 +242,13 @@ class TestGetSourceOptionsFallback:
         assert codec  # non-empty
 
     @pytest.mark.parametrize("vfmt", [None, ""])
-    def test_720playlists_merge_output_format_never_none(self, vfmt: Any) -> None:  # noqa: ANN401
+    def test_720playlists_merge_output_format_never_none(self, vfmt: Any) -> None:
         with _patch_formats(vfmt, "m4a"):
             opts = get_source_options("720playlists")
         assert opts["merge_output_format"] not in (None, "", "None")
 
     @pytest.mark.parametrize("vfmt", [None, ""])
-    def test_unknown_source_merge_output_format_never_none(self, vfmt: Any) -> None:  # noqa: ANN401
+    def test_unknown_source_merge_output_format_never_none(self, vfmt: Any) -> None:
         with _patch_formats(vfmt, "m4a"):
             opts = get_source_options("garbage")
         assert opts["merge_output_format"] not in (None, "", "None")
@@ -383,7 +383,7 @@ class TestApplyComboBox:
         combo = self._make_combo_with_value("mkv")
         persisted: dict[str, Any] = {}
 
-        def _fake_persist(key: str, value: Any) -> None:  # noqa: ANN401
+        def _fake_persist(key: str, value: Any) -> None:
             persisted[key] = value
             sd._runtime[key] = value
 
@@ -403,7 +403,7 @@ class TestApplyComboBox:
         combo = self._make_combo_with_value("mp4")
         persist_called = False
 
-        def _fake_persist(key: str, value: Any) -> None:  # noqa: ANN401
+        def _fake_persist(key: str, value: Any) -> None:
             nonlocal persist_called
             persist_called = True
 
@@ -419,7 +419,7 @@ class TestApplyComboBox:
         combo = self._make_combo_with_value("webm")
         changes: dict[str, Any] = {}
 
-        def _fake_persist(key: str, value: Any) -> None:  # noqa: ANN401
+        def _fake_persist(key: str, value: Any) -> None:
             changes[key] = value
             sd._runtime[key] = value
 
@@ -644,7 +644,7 @@ class TestRemuxvideoKeyPresence:
     @pytest.mark.parametrize("source", ["720playlists", "1080playlists", "480", "garbage"])
     @pytest.mark.parametrize("vfmt", [None, ""])
     def test_remuxvideo_falls_back_to_mp4_when_vfmt_falsy(
-        self, source: str, vfmt: Any  # noqa: ANN401
+        self, source: str, vfmt: Any
     ) -> None:
         """When vfmt is falsy, FFmpegVideoRemuxer preferedformat must be 'mp4'."""
         with _patch_formats(vfmt, "m4a"):

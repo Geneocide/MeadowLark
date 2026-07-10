@@ -1,6 +1,6 @@
 """Unit tests for podcast_filtering helpers."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -27,7 +27,7 @@ def test_parse_video_timestamp_uses_upload_date_as_fallback() -> None:
     result = parse_video_timestamp(entry)
     assert isinstance(result, float)
     assert (
-        datetime.fromtimestamp(result, tz=timezone.utc).strftime("%Y%m%d") == "20240301"
+        datetime.fromtimestamp(result, tz=UTC).strftime("%Y%m%d") == "20240301"
     )
 
 
@@ -41,7 +41,7 @@ def test_format_timestamp_readable_unknown() -> None:
 
 
 def test_format_timestamp_readable_valid() -> None:
-    ts = datetime(2024, 3, 1, tzinfo=timezone.utc).timestamp()
+    ts = datetime(2024, 3, 1, tzinfo=UTC).timestamp()
     assert format_timestamp_readable(ts) == "2024-03-01"
 
 
@@ -66,7 +66,7 @@ def test_parse_scheduled_time_from_error_primetime() -> None:
     err = "This live event will begin in 2 hours"
     ts = parse_scheduled_time_from_error(err)
     assert ts is not None
-    assert ts > datetime.now(tz=timezone.utc).timestamp()
+    assert ts > datetime.now(tz=UTC).timestamp()
 
 
 def test_parse_scheduled_time_from_error_scheduled() -> None:
@@ -174,24 +174,24 @@ def test_parse_video_id_from_error_id_with_hyphen_and_underscore() -> None:
 
 def test_parse_scheduled_time_from_error_days_unit() -> None:
     """'will begin in X days' must convert days to seconds correctly."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     err = "This live event will begin in 3 days"
     ts = parse_scheduled_time_from_error(err)
     assert ts is not None
-    expected_min = datetime.now(tz=timezone.utc).timestamp() + 3 * 86400 - 5
-    expected_max = datetime.now(tz=timezone.utc).timestamp() + 3 * 86400 + 5
+    expected_min = datetime.now(tz=UTC).timestamp() + 3 * 86400 - 5
+    expected_max = datetime.now(tz=UTC).timestamp() + 3 * 86400 + 5
     assert expected_min < ts < expected_max
 
 
 def test_parse_scheduled_time_from_error_full_datetime_with_utc_suffix() -> None:
     """'scheduled to begin YYYY-MM-DD HH:MM:SS UTC' must parse correctly."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     err = "This stream is scheduled to begin 2026-01-15 09:30:00 UTC"
     ts = parse_scheduled_time_from_error(err)
     assert ts is not None
-    expected = datetime(2026, 1, 15, 9, 30, 0, tzinfo=timezone.utc).timestamp()
+    expected = datetime(2026, 1, 15, 9, 30, 0, tzinfo=UTC).timestamp()
     assert ts == expected
 
 

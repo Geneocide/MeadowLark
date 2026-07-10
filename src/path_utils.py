@@ -65,7 +65,7 @@ def slugify_if_too_long(
     if len(tentative) <= max_total:
         return label
     base = re.sub(r"[^A-Za-z0-9]+", "-", label).strip("-")[:MIN_SLUG_LEN]
-    h = hashlib.sha1(label.encode("utf-8")).hexdigest()[:HASH_LENGTH]  # noqa: S324
+    h = hashlib.sha1(label.encode("utf-8")).hexdigest()[:HASH_LENGTH]
     slug = f"{base}-{h}" if base else h
     return slug or "misc"
 
@@ -96,7 +96,7 @@ def resolve_playlist_label(info: dict, url: str) -> str:
     return sanitize_for_path(label)
 
 
-def rename_playlist_folders_from_comments(  # noqa: C901
+def rename_playlist_folders_from_comments(
     base_output_dir: str,
     urls: list[str],
     playlist_comments: dict[str, str] | None = None,
@@ -146,5 +146,5 @@ def rename_playlist_folders_from_comments(  # noqa: C901
                             exc,
                             f"Failed to rename NA folder to {new_name}",
                         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log_exception(exc, "Error during playlist folder renaming from comments")

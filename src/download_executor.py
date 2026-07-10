@@ -41,10 +41,18 @@ class DownloadExecutor:
         """Emit a status message via callback."""
         self.message_callback(message)
 
-    def _download_with_cache_clear(self, opts: dict, urls: list) -> None:
-        """Run yt-dlp download after clearing cache to avoid stale format data."""
+    def _run_download(self, opts: dict, urls: list) -> None:
+        """
+        Run a yt-dlp download.
+
+        Note: we deliberately do NOT wipe ``ydl.cache`` here. Recent yt-dlp
+        caches the YouTube JS-challenge solver library (and player data) under
+        ~/.cache/yt-dlp; blanket-clearing it every run forced a fresh GitHub
+        fetch of the solver on each download, turning a transient upstream blip
+        (e.g. HTTP 504) into a hard "Requested format is not available" failure.
+        yt-dlp keys its cache by player URL/version and self-invalidates.
+        """
         with YoutubeDL(opts) as ydl:
-            ydl.cache.remove()
             ydl.download(urls)
 
     def _extract_title(self, urls: list, options: dict | None = None) -> str:
@@ -78,21 +86,22 @@ class DownloadExecutor:
         urls: list,
         options: dict,
         tried_flag: str,
-        trigger_phrase: str,
+        trigger_phrase: str | tuple[str, ...],
         error_str: str,
         message: str,
         options_modifier: Callable[[dict], dict],
         log_context: str,
     ) -> tuple[bool, str]:
-        """Attempt a generic fallback download if trigger phrase present and not yet tried."""
-        if trigger_phrase not in error_str or options.get(tried_flag):
+        """Attempt a generic fallback download if a trigger phrase is present and not yet tried."""
+        phrases = (trigger_phrase,) if isinstance(trigger_phrase, str) else trigger_phrase
+        if not any(phrase in error_str for phrase in phrases) or options.get(tried_flag):
             return False, error_str
         self._emit_message(message)
         fallback = options_modifier(options)
         fallback[tried_flag] = True
         try:
-            self._download_with_cache_clear(fallback, urls)
-            return True, error_str  # noqa: TRY300
+            self._run_download(fallback, urls)
+            return True, error_str
         except YDL_EXTRACTION_ERRORS as e2:
             utils.log_exception(e2, log_context)
             return False, str(e2)
@@ -125,9 +134,16 @@ class DownloadExecutor:
             urls=urls,
             options=options,
             tried_flag="_tried_720_fallback",
-            trigger_phrase="Requested format is not available",
+            # 403 / "unable to download video data": YouTube gated the selected
+            # 1080 media URL (e.g. SABR/PO-token experiment, #12482). A lower
+            # rung often resolves to a still-servable format on the tv client.
+            trigger_phrase=(
+                "Requested format is not available",
+                "unable to download video data",
+                "HTTP Error 403",
+            ),
             error_str=error_str,
-            message=f"Requested 1080 format not available for '{title}'; retrying at 720...",
+            message=f"1080 format unavailable or blocked for '{title}'; retrying at 720...",
             options_modifier=_modify,
             log_context="720p fallback attempt failed",
         )
@@ -201,7 +217,7 @@ class DownloadExecutor:
         Returns (success: bool, error_message: str).
         """
         try:
-            self._download_with_cache_clear(options, urls)
+            self._run_download(options, urls)
             self._rename_na_folder_if_needed(options, urls)
         except (
             DownloadError,

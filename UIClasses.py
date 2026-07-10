@@ -75,7 +75,7 @@ class PlaylistDialog(QDialog):
         """
         return self.playlistInput.text()
 
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         """
         Handle the drag enter event.
 
@@ -110,7 +110,7 @@ class DropLabel(QLabel):
         self,
         text: str,
         color: str,
-        connection: Any,  # noqa: ANN401
+        connection: Any,
         source_key: str | None = None,
     ) -> None:
         """
@@ -139,7 +139,7 @@ class DropLabel(QLabel):
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self._revert_text)
 
-    def dragEnterEvent(self, event: QDragEnterEvent) -> bool:  # noqa: N802
+    def dragEnterEvent(self, event: QDragEnterEvent) -> bool:
         """
         Handle the drag enter event.
 
@@ -154,7 +154,7 @@ class DropLabel(QLabel):
     def _revert_text(self) -> None:
         self.setText(self.originalText)
 
-    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
+    def dropEvent(self, event: QDropEvent) -> None:
         """
         Handle the drop event by updating the label text, starting a timer to revert the text, and emitting the dropped URLs via the urls_dropped signal.
 
@@ -190,8 +190,8 @@ class PlaylistButton(QPushButton):
         self,
         text: str,
         playlist_path: str | Path,
-        *args: Any,  # noqa: ANN401
-        **kwargs: Any,  # noqa: ANN401
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         """
         .
@@ -207,7 +207,7 @@ class PlaylistButton(QPushButton):
         super().__init__(text, *args, **kwargs)
         self.playlist_path = Path(playlist_path)
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, event: QMouseEvent) -> None:
         """
         .
 
@@ -218,7 +218,7 @@ class PlaylistButton(QPushButton):
         """
         if event.button() == Qt.MouseButton.RightButton:
             if self.playlist_path.exists():
-                startfile(self.playlist_path)  # noqa: S606
+                startfile(self.playlist_path)
             else:
                 msg = f"Playlist file not found: {self.playlist_path}"
                 utils.log_exception(

@@ -1,0 +1,5 @@
+# graphify-out/ is regenerable and local-only — nothing here is committed.
+# Rebuild: `python scripts/graphify-build.py`  (or `graphify update .` for incremental)
+# A post-commit hook (graphify hook install) keeps it fresh automatically.
+*
+!.gitignore

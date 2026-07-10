@@ -7,9 +7,11 @@ from .config import (
     COOKIES_FILE,
     MAX_FRAGMENT_RETRIES,
     PODCAST_MISC_OUTPUT_DIR,
+    POT_PROVIDER_SERVER_HOME,
     SOCKET_TIMEOUT_SECONDS,
     VENV_SCRIPTS_DIR,
     VIDEO_STORAGE_DIR,
+    YOUTUBE_PLAYER_CLIENTS,
 )
 from .dict_utils import DEFAULT_POSTPROCESSORS
 from .qt_protocols import YdlLogger, YdlProgressHook
@@ -38,7 +40,7 @@ def build_base_ydl_opts(logger: YdlLogger, qhook: YdlProgressHook) -> dict[str, 
         "logger": logger,
         "progress_hooks": [qhook],
         "windowsfilenames": True,
-        "socket-timeout": SOCKET_TIMEOUT_SECONDS,
+        "socket_timeout": SOCKET_TIMEOUT_SECONDS,
         "max_fragment_retries": MAX_FRAGMENT_RETRIES,
         "mtime": True,
         # Custom match_filter will be set per-source by callers
@@ -46,6 +48,22 @@ def build_base_ydl_opts(logger: YdlLogger, qhook: YdlProgressHook) -> dict[str, 
         "postprocessors": list(DEFAULT_POSTPROCESSORS),
         "js_runtimes": JS_RUNTIMES_CONFIG,
         "remote_components": ["ejs:github"],
+        # Force an explicit client priority so YouTube's per-client 403 gating
+        # (SABR/PO-token experiment, #12482) can't steer us onto broken media
+        # URLs (see YOUTUBE_PLAYER_CLIENTS in config). Only affects YouTube.
+        "extractor_args": {
+            "youtube": {
+                "player_client": [
+                    c.strip() for c in YOUTUBE_PLAYER_CLIENTS.split(",") if c.strip()
+                ],
+            },
+            # Point the bgutil script provider at our vendored/bundled server copy
+            # instead of its ~/bgutil-ytdlp-pot-provider default. Extractor-arg
+            # values are lists; the provider reads _configuration_arg(...)[0].
+            "youtubepot-bgutilscript": {
+                "server_home": [str(POT_PROVIDER_SERVER_HOME)],
+            },
+        },
     }
     if get_setting("VID_DL_MARK_WATCHED"):
         opts["mark_watched"] = True

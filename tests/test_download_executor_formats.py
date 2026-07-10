@@ -129,6 +129,49 @@ class TestTry720FallbackGuards:
         assert error == ""
 
 
+class TestTry720FallbackTriggersOn403:
+    """Regression (#12482): a gated-1080 403 must also trigger the 720p retry, not only the 'format not available' phrase."""
+
+    @pytest.mark.parametrize(
+        "error_str",
+        [
+            "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+            "HTTP Error 403: Forbidden",
+        ],
+    )
+    def test_403_error_triggers_fallback(self, error_str: str) -> None:
+        """A 1080 media 403 must attempt the 720p fallback (inner download succeeds)."""
+        captured: list[dict] = []
+
+        class _CapturingYDL:
+            def __init__(self, opts: dict) -> None:
+                captured.append(opts)
+                self._mock_instance = MagicMock()
+
+            def __enter__(self) -> MagicMock:
+                return self._mock_instance
+
+            def __exit__(self, *_: object) -> None:
+                pass
+
+        with (
+            _patch_get_setting("mp4", "m4a"),
+            patch("src.download_executor.YoutubeDL", side_effect=_CapturingYDL),
+        ):
+            executor = _make_executor()
+            success, _ = executor._try_720_fallback(
+                ["https://example.com/v"],
+                {},
+                "Test Title",
+                "youtube",
+                error_str,
+            )
+
+        assert success is True, "403 should have triggered the 720p fallback"
+        assert captured, "fallback never attempted a download"
+        assert "height=720" in captured[0]["format"]
+
+
 # ===========================================================================
 # 2. Nominal format — non-default vfmt/afmt appear in the fallback format string
 # ===========================================================================
@@ -227,7 +270,7 @@ class TestFallbackToDefaults:
     """None and empty string settings must produce 'mp4'/'m4a', never 'None' or ''."""
 
     @pytest.mark.parametrize("vfmt", [None, ""])
-    def test_none_or_empty_vfmt_falls_back_to_mp4_in_format(self, vfmt: Any) -> None:  # noqa: ANN401
+    def test_none_or_empty_vfmt_falls_back_to_mp4_in_format(self, vfmt: Any) -> None:
         opts = _run_fallback_and_capture_options(vfmt, "m4a", {})
         assert "ext=mp4" in opts["format"]
         assert "None" not in opts["format"]
@@ -236,14 +279,14 @@ class TestFallbackToDefaults:
         )  # no other ext= fragments with garbage values
 
     @pytest.mark.parametrize("afmt", [None, ""])
-    def test_none_or_empty_afmt_falls_back_to_m4a_in_format(self, afmt: Any) -> None:  # noqa: ANN401
+    def test_none_or_empty_afmt_falls_back_to_m4a_in_format(self, afmt: Any) -> None:
         opts = _run_fallback_and_capture_options("mp4", afmt, {})
         assert "ext=m4a" in opts["format"]
         assert "None" not in opts["format"]
 
     @pytest.mark.parametrize("vfmt", [None, ""])
     def test_none_or_empty_vfmt_falls_back_to_mp4_for_merge_output_format(
-        self, vfmt: Any  # noqa: ANN401
+        self, vfmt: Any
     ) -> None:
         opts = _run_fallback_and_capture_options(vfmt, "m4a", {})
         assert opts["merge_output_format"] == "mp4"
@@ -483,7 +526,7 @@ class TestRemuxvideoKeyInFallback:
         )
 
     @pytest.mark.parametrize("vfmt", [None, ""])
-    def test_remuxvideo_falls_back_to_mp4_when_vfmt_falsy(self, vfmt: Any) -> None:  # noqa: ANN401
+    def test_remuxvideo_falls_back_to_mp4_when_vfmt_falsy(self, vfmt: Any) -> None:
         """Falsy vfmt must produce FFmpegVideoRemuxer preferedformat='mp4'."""
         opts = _run_fallback_and_capture_options(vfmt, "m4a", {})
         remuxer = _find_remuxer_in_fallback(opts)

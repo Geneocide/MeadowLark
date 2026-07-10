@@ -7,11 +7,22 @@ a = Analysis(
     binaries=[
         (".venv/Scripts/deno.exe", "."),
     ],
-    datas=copy_metadata("meadowlark") + [
+    datas=copy_metadata("meadowlark")
+    + copy_metadata("bgutil-ytdlp-pot-provider")
+    + [
         ("resources", "resources"),
+        (
+            ".venv/Lib/site-packages/yt_dlp_plugins/extractor",
+            "yt-dlp-plugins/extractor",
+        ),
+        ("vendor/bgutil-pot-provider/server", "bgutil-server"),
     ],
     hiddenimports=[
         *collect_submodules("yt_dlp"),
+        *collect_submodules("yt_dlp_plugins"),
+        "yt_dlp_plugins.extractor.getpot_bgutil",
+        "yt_dlp_plugins.extractor.getpot_bgutil_http",
+        "yt_dlp_plugins.extractor.getpot_bgutil_script",
         "keyring.backends.Windows",
         "wakepy._implementations",
     ],
