@@ -93,7 +93,12 @@ def test_extract_playlist_info_extra_opts_none_leaves_baseline_intact() -> None:
     captured: list[dict] = []
     factory = _make_ydl_factory({}, captured_opts=captured)
     extract_playlist_info("https://example.com", ydl_class=factory, extra_opts=None)
-    assert set(captured[0].keys()) == {"quiet", "no_warnings"}
+    assert set(captured[0].keys()) == {
+        "quiet",
+        "no_warnings",
+        "js_runtimes",
+        "extractor_args",
+    }
 
 
 def test_extract_video_entries_uses_default_ydl_class_when_none() -> None:
@@ -125,7 +130,12 @@ def test_extract_playlist_info_extra_opts_empty_dict_does_not_merge() -> None:
     captured: list[dict] = []
     factory = _make_ydl_factory({}, captured_opts=captured)
     extract_playlist_info("https://example.com", ydl_class=factory, extra_opts={})
-    assert set(captured[0].keys()) == {"quiet", "no_warnings"}
+    assert set(captured[0].keys()) == {
+        "quiet",
+        "no_warnings",
+        "js_runtimes",
+        "extractor_args",
+    }
 
 
 def test_extract_playlist_info_extra_opts_overrides_quiet_baseline() -> None:
@@ -182,3 +192,59 @@ def test_extract_playlist_info_extra_opts_adds_no_warnings_override() -> None:
     )
     assert captured[0]["no_warnings"] is False
     assert captured[0]["quiet"] is True
+
+
+# ---------------------------------------------------------------------------
+# PO-token provider wiring regression coverage.
+#
+# extract_playlist_info/extract_video_entries build their own YoutubeDL opts
+# independently of ydl_options.build_base_ydl_opts. Both are reached from
+# metadata-only call sites (meadowlark.pyw's on-demand "open latest episode"
+# resolution via extract_playlist_info, and DownloadExecutor._extract_title's
+# error-path title lookup) that must not fall back to the bgutil provider's
+# stale default server_home -- the same cold-cache Deno-probe timeout that
+# motivated build_shared_extraction_opts() in the first place.
+# ---------------------------------------------------------------------------
+
+
+def test_extract_playlist_info_carries_pot_provider_wiring() -> None:
+    from src.config import POT_PROVIDER_SERVER_HOME
+
+    captured: list[dict] = []
+    factory = _make_ydl_factory({}, captured_opts=captured)
+    extract_playlist_info("https://example.com", ydl_class=factory)
+
+    assert captured[0]["extractor_args"]["youtubepot-bgutilscript"]["server_home"] == [
+        str(POT_PROVIDER_SERVER_HOME)
+    ]
+    assert captured[0]["extractor_args"]["youtube"]["player_client"]
+    assert "js_runtimes" in captured[0]
+    # baseline quiet options must survive the merge
+    assert captured[0]["quiet"] is True
+    assert captured[0]["no_warnings"] is True
+
+
+def test_extract_playlist_info_extra_opts_still_win_over_pot_wiring() -> None:
+    """extra_opts (applied last) can still override a shared-wiring key if needed."""
+    captured: list[dict] = []
+    factory = _make_ydl_factory({}, captured_opts=captured)
+    extract_playlist_info(
+        "https://example.com",
+        ydl_class=factory,
+        extra_opts={"extractor_args": {}},
+    )
+    assert captured[0]["extractor_args"] == {}
+
+
+def test_extract_video_entries_carries_pot_provider_wiring() -> None:
+    from src.config import POT_PROVIDER_SERVER_HOME
+
+    captured: list[dict] = []
+    factory = _make_ydl_factory({"entries": [{"id": "v1"}]}, captured_opts=captured)
+    extract_video_entries("https://example.com", ydl_class=factory)
+
+    assert captured[0]["extractor_args"]["youtubepot-bgutilscript"]["server_home"] == [
+        str(POT_PROVIDER_SERVER_HOME)
+    ]
+    # per-call key must survive the merge
+    assert captured[0]["extract_flat"] is True

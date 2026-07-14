@@ -29,6 +29,73 @@ class TestFetchLatestAccessibleEntry:
     """Tests for fetch_latest_accessible_entry function."""
 
     @patch("src.podcast_helpers.yt_dlp.YoutubeDL")
+    def test_extraction_carries_pot_provider_wiring(
+        self, mock_ydl_class: MagicMock
+    ) -> None:
+        """
+        Metadata extraction must carry the shared PO-token provider wiring.
+
+        A bare YoutubeDL falls back to the plugin's
+        ~/bgutil-ytdlp-pot-provider default server_home, whose cold-cache
+        Deno probe overruns yt-dlp's 15s budget and raises
+        subprocess.TimeoutExpired into the podcast refresh.
+        """
+        from src.config import POT_PROVIDER_SERVER_HOME
+        from src.ydl_options import JS_RUNTIMES_CONFIG
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+        mock_ydl_instance.extract_info.return_value = {
+            "entries": [{"id": "vid123", "title": "Episode 1"}],
+            "id": "playlist123",
+        }
+
+        fetch_latest_accessible_entry("http://test.url")
+
+        opts = mock_ydl_class.call_args.args[0]
+        assert opts["extractor_args"]["youtubepot-bgutilscript"]["server_home"] == [
+            str(POT_PROVIDER_SERVER_HOME)
+        ]
+        assert opts["extractor_args"]["youtube"]["player_client"]
+        assert opts["js_runtimes"] == JS_RUNTIMES_CONFIG
+        # per-call options must survive the merge
+        assert opts["playlist_items"] == "1"
+
+    @patch("src.podcast_helpers.yt_dlp.YoutubeDL")
+    def test_pot_provider_wiring_carried_on_every_lookahead_retry(
+        self, mock_ydl_class: MagicMock
+    ) -> None:
+        """
+        Every lookahead retry must carry the wiring, not just the first call.
+
+        build_shared_extraction_opts() is invoked fresh inside the retry loop
+        (once per ``n``). A regression that only wired the first iteration
+        would leave later retries -- reached whenever the latest entry is a
+        private video -- exposed to the stale-server_home bug again.
+        """
+        from src.config import POT_PROVIDER_SERVER_HOME
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+        mock_ydl_instance.extract_info.side_effect = [
+            {"entries": [{"id": "p1", "title": "Private video"}], "id": "pl"},
+            {"entries": [{"id": "p2", "title": "Public"}], "id": "pl"},
+        ]
+
+        fetch_latest_accessible_entry("http://test.url")
+
+        assert mock_ydl_class.call_count == 2
+        for call in mock_ydl_class.call_args_list:
+            opts = call.args[0]
+            assert opts["extractor_args"]["youtubepot-bgutilscript"][
+                "server_home"
+            ] == [str(POT_PROVIDER_SERVER_HOME)]
+        # playlist_items must increment per retry, proving each call rebuilds
+        # (rather than reuses/caches) the merged opts.
+        assert mock_ydl_class.call_args_list[0].args[0]["playlist_items"] == "1"
+        assert mock_ydl_class.call_args_list[1].args[0]["playlist_items"] == "2"
+
+    @patch("src.podcast_helpers.yt_dlp.YoutubeDL")
     def test_single_iteration_success(self, mock_ydl_class: MagicMock) -> None:
         """Test successful fetch on first iteration (n=1)."""
         # Setup mock

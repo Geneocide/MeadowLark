@@ -410,7 +410,12 @@ class QYTQueue(QThread):
                 self.message_changed.emit(f"------  Downloading  ------\n{item[0]}")
                 try:
                     self.download(item[0], item[1])
-                except (OSError, ValueError, ConnectionError, RuntimeError) as exc:
+                # A failed item must never kill the worker: an exception escaping
+                # QThread.run() aborts the whole PyQt process. yt-dlp reaches into
+                # third-party plugins (e.g. the bgutil PO-token provider, which can
+                # raise subprocess.TimeoutExpired), so the set of exception types
+                # crossing this boundary is not enumerable in advance.
+                except Exception as exc:
                     utils.log_exception(
                         exc, f"QYTQueue.run: unhandled error for {item[0]}"
                     )

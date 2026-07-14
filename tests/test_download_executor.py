@@ -1,5 +1,6 @@
 """Tests for download executor logic with mocked yt-dlp calls."""
 
+import subprocess
 from unittest.mock import MagicMock, Mock, patch
 
 from yt_dlp.utils import DownloadError, ExtractorError
@@ -271,6 +272,34 @@ class TestExecute:
         success, error = executor.execute(["url"], {"test": True})
         assert success is True
         assert error == ""
+
+    @patch("src.download_executor.YoutubeDL")
+    def test_execute_reports_helper_process_timeout_as_failed_download(
+        self,
+        mock_ydl_class: Mock,
+    ) -> None:
+        """
+        Test a helper-process timeout inside yt-dlp is reported, not propagated.
+
+        The bgutil PO-token provider probes its Deno script with a hard 15s budget
+        and raises subprocess.TimeoutExpired when Deno has to re-resolve its npm
+        deps over the network. That is a failed download, not an app-level fault.
+        """
+        mock_ydl_instance = MagicMock()
+        mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+        mock_ydl_instance.download.side_effect = subprocess.TimeoutExpired(
+            cmd=["deno", "run", "generate_once.ts", "--version"],
+            timeout=15.0,
+        )
+
+        executor = DownloadExecutor()
+        success, error = executor.execute(
+            ["https://youtube.com/watch?v=test"],
+            {"qmeta": {"site": "youtube", "type": "1080"}},
+        )
+
+        assert success is False
+        assert "timed out after 15.0 seconds" in error
 
     @patch("src.download_executor.YoutubeDL")
     def test_execute_1080_format_not_available_falls_back_to_720(
@@ -644,6 +673,31 @@ class TestExecuteEdgeCases:
         success, error = executor.execute(["url"], {"test": True})
         assert success is False
         assert "Disk full" in error
+
+    @patch("src.download_executor.YoutubeDL")
+    def test_execute_called_process_error_reported_as_failed_download(
+        self,
+        mock_ydl_class: Mock,
+    ) -> None:
+        """
+        Test a non-timeout SubprocessError subclass is also caught and reported.
+
+        subprocess.CalledProcessError is a sibling of TimeoutExpired under
+        SubprocessError (e.g. the bgutil PO-token provider's Deno probe exiting
+        non-zero rather than timing out). YDL_DOWNLOAD_ERRORS must catch the
+        SubprocessError base, not just the timeout subclass exercised elsewhere.
+        """
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.download.side_effect = subprocess.CalledProcessError(
+            returncode=1,
+            cmd=["deno", "run", "generate_once.ts", "--version"],
+        )
+        mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+
+        executor = DownloadExecutor()
+        success, error = executor.execute(["url"], {"test": True})
+        assert success is False
+        assert "returned non-zero exit status" in error
 
     @patch("src.download_executor.YoutubeDL")
     def test_execute_with_empty_options(self, mock_ydl_class: Mock) -> None:

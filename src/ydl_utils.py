@@ -2,6 +2,8 @@
 
 import yt_dlp
 
+from .ydl_options import build_shared_extraction_opts
+
 _QUIET_YDL_OPTS: dict[str, bool] = {"quiet": True, "no_warnings": True}
 
 
@@ -13,6 +15,13 @@ def extract_playlist_info(
 ) -> dict:
     """
     Extract playlist/video info with standard quiet options.
+
+    Includes the shared PO-token provider wiring (see
+    ``build_shared_extraction_opts``) so metadata-only lookups -- e.g.
+    ``meadowlark.pyw``'s on-demand "open latest episode" resolution and
+    ``DownloadExecutor._extract_title``'s error-path title lookup -- don't
+    fall back to the bgutil provider's stale default server_home and hit its
+    cold-cache Deno probe budget.
 
     Args:
         url: The URL to extract info from.
@@ -26,7 +35,7 @@ def extract_playlist_info(
     """
     if ydl_class is None:
         ydl_class = yt_dlp.YoutubeDL
-    opts: dict = {**_QUIET_YDL_OPTS}
+    opts: dict = {**build_shared_extraction_opts(), **_QUIET_YDL_OPTS}
     if extra_opts:
         opts.update(extra_opts)
     if playlistend:
@@ -43,6 +52,9 @@ def extract_video_entries(
     """
     Extract entries from URL (playlist or video).
 
+    Includes the shared PO-token provider wiring (see
+    ``build_shared_extraction_opts``); see ``extract_playlist_info`` for why.
+
     Args:
         url: The URL to extract entries from.
         extract_flat: Whether to extract flat info (True) or full info (False).
@@ -53,7 +65,11 @@ def extract_video_entries(
     """
     if ydl_class is None:
         ydl_class = yt_dlp.YoutubeDL
-    opts = {**_QUIET_YDL_OPTS, "extract_flat": extract_flat}
+    opts = {
+        **build_shared_extraction_opts(),
+        **_QUIET_YDL_OPTS,
+        "extract_flat": extract_flat,
+    }
     with ydl_class(opts) as ydl:
         info = ydl.extract_info(url, download=False)
         return info.get("entries", [info])

@@ -1,9 +1,11 @@
 """Unit tests for QYT module classes and functionality."""
 
+import subprocess
 from pathlib import Path
 from queue import Queue
 from unittest.mock import MagicMock, patch
 
+import pytest
 from PyQt6.QtCore import QObject
 
 from QYT import HistoryHook, HistoryLogger, QHook, QLogger, QYTQueue, parse_history_log
@@ -440,6 +442,78 @@ class TestQYTQueue:
         assert ydl_queue.daemon is True
         assert hasattr(ydl_queue, "message_changed")
         assert hasattr(ydl_queue, "queue_empty")
+
+    def test_run_keeps_worker_alive_when_download_raises_unlisted_error(self) -> None:
+        """
+        Test the worker loop survives an exception type it does not enumerate.
+
+        yt-dlp calls into third-party plugins (the bgutil PO-token provider shells
+        out to Deno), so arbitrary exception types can cross this boundary. Anything
+        escaping QThread.run() aborts the whole PyQt process, so the item must fail
+        while the queue keeps running.
+        """
+
+        class _StopLoop(Exception):
+            """Breaks out of the otherwise infinite worker loop."""
+
+        queue = MagicMock()
+        item = (["https://youtube.com/watch?v=test"], {})
+        queue.get.side_effect = [item, _StopLoop()]
+        queue.empty.return_value = True
+
+        ydl_queue = QYTQueue(queue)
+        messages: list[str] = []
+        ydl_queue.message_changed.connect(messages.append)
+
+        timeout = subprocess.TimeoutExpired(cmd=["deno", "run"], timeout=15.0)
+        with (
+            patch("QYT.keep"),
+            patch.object(ydl_queue, "download", side_effect=timeout),
+            pytest.raises(_StopLoop),
+        ):
+            ydl_queue.run()
+
+        # The loop asked for a second item, i.e. it outlived the failing one.
+        assert queue.get.call_count == 2
+        assert any("Download error" in message for message in messages)
+
+    def test_run_processes_next_item_after_a_failure(self) -> None:
+        """
+        Test a failed item does not block a subsequent successful item.
+
+        Regression coverage for the widened ``except Exception``: the worker
+        must fully drain the queue -- fail item one, then still download and
+        report success for item two -- rather than stalling or skipping it.
+        """
+
+        class _StopLoop(Exception):
+            """Breaks out of the otherwise infinite worker loop."""
+
+        queue = MagicMock()
+        failing_item = (["https://youtube.com/watch?v=fails"], {})
+        ok_item = (["https://youtube.com/watch?v=ok"], {})
+        queue.get.side_effect = [failing_item, ok_item, _StopLoop()]
+        queue.empty.return_value = True
+
+        ydl_queue = QYTQueue(queue)
+        messages: list[str] = []
+        ydl_queue.message_changed.connect(messages.append)
+
+        timeout = subprocess.TimeoutExpired(cmd=["deno", "run"], timeout=15.0)
+        with (
+            patch("QYT.keep"),
+            patch.object(ydl_queue, "download", side_effect=[timeout, None]),
+            pytest.raises(_StopLoop),
+        ):
+            ydl_queue.run()
+
+        assert queue.get.call_count == 3
+        assert any(
+            "Download error" in m and "fails" in m for m in messages
+        )
+        assert any(
+            "Finished downloading" in m and "ok" in m for m in messages
+        )
 
     def test_extract_title_from_urls(self) -> None:
         """Test _extract_title returns URL if extraction fails."""

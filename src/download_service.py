@@ -28,6 +28,7 @@ from src.config import (
 from src.match_filter import build_match_filter
 from src.playlist_utils import load_playlist_urls
 from src.podcast_filtering import load_downloaded_video_ids
+from src.ydl_options import build_shared_extraction_opts
 
 
 class DownloadService:
@@ -204,6 +205,7 @@ class DownloadService:
         for url in urls:
             # Use extract_flat="in_playlist" for playlists, True for single videos
             ydl_opts = {
+                **build_shared_extraction_opts(),
                 "extract_flat": "in_playlist" if "lists" in source else True,
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -256,6 +258,7 @@ class DownloadService:
             try:
                 with yt_dlp.YoutubeDL(
                     {
+                        **build_shared_extraction_opts(),
                         "quiet": True,
                         "skip_download": True,
                         "cookiefile": str(COOKIES_FILE),

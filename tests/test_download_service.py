@@ -304,6 +304,96 @@ def test_check_live_queue_runtime_error_keeps_url_in_remaining() -> None:
     log_callback.assert_called()
 
 
+# ---------------------------------------------------------------------------
+# skip_downloading / check_live_queue: shared PO-token provider wiring
+#
+# Both build a YoutubeDL dict inline rather than via utils.build_base_ydl_opts,
+# so they need build_shared_extraction_opts() merged in explicitly. A bare
+# YoutubeDL here falls back to the bgutil provider's stale
+# ~/bgutil-ytdlp-pot-provider default server_home, whose cold-cache Deno
+# probe overruns yt-dlp's 15s budget -- the exact failure this fix addressed
+# for podcast metadata extraction, just reached from a different call site.
+# ---------------------------------------------------------------------------
+
+
+def test_skip_downloading_carries_pot_provider_wiring(tmp_path) -> None:
+    from src.config import POT_PROVIDER_SERVER_HOME
+
+    service = make_service()
+    archive_path = tmp_path / "archive.txt"
+
+    with (
+        patch("src.download_service.ARCHIVE_PATH", archive_path),
+        patch("src.download_service.yt_dlp.YoutubeDL") as mock_ydl_class,
+    ):
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = {"entries": [{"id": "vid1"}]}
+        mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+
+        service.skip_downloading(
+            ["https://youtube.com/watch?v=test"],
+            "audio_playlists",
+        )
+
+    opts = mock_ydl_class.call_args.args[0]
+    assert opts["extractor_args"]["youtubepot-bgutilscript"]["server_home"] == [
+        str(POT_PROVIDER_SERVER_HOME)
+    ]
+    assert opts["extractor_args"]["youtube"]["player_client"]
+    assert "js_runtimes" in opts
+    # per-call key ("lists" in "audio_playlists" -> "in_playlist") must survive the merge
+    assert opts["extract_flat"] == "in_playlist"
+
+
+def test_skip_downloading_single_url_extract_flat_true_survives_merge(
+    tmp_path,
+) -> None:
+    """Non-list sources use extract_flat=True; must also survive the opts merge."""
+    service = make_service()
+    archive_path = tmp_path / "archive.txt"
+
+    with (
+        patch("src.download_service.ARCHIVE_PATH", archive_path),
+        patch("src.download_service.yt_dlp.YoutubeDL") as mock_ydl_class,
+    ):
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = {"entries": [{"id": "vid1"}]}
+        mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+
+        service.skip_downloading(["https://youtube.com/watch?v=test"], "1080")
+
+    opts = mock_ydl_class.call_args.args[0]
+    assert opts["extract_flat"] is True
+    assert "extractor_args" in opts
+
+
+def test_check_live_queue_carries_pot_provider_wiring() -> None:
+    from src.config import POT_PROVIDER_SERVER_HOME
+
+    service = make_service()
+    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None)}
+    service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
+    service.save_live_queue = MagicMock()  # type: ignore[method-assign]
+
+    with patch("src.download_service.yt_dlp.YoutubeDL") as mock_ydl_class:
+        ydl_instance = mock_ydl_class.return_value.__enter__.return_value
+        ydl_instance.extract_info.return_value = {
+            "is_live": True,
+            "live_status": "is_live",
+        }
+        service.check_live_queue()
+
+    opts = mock_ydl_class.call_args.args[0]
+    assert opts["extractor_args"]["youtubepot-bgutilscript"]["server_home"] == [
+        str(POT_PROVIDER_SERVER_HOME)
+    ]
+    assert opts["extractor_args"]["youtube"]["player_client"]
+    # per-call keys must survive the merge
+    assert opts["extract_flat"] is True
+    assert opts["skip_download"] is True
+    assert opts["quiet"] is True
+
+
 def test_check_live_queue_keyboard_interrupt_not_caught() -> None:
     service = make_service()
 

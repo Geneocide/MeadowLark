@@ -3,11 +3,10 @@
 from collections.abc import Callable
 
 import yt_dlp
-from yt_dlp.utils import DownloadError, ExtractorError, MaxDownloadsReached
 
 import utils
 
-from .config import YDL_EXTRACTION_ERRORS
+from .config import YDL_DOWNLOAD_ERRORS, YDL_EXTRACTION_ERRORS
 from .path_utils import rename_playlist_folders_from_comments
 from .settings_dialog import get_setting
 from .ydl_options import _build_video_format_selector
@@ -219,13 +218,7 @@ class DownloadExecutor:
         try:
             self._run_download(options, urls)
             self._rename_na_folder_if_needed(options, urls)
-        except (
-            DownloadError,
-            ExtractorError,
-            MaxDownloadsReached,
-            OSError,
-            ValueError,
-        ) as e:
+        except YDL_DOWNLOAD_ERRORS as e:
             title = self._extract_title(urls, options)
             error_str = str(e)
             meta = options.get("qmeta") or {}

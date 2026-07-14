@@ -5,6 +5,7 @@ from typing import Any
 import yt_dlp
 
 from src.exceptions import PodcastResolutionError
+from src.ydl_options import build_shared_extraction_opts
 
 MAX_LOOKAHEAD = 5
 """Max number of lookahead iterations when searching for accessible podcast entries."""
@@ -59,7 +60,12 @@ def fetch_latest_accessible_entry(
     for n in range(1, MAX_LOOKAHEAD + 1):
         try:
             with yt_dlp.YoutubeDL(
-                {"quiet": True, "no_warnings": True, "playlist_items": str(n)},
+                {
+                    **build_shared_extraction_opts(),
+                    "quiet": True,
+                    "no_warnings": True,
+                    "playlist_items": str(n),
+                },
             ) as ydl:
                 info = ydl.extract_info(url, download=False)
         except Exception as exc:

@@ -391,8 +391,6 @@ def test_download_retries_without_sponsorblock(monkeypatch):
     import src.download_executor
 
     monkeypatch.setattr(src.download_executor, "YoutubeDL", DummyYDL)
-    # Also patch DownloadError so DummyYDL can raise it correctly
-    monkeypatch.setattr(src.download_executor, "DownloadError", DownloadError)
 
     download_queue = queue.Queue()
     q = vd.QYT.QYTQueue(download_queue)

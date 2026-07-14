@@ -1,7 +1,96 @@
 """Unit tests for src.ydl_options builders."""
 
 from src.dict_utils import DEFAULT_POSTPROCESSORS
-from src.ydl_options import get_output_template, get_postprocessors, get_source_options
+from src.ydl_options import (
+    JS_RUNTIMES_CONFIG,
+    build_shared_extraction_opts,
+    get_output_template,
+    get_postprocessors,
+    get_source_options,
+)
+
+
+class TestBuildSharedExtractionOpts:
+    """
+    Direct coverage for the option-merge helper factored out of build_base_ydl_opts.
+
+    Every YoutubeDL construction site in the app (build_base_ydl_opts,
+    podcast_helpers.fetch_latest_accessible_entry, both bare YoutubeDL sites
+    in download_service.py, and ydl_utils.extract_playlist_info/
+    extract_video_entries) now goes through this helper, so its own
+    contract -- returned keys, and which parts are safe to mutate per-call --
+    is worth pinning down independently of any single caller.
+    """
+
+    def test_returns_expected_top_level_keys(self) -> None:
+        opts = build_shared_extraction_opts()
+        assert set(opts) == {"js_runtimes", "extractor_args"}
+
+    def test_extractor_args_wiring(self) -> None:
+        from src.config import POT_PROVIDER_SERVER_HOME
+
+        opts = build_shared_extraction_opts()
+        assert opts["extractor_args"]["youtubepot-bgutilscript"]["server_home"] == [
+            str(POT_PROVIDER_SERVER_HOME)
+        ]
+        assert opts["extractor_args"]["youtube"]["player_client"]
+
+    def test_extractor_args_tree_is_a_fresh_dict_per_call(self) -> None:
+        """
+        extractor_args must not be shared by reference across calls.
+
+        Every call site builds its own YoutubeDL instance from this dict; if
+        extractor_args were shared, yt-dlp (or the bgutil plugin) mutating
+        one instance's config would leak into every other instance built
+        afterwards -- including unrelated, concurrently-running ones (e.g.
+        the QYTQueue download thread vs. a podcast-polling timer callback on
+        the Qt main thread).
+        """
+        first = build_shared_extraction_opts()
+        second = build_shared_extraction_opts()
+
+        assert first["extractor_args"] is not second["extractor_args"]
+        assert (
+            first["extractor_args"]["youtube"]
+            is not second["extractor_args"]["youtube"]
+        )
+        assert (
+            first["extractor_args"]["youtubepot-bgutilscript"]
+            is not second["extractor_args"]["youtubepot-bgutilscript"]
+        )
+
+    def test_player_client_list_is_not_shared_across_calls(self) -> None:
+        """Mutating one call's player_client list must not affect another's."""
+        first = build_shared_extraction_opts()
+        first["extractor_args"]["youtube"]["player_client"].append("mutated")
+
+        second = build_shared_extraction_opts()
+
+        assert "mutated" not in second["extractor_args"]["youtube"]["player_client"]
+
+    def test_js_runtimes_is_the_shared_module_level_dict(self) -> None:
+        """
+        Characterization test: unlike extractor_args, js_runtimes is NOT copied.
+
+        Every YoutubeDL instance built via this helper -- across podcast
+        polling, live-queue checks, on-demand metadata lookups, and actual
+        downloads -- receives the exact same JS_RUNTIMES_CONFIG object. This
+        is currently safe: the bgutil script provider only reads it
+        (yt_dlp_plugins.extractor.getpot_bgutil_script._jsrt_path_impl does a
+        read-only traverse_obj lookup, never a write). It is nonetheless a
+        footgun for a future yt-dlp/plugin version, or any other extractor,
+        that writes back into params dicts it's handed -- especially now that
+        this helper is called from many more concurrently-reachable sites
+        than before this fix. If this assertion ever starts failing, either
+        JS_RUNTIMES_CONFIG was deliberately made per-call (update this test),
+        or something started copying it defensively (also fine -- update
+        this test and drop the characterization note).
+        """
+        first = build_shared_extraction_opts()
+        second = build_shared_extraction_opts()
+
+        assert first["js_runtimes"] is JS_RUNTIMES_CONFIG
+        assert second["js_runtimes"] is JS_RUNTIMES_CONFIG
 
 
 def test_get_source_options_numeric_height_format() -> None:

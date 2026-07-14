@@ -25,6 +25,42 @@ JS_RUNTIMES_CONFIG = {
 }
 
 
+def build_shared_extraction_opts() -> dict[str, Any]:
+    """
+    Options every YoutubeDL instance must carry, even metadata-only ones.
+
+    Without these, the bgutil PO-token provider falls back to its
+    ~/bgutil-ytdlp-pot-provider default server_home instead of the
+    vendored/bundled copy, and its Deno availability probe (hard 15s budget
+    inside yt-dlp) runs against a cold cache -- re-resolving the provider's
+    npm deps over the network and surfacing subprocess.TimeoutExpired to the
+    caller. See POT_PROVIDER_SERVER_HOME in config.
+
+    Returns:
+        Dictionary with the JS-runtime and extractor-arg wiring shared by
+        all YoutubeDL constructions.
+    """
+    return {
+        "js_runtimes": JS_RUNTIMES_CONFIG,
+        # Force an explicit client priority so YouTube's per-client 403 gating
+        # (SABR/PO-token experiment, #12482) can't steer us onto broken media
+        # URLs (see YOUTUBE_PLAYER_CLIENTS in config). Only affects YouTube.
+        "extractor_args": {
+            "youtube": {
+                "player_client": [
+                    c.strip() for c in YOUTUBE_PLAYER_CLIENTS.split(",") if c.strip()
+                ],
+            },
+            # Point the bgutil script provider at our vendored/bundled server copy
+            # instead of its ~/bgutil-ytdlp-pot-provider default. Extractor-arg
+            # values are lists; the provider reads _configuration_arg(...)[0].
+            "youtubepot-bgutilscript": {
+                "server_home": [str(POT_PROVIDER_SERVER_HOME)],
+            },
+        },
+    }
+
+
 def build_base_ydl_opts(logger: YdlLogger, qhook: YdlProgressHook) -> dict[str, Any]:
     """
     Centralize common yt-dlp options used across the app.
@@ -46,24 +82,8 @@ def build_base_ydl_opts(logger: YdlLogger, qhook: YdlProgressHook) -> dict[str, 
         # Custom match_filter will be set per-source by callers
         "cookiefile": get_setting("VID_DL_COOKIES_FILE") or str(COOKIES_FILE),
         "postprocessors": list(DEFAULT_POSTPROCESSORS),
-        "js_runtimes": JS_RUNTIMES_CONFIG,
         "remote_components": ["ejs:github"],
-        # Force an explicit client priority so YouTube's per-client 403 gating
-        # (SABR/PO-token experiment, #12482) can't steer us onto broken media
-        # URLs (see YOUTUBE_PLAYER_CLIENTS in config). Only affects YouTube.
-        "extractor_args": {
-            "youtube": {
-                "player_client": [
-                    c.strip() for c in YOUTUBE_PLAYER_CLIENTS.split(",") if c.strip()
-                ],
-            },
-            # Point the bgutil script provider at our vendored/bundled server copy
-            # instead of its ~/bgutil-ytdlp-pot-provider default. Extractor-arg
-            # values are lists; the provider reads _configuration_arg(...)[0].
-            "youtubepot-bgutilscript": {
-                "server_home": [str(POT_PROVIDER_SERVER_HOME)],
-            },
-        },
+        **build_shared_extraction_opts(),
     }
     if get_setting("VID_DL_MARK_WATCHED"):
         opts["mark_watched"] = True

@@ -3,6 +3,7 @@
 import os
 import sys
 from pathlib import Path
+from subprocess import SubprocessError
 from typing import Final
 
 # ============================================================================
@@ -11,14 +12,27 @@ from typing import Final
 # Import yt-dlp exceptions for consistent error handling
 from yt_dlp.utils import DownloadError, ExtractorError, MaxDownloadsReached
 
-# Exception tuples for consistent error handling across the application
-YDL_COMMON_ERRORS: Final = (DownloadError, ExtractorError, OSError)
-YDL_EXTRACTION_ERRORS: Final = (DownloadError, ExtractorError, OSError, ValueError)
+# Exception tuples for consistent error handling across the application.
+# SubprocessError covers the helper processes yt-dlp shells out to mid-extraction
+# -- notably the bgutil PO-token provider's Deno probe, which yt-dlp gives a hard
+# 15s budget and which overruns it whenever Deno has to re-resolve the provider's
+# npm deps over the network. That surfaces as subprocess.TimeoutExpired escaping
+# ydl.download(); it is a failed download, not a bug in the app, so it must be
+# caught wherever the yt-dlp errors are.
+YDL_COMMON_ERRORS: Final = (DownloadError, ExtractorError, OSError, SubprocessError)
+YDL_EXTRACTION_ERRORS: Final = (
+    DownloadError,
+    ExtractorError,
+    OSError,
+    SubprocessError,
+    ValueError,
+)
 YDL_DOWNLOAD_ERRORS: Final = (
     DownloadError,
     ExtractorError,
     MaxDownloadsReached,
     OSError,
+    SubprocessError,
     ValueError,
 )
 
