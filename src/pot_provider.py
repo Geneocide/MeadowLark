@@ -13,8 +13,11 @@ yt_dlp_plugins.extractor.getpot_bgutil_script.BgUtilScriptDenoPTP.
 from __future__ import annotations
 
 import importlib.util
+import logging
+import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +30,21 @@ _NODE_MODULES = "node_modules"
 _DENO_MIN_VERSION = (2, 0, 0)
 _DENO_VERSION_TIMEOUT_S = 5.0
 _DENO_VERSION_RE = re.compile(r"deno\s+(\d+)\.(\d+)\.(\d+)")
+
+logger = logging.getLogger(__name__)
+
+# The plugin gives its script-version probe a hard 15s budget
+# (BgUtilScriptPTPBase._GET_SCRIPT_VSN_TIMEOUT). A cold DENO_DIR blows straight
+# through it -- measured 26.3s cold vs 1.5s warm -- so is_available() goes False
+# and every 1080p download 403s for want of a PO token. Warming the cache ahead of
+# time is the only lever we have; the timeout itself lives in the plugin.
+_PROBE_BUDGET_S = 15.0
+# Cold fill pulls ~63 MB of npm deps over the network; be generous, this never
+# runs on the UI thread.
+_DENO_WARM_TIMEOUT_S = 300.0
+# Windows GUI build (console=False): keep deno.exe from flashing a console window.
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+_CACHE_DIRNAME = "bgutil-ytdlp-pot-provider"
 
 
 @dataclass(frozen=True)
@@ -63,6 +81,15 @@ class PotProviderStatus:
         return ", ".join(missing)
 
 
+@dataclass(frozen=True)
+class DenoWarmResult:
+    """Outcome of a DENO_DIR warm-up run."""
+
+    ok: bool
+    elapsed_s: float
+    detail: str
+
+
 def _plugin_importable() -> bool:
     """Return True if the bgutil script provider plugin imports (i.e. not pruned)."""
     try:
@@ -88,6 +115,7 @@ def _deno_ok(scripts_dir: Path) -> bool:
             text=True,
             timeout=_DENO_VERSION_TIMEOUT_S,
             check=False,
+            creationflags=_NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -121,3 +149,131 @@ def check_pot_provider(
         script_found=home.joinpath(*_SCRIPT_RELPATH).is_file(),
         node_modules_found=(home / _NODE_MODULES).is_dir(),
     )
+
+
+def _escpath(*paths: Path) -> str:
+    """Mirror BgUtilScriptDenoPTP._jsrt_args.escpath: comma-join, doubling literal commas."""
+    return ",".join(str(p).replace(",", ",,") for p in paths)
+
+
+def _script_cache_dir(server_home: Path) -> Path:
+    """
+    Mirror BgUtilScriptPTPBase._script_cache_dir.
+
+    The provider grants Deno --allow-write/--allow-read on this dir only, so the
+    warm-up must pass the same path or the script errors instead of caching.
+    """
+    xdg = os.getenv("XDG_CACHE_HOME")
+    if xdg is not None:
+        return Path(xdg).absolute() / _CACHE_DIRNAME
+    home = os.getenv("HOME") or os.getenv("USERPROFILE")
+    if home:
+        return Path(home).absolute() / ".cache" / _CACHE_DIRNAME
+    return server_home
+
+
+def build_warm_cmd(deno: str | Path, server_home: Path) -> list[str]:
+    """Return the exact argv BgUtilScriptDenoPTP uses for its version probe."""
+    node_mods = server_home / _NODE_MODULES
+    cache = _script_cache_dir(server_home)
+    return [
+        str(deno),
+        "run",
+        "--allow-env",
+        "--allow-net",
+        f"--allow-ffi={_escpath(node_mods)}",
+        f"--allow-write={_escpath(cache)}",
+        f"--allow-read={_escpath(cache, node_mods)}",
+        str(server_home.joinpath(*_SCRIPT_RELPATH)),
+        "--version",
+    ]
+
+
+def build_warm_env() -> dict[str, str]:
+    """Return the env BgUtilScriptDenoPTP._jsrt_envs builds (os.environ + Deno flags)."""
+    env = os.environ.copy()
+    env["DENO_NO_PROMPT"] = "1"
+    env["DENO_NO_UPDATE_CHECK"] = "1"
+    env["FORCE_COLOR"] = "false"
+    return env
+
+
+def warm_deno_cache(
+    server_home: Path | None = None,
+    scripts_dir: Path | None = None,
+    timeout: float = _DENO_WARM_TIMEOUT_S,
+) -> DenoWarmResult:
+    r"""
+    Run the provider's own version probe once to populate Deno's module cache.
+
+    Deno caches npm deps and transpiled TS under DENO_DIR (default
+    %LOCALAPPDATA%\deno). On a cold cache the plugin's probe overruns its hard 15s
+    budget and 1080p downloads 403. Running the identical command here fills that
+    cache while nothing is waiting on it. Safe to call on every launch: ~1.5s once warm.
+
+    Args:
+        server_home: Provider server root; defaults to ``POT_PROVIDER_SERVER_HOME``.
+        scripts_dir: Dir holding ``deno.exe``; defaults to ``VENV_SCRIPTS_DIR``.
+        timeout: Hard cap on the warm-up subprocess.
+
+    Returns:
+        A ``DenoWarmResult``; never raises.
+    """
+    home = Path(server_home) if server_home is not None else POT_PROVIDER_SERVER_HOME
+    scripts = Path(scripts_dir) if scripts_dir is not None else VENV_SCRIPTS_DIR
+    deno = scripts / "deno.exe"
+
+    if not deno.is_file():
+        return DenoWarmResult(False, 0.0, f"deno.exe not found at {deno}")
+    if not home.joinpath(*_SCRIPT_RELPATH).is_file():
+        return DenoWarmResult(False, 0.0, f"generate_once.ts not found under {home}")
+    if not (home / _NODE_MODULES).is_dir():
+        return DenoWarmResult(
+            False,
+            0.0,
+            "node_modules missing; run scripts/setup_pot_provider.py",
+        )
+
+    cmd = build_warm_cmd(deno, home)
+    start = time.monotonic()
+    try:
+        proc = subprocess.run(  # noqa: S603
+            cmd,
+            cwd=home,
+            env=build_warm_env(),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            creationflags=_NO_WINDOW,
+        )
+    except subprocess.TimeoutExpired:
+        elapsed = time.monotonic() - start
+        logger.warning("Deno cache warm-up timed out after %.1fs", elapsed)
+        return DenoWarmResult(False, elapsed, f"timed out after {timeout:.0f}s")
+    except OSError as e:
+        elapsed = time.monotonic() - start
+        logger.warning("Deno cache warm-up could not start: %s", e)
+        return DenoWarmResult(False, elapsed, str(e))
+
+    elapsed = time.monotonic() - start
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()[:500]
+        logger.warning(
+            "Deno cache warm-up failed (rc=%d, %.1fs): %s",
+            proc.returncode,
+            elapsed,
+            detail,
+        )
+        return DenoWarmResult(False, elapsed, detail or f"returncode {proc.returncode}")
+
+    if elapsed > _PROBE_BUDGET_S:
+        logger.info(
+            "Deno cache warmed in %.1fs (a cold probe would have blown the plugin's "
+            "%.0fs budget; subsequent probes will be fast)",
+            elapsed,
+            _PROBE_BUDGET_S,
+        )
+    else:
+        logger.debug("Deno cache already warm (%.1fs)", elapsed)
+    return DenoWarmResult(True, elapsed, (proc.stdout or "").strip())

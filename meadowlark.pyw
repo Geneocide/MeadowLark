@@ -39,6 +39,7 @@ import queue
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import webbrowser
 from collections.abc import Callable
@@ -128,7 +129,7 @@ from src.podcast_filtering import (
     parse_video_timestamp,
 )
 from src.podcast_helpers import fetch_latest_accessible_entry
-from src.pot_provider import check_pot_provider
+from src.pot_provider import check_pot_provider, warm_deno_cache
 from src.settings_dialog import (
     SettingsDialog,
     _init_runtime_settings,
@@ -2090,6 +2091,17 @@ if __name__ == "__main__":
             '("unable to download video data"). Lower resolutions still work.\n\n'
             "See the README PO-token setup section to fix this.",
         )
+    else:
+        # Cold DENO_DIR makes the provider's own 15s script probe time out (~26s cold
+        # vs ~1.5s warm), which silently kills PO-token minting and 403s the first
+        # 1080p download. Warm it off-thread so the UI never waits on it; daemon so it
+        # cannot hold up shutdown. Only worth doing when the provider is otherwise
+        # complete -- warm_deno_cache() no-ops anyway if it is not.
+        threading.Thread(
+            target=warm_deno_cache,
+            name="deno-cache-warm",
+            daemon=True,
+        ).start()
 
     app.exec()
 

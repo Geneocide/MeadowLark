@@ -244,9 +244,29 @@ The generate script is already vendored in the repo, so setup is a single comman
 uv run python scripts/setup_pot_provider.py
 ```
 
-This runs `deno install` in `vendor/bgutil-pot-provider/server`, creating `node_modules` next to the vendored `src/generate_once.ts`. Run it once after `uv sync` (re-running is a no-op unless you pass `--force`). Then restart MeadowLark — the warning dialog should no longer appear, and 1080p downloads will succeed.
+This runs `deno install` in `vendor/bgutil-pot-provider/server`, creating `node_modules` next to the vendored `src/generate_once.ts`, then **warms Deno's module cache** (see below). Run it once after `uv sync` — the `deno install` half is a no-op if `node_modules` already exists (unless you pass `--force`), while the warm-up runs every time and costs ~2s once warm. Then restart MeadowLark — the warning dialog should no longer appear, and 1080p downloads will succeed.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--force` | off | Re-run `deno install` even when `node_modules` already exists |
+| `--skip-warm` | off | Skip the Deno module-cache warm-up. Used by CI, where the runner's cache is thrown away at the end of the job |
+
+The script exits `0` when the dependencies are in place, `2` when Deno or the vendored server dir cannot be found, and otherwise forwards `deno install`'s exit code. A failed warm-up is a **warning, not a failure** — it prints to stderr and still exits `0`.
 
 > If you keep the provider somewhere else, point `VID_DL_POT_SERVER_HOME` at that `server` directory (the folder containing `src/generate_once.ts` and `node_modules`).
+
+### The Deno module cache (`DENO_DIR`)
+
+`node_modules` alone is not enough. Deno keeps a **second** cache — the npm registry payload and the transpiled TypeScript — under `DENO_DIR` (default `%LOCALAPPDATA%\deno`, ~63 MB once filled). It is not part of the repo and not shipped in the installer.
+
+This matters because the plugin gives its script-version probe a hard **15-second budget**. Against a cold `DENO_DIR` that probe takes ~26s and blows straight through it, so the plugin reports itself unavailable, no PO token is minted, and the download 403s — with no error naming Deno at all. Once the cache is warm the same probe takes ~1.5s.
+
+MeadowLark fills the cache for you, so there is normally nothing to do:
+
+- **From source:** `scripts/setup_pot_provider.py` warms it at the end of the run.
+- **Installer users:** the app warms it in a background thread at startup (the first launch pulls the ~63 MB; the UI stays responsive throughout, and later launches are a no-op).
+
+If a first 1080p download still 403s on a brand-new machine, the warm-up likely has not finished — retry the download, or run `uv run python scripts/setup_pot_provider.py` to fill the cache in the foreground.
 
 ---
 

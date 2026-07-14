@@ -47,6 +47,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src import config as _config_mod
+from src.pot_provider import DenoWarmResult
 
 _SETUP_PATH = Path(__file__).resolve().parent.parent / "scripts" / "setup_pot_provider.py"
 
@@ -373,22 +374,33 @@ class TestSetupMainBranchMatrix:
         assert rc == 2
         run.assert_not_called()
 
-    def test_node_modules_check_precedes_deno_lookup(self, tmp_path: Path) -> None:
-        """main() must not require Deno on the already-installed skip path."""
+    def test_already_installed_path_does_not_require_deno(self, tmp_path: Path) -> None:
+        """
+        main() must not *require* Deno on the already-installed skip path.
+
+        main() does now look Deno up on this path -- the warm-up has to know where it
+        is -- but an unresolvable Deno here is non-fatal: node_modules is present, so
+        the install still counts as done and the exit code stays 0. Only the cache
+        warm-up is forgone.
+        """
         mod = _load_setup()
         server = tmp_path / "server"
         (server / "node_modules").mkdir(parents=True)
 
+        warm_result = DenoWarmResult(ok=False, elapsed_s=0.0, detail="deno.exe not found")
         with (
             patch.object(mod, "resolve_server_dir", return_value=server),
-            patch.object(mod, "resolve_deno") as resolve_deno,
+            patch.object(mod, "resolve_deno", return_value=None),
+            patch.object(mod, "warm_deno_cache", return_value=warm_result) as warm,
             patch.object(mod.subprocess, "run") as run,
         ):
             rc = mod.main([])
 
         assert rc == 0
-        resolve_deno.assert_not_called()
         run.assert_not_called()
+        # Warmed with no scripts_dir -> falls back to VENV_SCRIPTS_DIR and reports a
+        # non-fatal miss, rather than blowing up on a None Deno path.
+        warm.assert_called_once_with(server_home=server, scripts_dir=None)
 
     def test_force_reinstalls_when_node_modules_already_present(
         self, tmp_path: Path

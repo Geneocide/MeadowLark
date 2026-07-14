@@ -46,10 +46,47 @@ src.pot_provider.check_pot_provider (path resolution)
     - omitted args                         -> falls back to config module defaults
     - script path exists but is a directory -> treated as not found
     - node_modules path exists but is a file -> treated as not found
+
+src.pot_provider._escpath
+    - single path                          -> str(path)
+    - multiple paths                       -> comma-joined
+    - literal commas in path names         -> doubled
+
+src.pot_provider._script_cache_dir
+    - XDG_CACHE_HOME set                   -> <xdg>/bgutil-ytdlp-pot-provider
+    - XDG_CACHE_HOME unset, HOME set       -> <home>/.cache/bgutil-ytdlp-pot-provider
+    - both unset, USERPROFILE set          -> <userprofile>/.cache/bgutil-ytdlp-pot-provider
+    - all three unset                      -> server_home unchanged
+
+src.pot_provider.build_warm_cmd
+    - argv order and flags                 -> matches BgUtilScriptDenoPTP._jsrt_args
+    - paths use _escpath                   -> literal commas doubled in flags
+
+src.pot_provider.build_warm_env
+    - os.environ copied                    -> modifications don't leak
+    - Deno flags set                       -> DENO_NO_PROMPT, DENO_NO_UPDATE_CHECK, FORCE_COLOR
+
+src.pot_provider.warm_deno_cache
+    - all prerequisites present, rc=0     -> ok is True, detail stripped stdout
+    - deno.exe missing                     -> ok is False, subprocess never invoked
+    - generate_once.ts missing             -> ok is False, subprocess never invoked
+    - node_modules missing                 -> ok is False, subprocess never invoked
+    - subprocess.TimeoutExpired            -> ok is False, no exception escapes
+    - subprocess.OSError                   -> ok is False, no exception escapes
+    - subprocess rc != 0                   -> ok is False, detail is stripped stderr
+    - creationflags=_NO_WINDOW on Windows  -> passed to subprocess.run
+
+src.pot_provider.DenoWarmResult
+    - frozen dataclass                     -> field assignment raises FrozenInstanceError
+
+src.pot_provider._deno_ok (creationflags)
+    - creationflags=_NO_WINDOW passed      -> to subprocess.run
 """
 
 import itertools
+import os
 import subprocess
+import sys
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -475,3 +512,367 @@ def test_node_modules_path_is_file_not_dir(tmp_path: Path) -> None:
     assert status.node_modules_found is False
     assert status.ok is False
     assert "node_modules" in status.summary()
+
+
+# ---------------------------------------------------------------------------
+# _escpath — comma escaping
+# ---------------------------------------------------------------------------
+
+
+def test_escpath_single_path() -> None:
+    p = Path("foo/bar")
+    assert pot_provider._escpath(p) == str(p)
+
+
+def test_escpath_multiple_paths(tmp_path: Path) -> None:
+    p1 = tmp_path / "a"
+    p2 = tmp_path / "b"
+    result = pot_provider._escpath(p1, p2)
+    assert f"{p1},{p2}" == result
+
+
+def test_escpath_doubles_literal_commas(tmp_path: Path) -> None:
+    p = Path("a,b")
+    result = pot_provider._escpath(p)
+    assert result == "a,,b"
+
+
+def test_escpath_in_multiple_paths_with_commas(tmp_path: Path) -> None:
+    p1 = Path("a,b")
+    p2 = Path("c,d")
+    result = pot_provider._escpath(p1, p2)
+    assert result == "a,,b,c,,d"
+
+
+# ---------------------------------------------------------------------------
+# _script_cache_dir — environment resolution
+# ---------------------------------------------------------------------------
+
+
+def test_script_cache_dir_prefers_xdg_cache_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    xdg = tmp_path / "xdg_cache"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(xdg))
+    monkeypatch.delenv("HOME", raising=False)
+    monkeypatch.delenv("USERPROFILE", raising=False)
+    result = pot_provider._script_cache_dir(tmp_path)
+    expected = xdg / "bgutil-ytdlp-pot-provider"
+    assert result == expected
+
+
+def test_script_cache_dir_falls_back_to_userprofile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    userprofile = tmp_path / "user"
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    monkeypatch.delenv("HOME", raising=False)
+    monkeypatch.setenv("USERPROFILE", str(userprofile))
+    result = pot_provider._script_cache_dir(tmp_path)
+    expected = userprofile / ".cache" / "bgutil-ytdlp-pot-provider"
+    assert result == expected
+
+
+def test_script_cache_dir_falls_back_to_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("USERPROFILE", raising=False)
+    result = pot_provider._script_cache_dir(tmp_path)
+    expected = home / ".cache" / "bgutil-ytdlp-pot-provider"
+    assert result == expected
+
+
+def test_script_cache_dir_empty_string_xdg_is_honoured(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Empty-string XDG_CACHE_HOME (set but blank) must be honoured, not treated as unset.
+
+    The plugin gates on ``os.getenv('XDG_CACHE_HOME') is not None`` -- an empty string
+    passes that check and is used as-is. If ours instead falls through to HOME/
+    USERPROFILE on empty string, the warm-up caches a different directory than the
+    real probe reads from and the whole fix silently stops working.
+    """
+    userprofile = tmp_path / "user"
+    monkeypatch.setenv("XDG_CACHE_HOME", "")
+    monkeypatch.delenv("HOME", raising=False)
+    monkeypatch.setenv("USERPROFILE", str(userprofile))
+    monkeypatch.chdir(tmp_path)
+
+    result = pot_provider._script_cache_dir(tmp_path)
+
+    expected = Path().absolute() / "bgutil-ytdlp-pot-provider"
+    assert result == expected
+    assert result != userprofile / ".cache" / "bgutil-ytdlp-pot-provider"
+
+
+def test_script_cache_dir_falls_back_to_server_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server_home = tmp_path / "server"
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    monkeypatch.delenv("HOME", raising=False)
+    monkeypatch.delenv("USERPROFILE", raising=False)
+    result = pot_provider._script_cache_dir(server_home)
+    assert result == server_home
+
+
+# ---------------------------------------------------------------------------
+# build_warm_cmd — argv construction and flag validation
+# ---------------------------------------------------------------------------
+
+
+def test_build_warm_cmd_flags_match_plugin_jsrt_args(tmp_path: Path) -> None:
+    from yt_dlp_plugins.extractor.getpot_bgutil_script import BgUtilScriptDenoPTP
+
+    home = _valid_tree(tmp_path)
+    deno = tmp_path / "deno.exe"
+    deno.touch()
+    cmd = pot_provider.build_warm_cmd(deno, home)
+
+    assert cmd[1] == "run"
+    # Extract flag names (everything before first = or as-is if no =) from --allow-* args.
+    flag_names = set()
+    for arg in cmd[2:]:
+        if arg.startswith("--allow-"):
+            flag_names.add(arg.split("=")[0])
+
+    expected_flags = {
+        "--allow-env",
+        "--allow-net",
+        "--allow-ffi",
+        "--allow-write",
+        "--allow-read",
+    }
+    assert flag_names == expected_flags
+    assert BgUtilScriptDenoPTP._SCRIPT_BASENAME in cmd[-2]
+    assert cmd[-1] == "--version"
+
+
+def test_build_warm_cmd_points_at_server_home_script(tmp_path: Path) -> None:
+    home = _valid_tree(tmp_path)
+    deno = tmp_path / "deno.exe"
+    deno.touch()
+    cmd = pot_provider.build_warm_cmd(deno, home)
+
+    script_path = home / "src" / "generate_once.ts"
+    assert str(script_path) in cmd
+    node_modules = home / "node_modules"
+    assert f"--allow-ffi={node_modules}" in " ".join(cmd)
+
+
+def test_build_warm_cmd_escapes_literal_commas(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server_home = tmp_path / "a,b"
+    home = _valid_tree(server_home)
+    deno = tmp_path / "deno.exe"
+    deno.touch()
+    xdg = tmp_path / "xdg"  # comma-free, so only the server_home comma is under test
+    monkeypatch.setenv("XDG_CACHE_HOME", str(xdg))
+    cmd = pot_provider.build_warm_cmd(deno, home)
+
+    # Deno's permission flags use "," as the path separator, so a literal comma in
+    # the path must be doubled -- but only inside the flags. The script path is a
+    # plain argv entry and stays raw, exactly as the plugin passes it.
+    ffi = next(a for a in cmd if a.startswith("--allow-ffi="))
+    read = next(a for a in cmd if a.startswith("--allow-read="))
+    assert "a,,b" in ffi
+    assert "a,,b" in read
+    assert "a,b" in cmd[-2]
+    assert "a,,b" not in cmd[-2]
+
+
+# ---------------------------------------------------------------------------
+# build_warm_env — environment construction
+# ---------------------------------------------------------------------------
+
+
+def test_build_warm_env_sets_deno_flags() -> None:
+    env = pot_provider.build_warm_env()
+    assert env["DENO_NO_PROMPT"] == "1"
+    assert env["DENO_NO_UPDATE_CHECK"] == "1"
+    assert env["FORCE_COLOR"] == "false"
+
+
+def test_build_warm_env_preserves_existing_vars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MY_TEST_VAR", "my_value")
+    env = pot_provider.build_warm_env()
+    assert env["MY_TEST_VAR"] == "my_value"
+    assert env["DENO_NO_PROMPT"] == "1"
+
+
+def test_build_warm_env_copies_environ() -> None:
+    env = pot_provider.build_warm_env()
+    # Modifying returned env should not affect os.environ.
+    env["NEW_KEY"] = "new_value"
+    assert "NEW_KEY" not in os.environ
+
+
+# ---------------------------------------------------------------------------
+# warm_deno_cache — full integration
+# ---------------------------------------------------------------------------
+
+
+def test_warm_deno_cache_ok_on_returncode_zero(tmp_path: Path) -> None:
+    home = _valid_tree(tmp_path)
+    deno = tmp_path / "deno.exe"
+    deno.touch()
+    with patch(
+        "src.pot_provider.subprocess.run",
+        return_value=MagicMock(returncode=0, stdout="1.3.1\n", stderr=""),
+    ):
+        result = pot_provider.warm_deno_cache(server_home=home, scripts_dir=tmp_path)
+    assert result.ok is True
+    assert result.elapsed_s >= 0.0
+    assert result.detail == "1.3.1"
+
+
+def test_warm_deno_cache_skips_when_deno_absent(tmp_path: Path) -> None:
+    home = _valid_tree(tmp_path)
+    with patch("src.pot_provider.subprocess.run") as mock_run:
+        result = pot_provider.warm_deno_cache(server_home=home, scripts_dir=tmp_path)
+    mock_run.assert_not_called()
+    assert result.ok is False
+    assert "deno.exe" in result.detail
+
+
+def test_warm_deno_cache_skips_when_script_missing(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "node_modules").mkdir()
+    deno = tmp_path / "deno.exe"
+    deno.touch()
+    with patch("src.pot_provider.subprocess.run") as mock_run:
+        result = pot_provider.warm_deno_cache(server_home=home, scripts_dir=tmp_path)
+    mock_run.assert_not_called()
+    assert result.ok is False
+    assert "generate_once.ts" in result.detail
+
+
+def test_warm_deno_cache_skips_when_node_modules_missing(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    (home / "src").mkdir(parents=True)
+    (home / "src" / "generate_once.ts").touch()
+    deno = tmp_path / "deno.exe"
+    deno.touch()
+    with patch("src.pot_provider.subprocess.run") as mock_run:
+        result = pot_provider.warm_deno_cache(server_home=home, scripts_dir=tmp_path)
+    mock_run.assert_not_called()
+    assert result.ok is False
+    assert "node_modules" in result.detail
+
+
+def test_warm_deno_cache_returns_not_ok_on_timeout(tmp_path: Path) -> None:
+    home = _valid_tree(tmp_path)
+    deno = tmp_path / "deno.exe"
+    deno.touch()
+    with patch(
+        "src.pot_provider.subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd="deno", timeout=300),
+    ):
+        result = pot_provider.warm_deno_cache(
+            server_home=home,
+            scripts_dir=tmp_path,
+            timeout=300.0,
+        )
+    assert result.ok is False
+    assert "timed out" in result.detail.lower()
+
+
+def test_warm_deno_cache_returns_not_ok_on_oserror(tmp_path: Path) -> None:
+    home = _valid_tree(tmp_path)
+    deno = tmp_path / "deno.exe"
+    deno.touch()
+    with patch(
+        "src.pot_provider.subprocess.run",
+        side_effect=OSError("boom"),
+    ):
+        result = pot_provider.warm_deno_cache(server_home=home, scripts_dir=tmp_path)
+    assert result.ok is False
+    # No exception should escape.
+
+
+def test_warm_deno_cache_reports_stderr_on_failure(tmp_path: Path) -> None:
+    home = _valid_tree(tmp_path)
+    deno = tmp_path / "deno.exe"
+    deno.touch()
+    with patch(
+        "src.pot_provider.subprocess.run",
+        return_value=MagicMock(returncode=1, stdout="", stderr="boom"),
+    ):
+        result = pot_provider.warm_deno_cache(server_home=home, scripts_dir=tmp_path)
+    assert result.ok is False
+    assert result.detail == "boom"
+
+
+def test_warm_deno_cache_reports_stdout_on_failure_no_stderr(tmp_path: Path) -> None:
+    home = _valid_tree(tmp_path)
+    deno = tmp_path / "deno.exe"
+    deno.touch()
+    with patch(
+        "src.pot_provider.subprocess.run",
+        return_value=MagicMock(returncode=1, stdout="fallback", stderr=""),
+    ):
+        result = pot_provider.warm_deno_cache(server_home=home, scripts_dir=tmp_path)
+    assert result.ok is False
+    assert result.detail == "fallback"
+
+
+def test_warm_deno_cache_passes_no_window_creationflag(tmp_path: Path) -> None:
+    home = _valid_tree(tmp_path)
+    deno = tmp_path / "deno.exe"
+    deno.touch()
+    with patch("src.pot_provider.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="1.3.1",
+            stderr="",
+        )
+        pot_provider.warm_deno_cache(server_home=home, scripts_dir=tmp_path)
+    mock_run.assert_called_once()
+    call_kwargs = mock_run.call_args[1]
+    assert "creationflags" in call_kwargs
+    assert call_kwargs["creationflags"] == pot_provider._NO_WINDOW
+    if sys.platform == "win32":
+        assert pot_provider._NO_WINDOW == subprocess.CREATE_NO_WINDOW
+
+
+# ---------------------------------------------------------------------------
+# _deno_ok — creationflags validation
+# ---------------------------------------------------------------------------
+
+
+def test_deno_ok_passes_no_window_creationflag(tmp_path: Path) -> None:
+    (tmp_path / "deno.exe").touch()
+    with patch("src.pot_provider.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="deno 2.5.4")
+        pot_provider._deno_ok(tmp_path)
+    mock_run.assert_called_once()
+    call_kwargs = mock_run.call_args[1]
+    assert "creationflags" in call_kwargs
+    assert call_kwargs["creationflags"] == pot_provider._NO_WINDOW
+    if sys.platform == "win32":
+        assert pot_provider._NO_WINDOW == subprocess.CREATE_NO_WINDOW
+
+
+# ---------------------------------------------------------------------------
+# DenoWarmResult — dataclass invariants
+# ---------------------------------------------------------------------------
+
+
+def test_deno_warm_result_is_frozen_dataclass() -> None:
+    result = pot_provider.DenoWarmResult(ok=True, elapsed_s=1.5, detail="version 1.3.1")
+    with pytest.raises(FrozenInstanceError):
+        result.ok = False
