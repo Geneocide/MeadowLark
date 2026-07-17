@@ -68,6 +68,7 @@ COOKIES_FILE: Final[Path] = _resolve_path(
     "VID_DL_COOKIES_FILE", RESOURCES_DIR / "cookies.txt"
 )
 LIVE_QUEUE_FILE: Final[Path] = RESOURCES_DIR / "live_queue.txt"
+FAILED_DOWNLOADS_FILE: Final[Path] = RESOURCES_DIR / "failed_downloads.json"
 
 # Playlist files
 PLAYLISTS_DIR: Final[Path] = RESOURCES_DIR / "playlists"

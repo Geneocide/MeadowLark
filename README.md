@@ -22,6 +22,7 @@ A simple desktop app for downloading videos, playlists, and podcasts from YouTub
   - [Automation Tab](#automation-tab)
 - [cookies.txt — What It Is and How to Get One](#cookiestxt--what-it-is-and-how-to-get-one)
 - [Download History](#download-history)
+- [Failed Downloads](#failed-downloads)
 - [Updates](#updates)
 - [Developer Setup](#developer-setup)
 - [Environment Variable Reference](#environment-variable-reference)
@@ -51,6 +52,7 @@ It also handles:
 | **SponsorBlock integration** | Skips sponsor segments when downloading podcasts |
 | **Mark as watched** | Optionally tells YouTube a video is watched after you download it |
 | **Live video queue** | Queues live streams and retries them automatically until they're available |
+| **Failed download list** | Surfaces failures on a ⚠ button; review why each one failed and retry or dismiss it |
 
 ---
 
@@ -278,6 +280,24 @@ MeadowLark keeps two logs in its AppData folder:
 - **error_log.txt** — errors and failures
 
 You can view recent history inside the app via the **History** menu item (if available in your version). The archive file (`archive.txt`) is what yt-dlp uses internally to skip already-downloaded videos; you normally don't need to touch it. There is an **Ignore Archive?** checkbox that will download a video you have previously downloaded, if you need. Be careful to uncheck it when you no longer need it, or you could accidentally download whole playlists you've already seen.
+
+---
+
+## Failed Downloads
+
+When a download fails, MeadowLark records it instead of letting it scroll past in the log. A red **⚠ N** button appears in the top-right corner showing how many failures are waiting; it is hidden entirely when there are none.
+
+Click it to open the **Failed Downloads** window, a list of every failed item with the time it failed, the site, the download type (1080/720/audio/playlist), and the title. Hover any row to see the error message that caused the failure.
+
+Select a row and use:
+
+- **Retry** — re-queues the download exactly as if you had dropped the URL again. Already-completed entries of a playlist are skipped via the archive, so only the failed parts download. If it fails a second time, it reappears in the list with a fresh timestamp.
+- **Delete** — removes the item from the list without downloading it.
+- **Right-click → Open in Browser** — opens the original URL so you can check whether the video still exists.
+
+Retry is disabled for any record whose download type can no longer be recognised (for example, a record written by an older version); Delete still works on those.
+
+The list lives in `failed_downloads.json` next to the app's other resources and survives restarts — if failures are pending when you close the app, the ⚠ button is there again at next launch.
 
 ---
 

@@ -21,6 +21,7 @@ from src.config import (  # noqa: E402
     LOGFILE_MIGRATION_ENABLED,
 )
 from src.download_executor import DownloadExecutor  # noqa: E402
+from src.failed_downloads import FailureHook, make_failed_record  # noqa: E402
 from src.logging_utils import get_local_timestamp  # noqa: E402
 
 logging.basicConfig(
@@ -388,6 +389,7 @@ class QYTQueue(QThread):
     message_changed = pyqtSignal(str)
     queue_empty = pyqtSignal()
     history_entry_added = pyqtSignal(dict)
+    download_failed = pyqtSignal(dict)
 
     def __init__(self, download_queue: Queue) -> None:
         """
@@ -421,6 +423,16 @@ class QYTQueue(QThread):
                     )
                     self.message_changed.emit(
                         f"------  Download error  ------\n{item[0]}"
+                    )
+                    # Title is the URL here: no network title lookup in the crash path.
+                    qmeta = (
+                        (item[1] or {}).get("qmeta") if isinstance(item[1], dict) else {}
+                    )
+                    first_url = item[0][0] if item[0] else "(unknown)"
+                    self.download_failed.emit(
+                        make_failed_record(
+                            item[0], qmeta, first_url, f"{type(exc).__name__}: {exc}"
+                        ),
                     )
                 else:
                     self.message_changed.emit(
@@ -480,6 +492,12 @@ class QYTQueue(QThread):
             history_logger = HistoryLogger(on_log=self.history_entry_added.emit)
             progress_hooks = list(options.get("progress_hooks", []))
             progress_hooks.append(HistoryHook(options.get("qmeta"), logger=history_logger))
+            # Captures per-entry errors that ignoreerrors="only_download" swallows
+            # during playlist runs, so they never reach the `if not success` path.
+            failure_hook = FailureHook(
+                options.get("qmeta"), on_failure=self.download_failed.emit
+            )
+            progress_hooks.append(failure_hook)
             options["progress_hooks"] = progress_hooks
 
             # Delegate download to executor
@@ -497,6 +515,13 @@ class QYTQueue(QThread):
                 # Extract title for logging
                 title = self.executor._extract_title(urls)
                 history_logger.log(site, dtype, title, success=False)
+                self.download_failed.emit(
+                    make_failed_record(urls, meta, title, error_message),
+                )
+            # Runs on both paths: a playlist can fail entries while execute()
+            # still reports overall success. Phase 2's dedupe-by-key absorbs the
+            # overlap when the hook and the batch record catch the same video.
+            failure_hook.flush()
         except Exception as exc:
             utils.log_exception(exc, f"QYTQueue.download: unexpected error for {urls}")
             raise

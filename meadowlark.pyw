@@ -74,6 +74,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
     QGridLayout,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QMenu,
@@ -94,6 +95,7 @@ from src.config import (
     ALWAYS_ON_TOP,
     ARCHIVE_PATH,
     COOKIES_FILE,
+    FAILED_DOWNLOADS_FILE,
     LABEL_BTN_720,
     LABEL_BTN_PLAYLISTS,
     LABEL_BTN_PODCASTS,
@@ -115,6 +117,12 @@ from src.config import (
     YDL_COMMON_ERRORS,
     YDL_EXTRACTION_ERRORS,
 )
+from src.failed_downloads import (
+    add_failed_download,
+    load_failed_downloads,
+    remove_failed_download,
+)
+from src.failed_downloads_dialog import FailedDownloadsDialog
 from src.first_run_wizard import FirstRunWizard, needs_first_run
 from src.history_dialog import HistoryDialog
 from src.match_filter import build_match_filter
@@ -234,6 +242,9 @@ class MyWindow(QWidget):
         self._setup_timers()
         self._setup_podcast_state()
 
+        self._failed_dialog: FailedDownloadsDialog | None = None
+        self._refresh_failed_button()
+
         QShortcut(QKeySequence("Ctrl+H"), self).activated.connect(self._show_history)
         QShortcut(QKeySequence("Ctrl+U"), self).activated.connect(
             self._start_app_update_check
@@ -295,6 +306,11 @@ class MyWindow(QWidget):
         self.buttonUpdate.setVisible(True)
         self.buttonSettings = QPushButton("⚙")
         self.buttonSettings.clicked.connect(self._open_settings)
+        self.buttonFailed = QPushButton("⚠")
+        self.buttonFailed.setToolTip("Failed downloads — click to view")
+        self.buttonFailed.setStyleSheet("color:#d9534f;font-weight:bold;")
+        self.buttonFailed.clicked.connect(self._show_failed_downloads)
+        self.buttonFailed.setVisible(False)
         self.label1080 = DropLabel(
             LABEL_DROP_1080, "#424769", self.request_detected, source_key="1080"
         )
@@ -312,8 +328,15 @@ class MyWindow(QWidget):
 
         layout.addWidget(self.checkSkipDownload, 0, 0)
         layout.addWidget(self.checkIgnoreArchive, 0, 1)
-        layout.addWidget(self.buttonUpdate, 0, 2)
-        layout.addWidget(self.buttonSettings, 0, 3)
+        top_buttons = QWidget()
+        top_inner = QHBoxLayout()
+        top_inner.setContentsMargins(0, 0, 0, 0)
+        top_inner.addStretch()
+        top_inner.addWidget(self.buttonFailed)
+        top_inner.addWidget(self.buttonUpdate)
+        top_inner.addWidget(self.buttonSettings)
+        top_buttons.setLayout(top_inner)
+        layout.addWidget(top_buttons, 0, 2, 1, 2)
         layout.addWidget(self.buttonPlaylists, 1, 0)
         layout.addWidget(self.button720Playlists, 1, 1)
         layout.addWidget(self._build_podcast_container(), 1, 2, 1, 2)
@@ -334,6 +357,7 @@ class MyWindow(QWidget):
         self.downloader.message_changed.connect(self.handle_log_entry)
         self.downloader.queue_empty.connect(self.handle_queue_empty)
         self.downloader.history_entry_added.connect(self._on_history_entry_added)
+        self.downloader.download_failed.connect(self._on_download_failed)
         self.downloader.start()
 
     def _setup_timers(self) -> None:
@@ -1271,6 +1295,60 @@ class MyWindow(QWidget):
         """Clear stored references when the status dialog is destroyed."""
         self._podcast_status_dialog = None
         self._podcast_status_table = None
+
+    def _refresh_failed_button(self) -> None:
+        """Sync the warning button's count and visibility with the store."""
+        count = len(load_failed_downloads(FAILED_DOWNLOADS_FILE))
+        self.buttonFailed.setText(f"⚠ {count}")
+        self.buttonFailed.setVisible(count > 0)
+
+    def _on_download_failed(self, record: dict) -> None:
+        """Persist a failure reported by the download thread (GUI-thread slot)."""
+        try:
+            records = add_failed_download(FAILED_DOWNLOADS_FILE, record)
+            self._refresh_failed_button()
+            if self._failed_dialog is not None:
+                self._failed_dialog.set_records(records)
+        except OSError as exc:
+            # A broken store file must never take down the slot.
+            utils.log_exception(exc, "Failed to persist failed download")
+
+    def _show_failed_downloads(self) -> None:
+        """Open (or refocus) the non-blocking failed-downloads dialog."""
+        existing = self._failed_dialog
+        if existing is not None:
+            try:
+                existing.raise_()
+                existing.activateWindow()
+            except RuntimeError as exc:
+                utils.log_exception(exc, "Failed to focus failed-downloads dialog")
+            else:
+                return
+
+        dialog = FailedDownloadsDialog(load_failed_downloads(FAILED_DOWNLOADS_FILE), self)
+        dialog.retry_requested.connect(self._retry_failed_download)
+        dialog.delete_requested.connect(self._delete_failed_download)
+        dialog.destroyed.connect(self._on_failed_dialog_destroyed)
+        dialog.show()
+        self._failed_dialog = dialog
+
+    def _on_failed_dialog_destroyed(self) -> None:
+        self._failed_dialog = None
+
+    def _delete_failed_download(self, key: str) -> None:
+        """Drop a record from the store and refresh the button and dialog."""
+        records = remove_failed_download(FAILED_DOWNLOADS_FILE, key)
+        self._refresh_failed_button()
+        if self._failed_dialog is not None:
+            self._failed_dialog.set_records(records)
+
+    def _retry_failed_download(self, record: dict) -> None:
+        """Re-queue a failed download through the normal download pipeline."""
+        # Remove-first is deliberate: a repeat failure re-adds the record with a
+        # fresh timestamp via download_failed; a success leaves the list clean.
+        self._delete_failed_download(record["key"])
+        self.handle_log_entry(f"Retrying failed download: {record['title']}")
+        self.request_detected(list(record["urls"]), record["source"])
 
     def _show_history(self) -> None:
         """Open a non-blocking dialog showing download history (Ctrl+H)."""
