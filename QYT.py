@@ -14,6 +14,8 @@ _user_env = Path.home() / "AppData" / "Roaming" / "MeadowLark" / ".env"
 load_dotenv(dotenv_path=_user_env if _user_env.exists() else None)
 load_dotenv()  # also load project .env in dev (won't override vars already set)
 
+from genekit.logging import configure_logging  # noqa: E402
+
 import utils  # noqa: E402  (imported after load_dotenv so env is set at import time)
 from src.config import (  # noqa: E402
     ERROR_LOG_PATH,
@@ -24,11 +26,7 @@ from src.download_executor import DownloadExecutor  # noqa: E402
 from src.failed_downloads import FailureHook, make_failed_record  # noqa: E402
 from src.logging_utils import get_local_timestamp  # noqa: E402
 
-logging.basicConfig(
-    filename=str(ERROR_LOG_PATH),
-    level=logging.ERROR,
-    format="%(asctime)s %(message)s",
-)
+configure_logging("ERROR", log_file=ERROR_LOG_PATH, console="none")
 
 # Migrate prior logfile name to the new error log if present
 if LOGFILE_MIGRATION_ENABLED:

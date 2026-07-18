@@ -3,6 +3,10 @@
 import logging
 from datetime import datetime
 
+from genekit.logging import configure_logging
+
+from src.config import ERROR_LOG_PATH
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,18 +22,14 @@ def log_exception(exc: Exception, context: str | None = None) -> None:
     This helper is used by the app to ensure all swallowed exceptions are
     recorded with a full traceback.
 
-    If logging has not yet been configured elsewhere, configure a basic
-    handler so that errors are still written to the expected file.
+    If logging has not yet been configured elsewhere, configure it via
+    ``genekit.logging`` so that errors are still written to the expected file.
 
     Args:
         exc: The exception to log.
         context: Optional context string to prepend to the exception message.
     """
     if not logging.getLogger().hasHandlers():
-        logging.basicConfig(
-            filename="error_log.txt",
-            level=logging.ERROR,
-            format="%(asctime)s %(message)s",
-        )
+        configure_logging("ERROR", log_file=ERROR_LOG_PATH, console="none")
     msg = f"{context}: {exc}" if context else str(exc)
     logger.exception(msg)

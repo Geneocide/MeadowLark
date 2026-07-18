@@ -3,7 +3,7 @@ name = "meadowlark"
 version = "0.4.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "deno>=2.5.4",
     "python-dotenv>=1.0.0",
@@ -16,6 +16,7 @@ dependencies = [
     "bgutil-ytdlp-pot-provider>=1.3.1",
     "yt-dlp>=2025.7.21",
     "yt-dlp-ejs>=0.8.0",
+    "genekit",
 ]
 
 [dependency-groups]
@@ -79,3 +80,6 @@ ignore = [
 "UIClasses.py" = ["N802"]
 # Standalone dev/CLI tools, intentionally not an importable package.
 "scripts/**" = ["INP001"]
+
+[tool.uv.sources]
+genekit = { git = "https://github.com/TheGeneCode/genekit", subdirectory = "python", tag = "py-v0.1.0" }
