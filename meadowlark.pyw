@@ -1318,6 +1318,10 @@ class MyWindow(QWidget):
         existing = self._failed_dialog
         if existing is not None:
             try:
+                # Closing the dialog only hides it (no WA_DeleteOnClose), so a
+                # cached instance may be alive but invisible; show() is what
+                # makes the button work on every click, not just the first.
+                existing.show()
                 existing.raise_()
                 existing.activateWindow()
             except RuntimeError as exc:
