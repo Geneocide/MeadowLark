@@ -19,6 +19,13 @@ jobs:
           $version = "${{ github.ref_name }}".TrimStart('v')
           uv version $version
 
+      # genekit is a private repo; uv shells out to git, which has no credentials
+      # of its own on the runner. Rewrite github.com HTTPS URLs to carry the PAT.
+      - name: Authenticate git for private genekit dependency
+        env:
+          GENEKIT_TOKEN: ${{ secrets.GENEKIT_TOKEN }}
+        run: git config --global url."https://x-access-token:$env:GENEKIT_TOKEN@github.com/".insteadOf "https://github.com/"
+
       - name: Install dependencies (incl. dev group for PyInstaller)
         run: uv sync --group dev
 
