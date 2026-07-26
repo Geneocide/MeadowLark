@@ -14,8 +14,12 @@ from .config import (
     YOUTUBE_PLAYER_CLIENTS,
 )
 from .dict_utils import DEFAULT_POSTPROCESSORS
+from .path_utils import slugify_if_too_long
 from .qt_protocols import YdlLogger, YdlProgressHook
 from .settings_dialog import get_setting
+
+MISC_PODCAST_LABEL = "misc"
+"""Folder used for audio episodes whose show cannot be resolved."""
 
 # JavaScript runtimes configuration
 JS_RUNTIMES_CONFIG = {
@@ -108,6 +112,41 @@ def _build_video_format_selector(height: int | None, vfmt: str) -> str:
         f"bestvideo*{h}+bestaudio/"
         f"best{h}/best"
     )
+
+
+def podcast_base_dir() -> str:
+    """
+    Return the directory that holds one folder per podcast show.
+
+    The configured audio/podcast directory is the "misc" bucket for episodes
+    whose show is unknown; the per-show folders are its siblings.
+
+    Returns:
+        Posix-style path of the directory containing the per-show folders.
+    """
+    misc_dir = Path(
+        get_setting("VID_DL_PODCAST_MISC_OUTPUT_DIR") or str(PODCAST_MISC_OUTPUT_DIR)
+    )
+    return misc_dir.parent.as_posix()
+
+
+def build_podcast_outtmpl(label: str | None) -> str:
+    """
+    Return the output template that files an audio episode under its show folder.
+
+    Every ``audio_playlists`` download must go through this: the flat template
+    in ``get_source_options`` writes straight into the misc directory, which is
+    only correct for episodes with no known show.
+
+    Args:
+        label: Resolved show label, or None/empty when the show is unknown.
+
+    Returns:
+        yt-dlp output template rooted at ``<podcast base>/<show label>``.
+    """
+    base_dir = podcast_base_dir()
+    safe_label = slugify_if_too_long(base_dir, label or MISC_PODCAST_LABEL)
+    return f"{base_dir}/{safe_label}/%(title)s.%(ext)s"
 
 
 def get_source_options(source: str) -> dict[str, Any]:

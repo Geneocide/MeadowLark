@@ -22,13 +22,13 @@ def test_load_missing_file_returns_empty(queue_file: Path) -> None:
 
 
 def test_round_trip_without_playlist_id(queue_file: Path) -> None:
-    entries = {"https://yt.com/watch?v=abc": ("youtube", None)}
+    entries = {"https://yt.com/watch?v=abc": ("youtube", None, None)}
     save_live_queue(queue_file, entries)
     assert load_live_queue(queue_file) == entries
 
 
 def test_round_trip_with_playlist_id(queue_file: Path) -> None:
-    entries = {"https://yt.com/watch?v=abc": ("youtube", "PLxyz")}
+    entries = {"https://yt.com/watch?v=abc": ("youtube", "PLxyz", None)}
     save_live_queue(queue_file, entries)
     assert load_live_queue(queue_file) == entries
 
@@ -36,7 +36,7 @@ def test_round_trip_with_playlist_id(queue_file: Path) -> None:
 def test_add_creates_entry(queue_file: Path) -> None:
     add_to_live_queue(queue_file, "https://yt.com/watch?v=xyz", "youtube")
     result = load_live_queue(queue_file)
-    assert result["https://yt.com/watch?v=xyz"] == ("youtube", None)
+    assert result["https://yt.com/watch?v=xyz"] == ("youtube", None, None)
 
 
 def test_add_deduplicates(queue_file: Path) -> None:
@@ -44,13 +44,111 @@ def test_add_deduplicates(queue_file: Path) -> None:
     add_to_live_queue(queue_file, "https://yt.com/watch?v=xyz", "youtube", "PLabc")
     result = load_live_queue(queue_file)
     assert len(result) == 1
-    assert result["https://yt.com/watch?v=xyz"] == ("youtube", "PLabc")
+    assert result["https://yt.com/watch?v=xyz"] == ("youtube", "PLabc", None)
 
 
 def test_load_skips_blank_lines(queue_file: Path) -> None:
     queue_file.write_text("\nyoutube|https://yt.com/watch?v=abc\n\n", encoding="utf-8")
     result = load_live_queue(queue_file)
     assert len(result) == 1
+
+
+# --- Boundary tests: label field (4th column) round-trip and malformed lines ---
+
+
+def test_round_trip_with_label_no_playlist_id(queue_file: Path) -> None:
+    entries = {"https://yt.com/watch?v=abc": ("audio_playlists", None, "Show Name")}
+    save_live_queue(queue_file, entries)
+    assert load_live_queue(queue_file) == entries
+
+
+def test_round_trip_label_containing_pipe(queue_file: Path) -> None:
+    """A label that itself contains '|' must survive intact, not get split into extra fields."""
+    entries = {"https://yt.com/watch?v=abc": ("audio_playlists", "PLxyz", "Show | Two")}
+    save_live_queue(queue_file, entries)
+    assert load_live_queue(queue_file) == entries
+
+
+def test_round_trip_unicode_and_very_long_label(queue_file: Path) -> None:
+    label = ("配信番組 podcast show 🎙️ " * 30).strip()
+    entries = {"https://yt.com/watch?v=abc": ("audio_playlists", None, label)}
+    save_live_queue(queue_file, entries)
+    assert load_live_queue(queue_file) == entries
+
+
+def test_empty_label_round_trips_as_none(queue_file: Path) -> None:
+    """
+    An empty-string label is falsy at save time.
+
+    It collapses to a 3-field legacy line and reloads as None rather than ''.
+    """
+    entries = {"https://yt.com/watch?v=abc": ("audio_playlists", "PLxyz", "")}
+    save_live_queue(queue_file, entries)
+    assert load_live_queue(queue_file) == {
+        "https://yt.com/watch?v=abc": ("audio_playlists", "PLxyz", None),
+    }
+
+
+def test_load_legacy_two_field_line(queue_file: Path) -> None:
+    """Lines written before playlist_id existed still parse with both trailing fields None."""
+    queue_file.write_text("youtube|https://yt.com/watch?v=abc\n", encoding="utf-8")
+    assert load_live_queue(queue_file) == {
+        "https://yt.com/watch?v=abc": ("youtube", None, None),
+    }
+
+
+def test_load_empty_playlist_id_with_label_present(queue_file: Path) -> None:
+    """A line with an empty playlist_id column but a populated label column."""
+    queue_file.write_text(
+        "audio_playlists|https://yt.com/watch?v=abc||ShowLabel\n", encoding="utf-8"
+    )
+    assert load_live_queue(queue_file) == {
+        "https://yt.com/watch?v=abc": ("audio_playlists", None, "ShowLabel"),
+    }
+
+
+def test_load_skips_line_with_empty_url(queue_file: Path) -> None:
+    queue_file.write_text("audio_playlists||label\n", encoding="utf-8")
+    assert load_live_queue(queue_file) == {}
+
+
+def test_load_skips_single_field_line(queue_file: Path) -> None:
+    """A line with no '|' at all (truncated/corrupt write) is ignored, not a crash."""
+    queue_file.write_text("justsource\n", encoding="utf-8")
+    assert load_live_queue(queue_file) == {}
+
+
+def test_load_skips_bare_pipe_line(queue_file: Path) -> None:
+    queue_file.write_text("|\n", encoding="utf-8")
+    assert load_live_queue(queue_file) == {}
+
+
+def test_load_whitespace_only_line_is_skipped(queue_file: Path) -> None:
+    queue_file.write_text("   \n\t\n", encoding="utf-8")
+    assert load_live_queue(queue_file) == {}
+
+
+def test_load_trailing_pipes_become_literal_label(queue_file: Path) -> None:
+    """
+    Documents current parsing behavior for stray trailing pipes.
+
+    split(maxsplit=3) only protects the LAST field from stray '|'. Pipes past the
+    3rd delimiter are kept verbatim as the label rather than raising or being dropped.
+    """
+    queue_file.write_text("a|b|||\n", encoding="utf-8")
+    assert load_live_queue(queue_file) == {"b": ("a", None, "|")}
+
+
+def test_load_pipe_in_playlist_id_mangles_label(queue_file: Path) -> None:
+    """
+    Known quirk (low severity): a playlist_id containing '|' mangles the label.
+
+    Its remainder bleeds into the label field, since only the label (last field) is
+    protected from further splitting. Real playlist IDs are alphanumeric so this
+    shouldn't occur in practice -- documented here rather than fixed, per review scope.
+    """
+    queue_file.write_text("source|url|pl|ist|label\n", encoding="utf-8")
+    assert load_live_queue(queue_file) == {"url": ("source", "pl", "ist|label")}
 
 
 # --- DownloadService wrapper tests ---
@@ -99,7 +197,7 @@ def test_load_live_queue_parses_file(tmp_path) -> None:
 
     entries = service.load_live_queue()
 
-    assert entries == {"https://example.com/video": ("audio_playlists", None)}
+    assert entries == {"https://example.com/video": ("audio_playlists", None, None)}
 
 
 def test_load_live_queue_parses_playlist_id(tmp_path) -> None:
@@ -111,7 +209,7 @@ def test_load_live_queue_parses_playlist_id(tmp_path) -> None:
 
     entries = service.load_live_queue()
 
-    assert entries == {"https://youtube.com/watch?v=abc": ("720playlists", "PLtest123")}
+    assert entries == {"https://youtube.com/watch?v=abc": ("720playlists", "PLtest123", None)}
 
 
 def test_save_live_queue_writes_entries(tmp_path) -> None:
@@ -119,7 +217,7 @@ def test_save_live_queue_writes_entries(tmp_path) -> None:
     service = make_service()
     service.live_queue_path = path
 
-    service.save_live_queue({"https://example.com/video": ("audio_playlists", None)})
+    service.save_live_queue({"https://example.com/video": ("audio_playlists", None, None)})
 
     assert path.read_text().strip() == "audio_playlists|https://example.com/video"
 
@@ -130,7 +228,7 @@ def test_save_live_queue_writes_playlist_id(tmp_path) -> None:
     service.live_queue_path = path
 
     service.save_live_queue(
-        {"https://example.com/video": ("720playlists", "PLtest123")}
+        {"https://example.com/video": ("720playlists", "PLtest123", None)}
     )
 
     assert (
@@ -143,7 +241,7 @@ def test_live_queue_round_trip_with_playlist_id(tmp_path) -> None:
     service = make_service()
     service.live_queue_path = path
 
-    original = {"https://youtube.com/watch?v=X": ("720playlists", "PLabc456")}
+    original = {"https://youtube.com/watch?v=X": ("720playlists", "PLabc456", None)}
     service.save_live_queue(original)
     loaded = service.load_live_queue()
 
@@ -200,6 +298,7 @@ def test_make_match_filter_records_live_url() -> None:
         "https://youtube.com/live",
         "audio_playlists",
         None,
+        label=None,
     )
     log_callback.assert_called_once()
 
@@ -223,6 +322,7 @@ def test_make_match_filter_captures_playlist_id() -> None:
         "https://youtube.com/watch?v=abc",
         "720playlists",
         "PLxyz789",
+        label=None,
     )
 
 

@@ -44,6 +44,7 @@ import time
 import webbrowser
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
+from functools import partial
 from os import startfile
 from pathlib import Path
 from typing import ClassVar
@@ -111,7 +112,6 @@ from src.config import (
     PLAYLISTS_AUDIO_FILE,
     PLAYLISTS_FILE,
     PODCAST_AUTO_CHECK,
-    PODCAST_MISC_OUTPUT_DIR,
     VENV_SCRIPTS_DIR,
     VIDEO_STORAGE_DIR,
     YDL_COMMON_ERRORS,
@@ -145,6 +145,7 @@ from src.settings_dialog import (
     get_setting,
 )
 from src.url_utils import extract_playlist_id
+from src.ydl_options import build_podcast_outtmpl, podcast_base_dir
 from src.ydl_utils import extract_playlist_info
 from UIClasses import DropLabel, PlaylistButton, PlaylistDialog
 
@@ -828,11 +829,18 @@ class MyWindow(QWidget):
             # If the main thread or receiver has gone away, swallow to avoid crashing
 
     # --- Live queue management ---
-    def make_match_filter(self, source: str) -> Callable:
-        """Build a match_filter that skips live/upcoming videos and queues them."""
+    def make_match_filter(self, source: str, label: str | None = None) -> Callable:
+        """
+        Build a match_filter that skips live/upcoming videos and queues them.
+
+        Args:
+            source: The download source identifier.
+            label: Destination folder label the skipped item was bound for, so
+                ``check_live_queue`` can restore it once the stream ends.
+        """
         return build_match_filter(
             source,
-            add_to_queue_fn=self.add_to_live_queue,
+            add_to_queue_fn=partial(self.add_to_live_queue, label=label),
             log_fn=self.live_queue_log.emit,
         )
 
@@ -873,17 +881,20 @@ class MyWindow(QWidget):
         url: str,
         source: str,
         playlist_id: str | None = None,
+        label: str | None = None,
     ) -> None:
         """Add a URL to the live queue."""
-        live_queue.add_to_live_queue(self.live_queue_path, url, source, playlist_id)
+        live_queue.add_to_live_queue(
+            self.live_queue_path, url, source, playlist_id, label
+        )
 
     def check_live_queue(self) -> None:
         """Check the live queue for ended streams and queue them for download."""
         entries = self.load_live_queue()
         if not entries:
             return
-        remaining: dict[str, tuple[str, str | None]] = {}
-        for url, (source, playlist_id) in entries.items():
+        remaining: live_queue.LiveQueueEntries = {}
+        for url, (source, playlist_id, label) in entries.items():
             try:
                 with yt_dlp.YoutubeDL(
                     {
@@ -896,13 +907,13 @@ class MyWindow(QWidget):
                 ) as ydl:
                     info = ydl.extract_info(url, download=False)
                 if info is None:
-                    remaining[url] = (source, playlist_id)
+                    remaining[url] = (source, playlist_id, label)
                     continue
                 is_live = info.get("is_live")
                 live_status = info.get("live_status")
                 if is_live or live_status in ("is_live", "is_upcoming"):
                     # Still live; keep it in the queue
-                    remaining[url] = (source, playlist_id)
+                    remaining[url] = (source, playlist_id, label)
                 else:
                     self.logEdit.appendPlainText(
                         f"Live ended, queued: {url} [{source}]",
@@ -917,6 +928,11 @@ class MyWindow(QWidget):
                         # Don't re-apply match_filter: stream already confirmed ended
                         properties.pop("match_filter", None)
                         ydl_opts = self.append_properties(ydl_opts, properties)
+                        if source == "audio_playlists":
+                            # get_options rebuilds the flat misc-directory
+                            # template; the show folder this episode was bound
+                            # for survives only as the parked label.
+                            ydl_opts["outtmpl"] = build_podcast_outtmpl(label)
                         qmeta: dict = {
                             "site": utils.detect_site_from_urls([url]),
                             "type": source,
@@ -938,13 +954,13 @@ class MyWindow(QWidget):
                     f"Error checking live url {url}: {e}",
                 )
                 utils.log_exception(e, f"Error checking live url {url}")
-                remaining[url] = (source, playlist_id)
+                remaining[url] = (source, playlist_id, label)
             except Exception as e:  # noqa: BLE001
                 self.logEdit.appendPlainText(
                     f"Unexpected error checking live url {url}: {e}",
                 )
                 utils.log_exception(e, f"Unexpected error checking live url {url}")
-                remaining[url] = (source, playlist_id)
+                remaining[url] = (source, playlist_id, label)
         self.save_live_queue(remaining)
 
     def _episode_already_archived(
@@ -1738,12 +1754,7 @@ class MyWindow(QWidget):
         ydl_opts: dict,
     ) -> None:
         """Queue podcast downloads grouped by playlist label, one batch per label."""
-        base_dir = str(
-            Path(
-                get_setting("VID_DL_PODCAST_MISC_OUTPUT_DIR")
-                or str(PODCAST_MISC_OUTPUT_DIR)
-            ).parent
-        )
+        base_dir = podcast_base_dir()
         groups: dict[str, list[str]] = {}
         for obj in to_download:
             try:
@@ -1764,7 +1775,15 @@ class MyWindow(QWidget):
             qhook, qlogger, batch_opts = self._fork_download_context(
                 ydl_opts if isinstance(ydl_opts, dict) else {},
             )
-            batch_opts["outtmpl"] = f"{base_dir}/{label}/%(title)s.%(ext)s"
+            batch_opts["outtmpl"] = build_podcast_outtmpl(label)
+            if batch_opts.get("match_filter"):
+                # Re-bind the filter to this batch's show so an episode that is
+                # still live gets parked in the live queue with its label and
+                # can be filed back under the same folder when it ends.
+                batch_opts["match_filter"] = self.make_match_filter(
+                    "audio_playlists",
+                    label=label,
+                )
             self.downloadQueue.put((urls, batch_opts))
             self._wire_download_signals(qhook, qlogger)
             if not hasattr(self, "_active_qhooks"):

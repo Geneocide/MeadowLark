@@ -11,6 +11,7 @@ __pycache__
 *.lock
 .coverage
 .env
+resources/failed_downloads.json
 dist/
 build/
 installer_output/

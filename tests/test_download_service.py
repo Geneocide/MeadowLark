@@ -210,7 +210,7 @@ def test_check_live_queue_ydl_error_keeps_url_in_remaining() -> None:
     log_callback = Mock()
     service = make_service(log_edit_append_callback=log_callback)
 
-    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None)}
+    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None, None)}
     service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
     service.save_live_queue = MagicMock()  # type: ignore[method-assign]
 
@@ -229,8 +229,8 @@ def test_check_live_queue_still_live_and_upcoming_preserved() -> None:
     service = make_service()
 
     queue_entries = {
-        "https://youtube.com/watch?v=still_live": ("1080playlists", None),
-        "https://youtube.com/watch?v=upcoming": ("720playlists", "PLtest"),
+        "https://youtube.com/watch?v=still_live": ("1080playlists", None, None),
+        "https://youtube.com/watch?v=upcoming": ("720playlists", "PLtest", None),
     }
     service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
     service.save_live_queue = MagicMock()  # type: ignore[method-assign]
@@ -252,11 +252,13 @@ def test_check_live_queue_still_live_and_upcoming_preserved() -> None:
     assert saved_remaining["https://youtube.com/watch?v=still_live"] == (
         "1080playlists",
         None,
+        None,
     )
     assert "https://youtube.com/watch?v=upcoming" in saved_remaining
     assert saved_remaining["https://youtube.com/watch?v=upcoming"] == (
         "720playlists",
         "PLtest",
+        None,
     )
 
 
@@ -264,7 +266,7 @@ def test_check_live_queue_generic_exception_keeps_url_in_remaining() -> None:
     log_callback = Mock()
     service = make_service(log_edit_append_callback=log_callback)
 
-    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None)}
+    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None, None)}
     service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
     service.save_live_queue = MagicMock()  # type: ignore[method-assign]
     service.get_options = MagicMock(side_effect=TypeError("unexpected"))  # type: ignore[method-assign]
@@ -286,7 +288,7 @@ def test_check_live_queue_runtime_error_keeps_url_in_remaining() -> None:
     log_callback = Mock()
     service = make_service(log_edit_append_callback=log_callback)
 
-    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None)}
+    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None, None)}
     service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
     service.save_live_queue = MagicMock()  # type: ignore[method-assign]
     service.get_options = MagicMock(side_effect=RuntimeError("qt-like failure"))  # type: ignore[method-assign]
@@ -371,7 +373,7 @@ def test_check_live_queue_carries_pot_provider_wiring() -> None:
     from src.config import POT_PROVIDER_SERVER_HOME
 
     service = make_service()
-    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None)}
+    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None, None)}
     service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
     service.save_live_queue = MagicMock()  # type: ignore[method-assign]
 
@@ -397,7 +399,7 @@ def test_check_live_queue_carries_pot_provider_wiring() -> None:
 def test_check_live_queue_keyboard_interrupt_not_caught() -> None:
     service = make_service()
 
-    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None)}
+    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None, None)}
     service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
     service.save_live_queue = MagicMock()  # type: ignore[method-assign]
     service.get_options = MagicMock(side_effect=KeyboardInterrupt())  # type: ignore[method-assign]

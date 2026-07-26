@@ -7,6 +7,7 @@ to improve testability and separation of concerns.
 """
 
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from queue import Queue
 from typing import Any
@@ -28,7 +29,7 @@ from src.config import (
 from src.match_filter import build_match_filter
 from src.playlist_utils import load_playlist_urls
 from src.podcast_filtering import load_downloaded_video_ids
-from src.ydl_options import build_shared_extraction_opts
+from src.ydl_options import build_podcast_outtmpl, build_shared_extraction_opts
 
 
 class DownloadService:
@@ -52,7 +53,7 @@ class DownloadService:
         handle_log_entry_callback: Callable[[str], None],
         handle_queue_empty_callback: Callable[[], None],
         do_updates_callback: Callable[[], None],
-        add_to_live_queue_callback: Callable[[str, str, str | None], None],
+        add_to_live_queue_callback: Callable[..., None],
         qhook_factory: Callable[[], QYT.QHook],
         qlogger_factory: Callable[[], QYT.QLogger],
     ) -> None:
@@ -71,7 +72,7 @@ class DownloadService:
             handle_log_entry_callback: Callback to handle log entry.
             handle_queue_empty_callback: Callback to handle queue empty.
             do_updates_callback: Callback to perform updates.
-            add_to_live_queue_callback: Callback to add to live queue (url, source, playlist_id).
+            add_to_live_queue_callback: Callback to add to live queue (url, source, playlist_id, label).
             qhook_factory: Factory for QHook.
             qlogger_factory: Factory for QLogger.
         """
@@ -226,11 +227,18 @@ class DownloadService:
         )
         self.handle_queue_empty_callback()
 
-    def make_match_filter(self, source: str) -> Callable:
-        """Build a match_filter that skips live/upcoming videos and queues them."""
+    def make_match_filter(self, source: str, label: str | None = None) -> Callable:
+        """
+        Build a match_filter that skips live/upcoming videos and queues them.
+
+        Args:
+            source: The download source identifier.
+            label: Destination folder label the skipped item was bound for, so
+                the live-queue re-queue can restore it (see check_live_queue).
+        """
         return build_match_filter(
             source,
-            add_to_queue_fn=self.add_to_live_queue_callback,
+            add_to_queue_fn=partial(self.add_to_live_queue_callback, label=label),
             log_fn=self.log_edit_append_callback,
         )
 
@@ -243,18 +251,24 @@ class DownloadService:
         live_queue.save_live_queue(self.live_queue_path, entries)
 
     def add_to_live_queue(
-        self, url: str, source: str, playlist_id: str | None = None
+        self,
+        url: str,
+        source: str,
+        playlist_id: str | None = None,
+        label: str | None = None,
     ) -> None:
         """Add a URL to the live queue."""
-        live_queue.add_to_live_queue(self.live_queue_path, url, source, playlist_id)
+        live_queue.add_to_live_queue(
+            self.live_queue_path, url, source, playlist_id, label
+        )
 
     def check_live_queue(self) -> None:
         """Check the live queue for ended lives and queue them for download."""
         entries = self.load_live_queue()
         if not entries:
             return
-        remaining: dict[str, tuple[str, str | None]] = {}
-        for url, (source, playlist_id) in entries.items():
+        remaining: live_queue.LiveQueueEntries = {}
+        for url, (source, playlist_id, label) in entries.items():
             try:
                 with yt_dlp.YoutubeDL(
                     {
@@ -267,13 +281,13 @@ class DownloadService:
                 ) as ydl:
                     info = ydl.extract_info(url, download=False)
                 if info is None:
-                    remaining[url] = (source, playlist_id)
+                    remaining[url] = (source, playlist_id, label)
                     continue
                 is_live = info.get("is_live")
                 live_status = info.get("live_status")
                 if is_live or live_status in ("is_live", "is_upcoming"):
                     # Still live; keep it in the queue
-                    remaining[url] = (source, playlist_id)
+                    remaining[url] = (source, playlist_id, label)
                 else:
                     self.log_edit_append_callback(
                         f"Live ended, queued: {url} [{source}]",
@@ -290,6 +304,11 @@ class DownloadService:
                         # Don't re-apply match_filter: stream already confirmed ended
                         properties.pop("match_filter", None)
                         ydl_opts = self.append_properties(ydl_opts, properties)
+                        if source == "audio_playlists":
+                            # get_options rebuilds the flat misc-directory
+                            # template; the show folder this episode was bound
+                            # for survives only as the parked label.
+                            ydl_opts["outtmpl"] = build_podcast_outtmpl(label)
                         qmeta: dict = {
                             "site": utils.detect_site_from_urls([url]),
                             "type": source,
@@ -309,13 +328,13 @@ class DownloadService:
                         self.bar_progress_set_range_callback(0, 1)
             except YDL_EXTRACTION_ERRORS as e:
                 # If any error in checking, keep it for later
-                remaining[url] = (source, playlist_id)
+                remaining[url] = (source, playlist_id, label)
                 self.log_edit_append_callback(
                     f"Error checking live queue: {e}",
                 )
                 utils.log_exception(e, f"Error checking live queue: {url}")
             except Exception as e:
-                remaining[url] = (source, playlist_id)
+                remaining[url] = (source, playlist_id, label)
                 self.log_edit_append_callback(
                     f"Unexpected error checking live queue: {e}",
                 )
