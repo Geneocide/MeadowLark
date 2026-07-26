@@ -252,8 +252,11 @@ def test_window_check_pending_queue_restores_show_folder(tmp_path: Path) -> None
         logEdit = SimpleNamespace(appendPlainText=lambda _msg: None)
         barProgress = SimpleNamespace(setRange=lambda _a, _b: None)
         downloadQueue = SimpleNamespace(put=queued.append)
+        buttonPending = SimpleNamespace(setText=lambda _t: None, setVisible=lambda _v: None)
+        _pending_dialog = None
         _pending_deps = vd.MyWindow._pending_deps
         check_pending_queue = vd.MyWindow.check_pending_queue
+        _refresh_pending_button = vd.MyWindow._refresh_pending_button
 
         def _create_download_context(self):
             return (

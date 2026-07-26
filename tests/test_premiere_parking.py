@@ -34,13 +34,16 @@ def _make_win(
         logEdit = SimpleNamespace(appendPlainText=lambda _msg: None)
         barProgress = SimpleNamespace(setRange=lambda _a, _b: None)
         buttonFailed = SimpleNamespace(setText=lambda _t: None, setVisible=lambda _v: None)
+        buttonPending = SimpleNamespace(setText=lambda _t: None, setVisible=lambda _v: None)
         _failed_dialog = None
+        _pending_dialog = None
 
         _pending_deps = vd.MyWindow._pending_deps
         check_pending_queue = vd.MyWindow.check_pending_queue
         _park_not_yet_released = vd.MyWindow._park_not_yet_released
         _on_download_failed = vd.MyWindow._on_download_failed
         _refresh_failed_button = vd.MyWindow._refresh_failed_button
+        _refresh_pending_button = vd.MyWindow._refresh_pending_button
 
         def handle_log_entry(self, msg: str) -> None:
             self.logs.append(msg)

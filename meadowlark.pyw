@@ -128,6 +128,7 @@ from src.history_dialog import HistoryDialog
 from src.match_filter import build_match_filter
 from src.pending_check import PendingCheckDeps
 from src.pending_check import check_pending_queue as run_pending_check
+from src.pending_downloads_dialog import PendingDownloadsDialog
 from src.pending_queue import (
     KIND_LIVE,
     KIND_PREMIERE,
@@ -135,6 +136,7 @@ from src.pending_queue import (
     load_pending_queue,
     make_pending_record,
     migrate_legacy_live_queue,
+    remove_pending,
     save_pending_queue,
     upsert_pending,
 )
@@ -256,12 +258,14 @@ class MyWindow(QWidget):
         self._ready_text = LABEL_READY_TEXT
 
         self._setup_ui_layout()
+        self._pending_dialog: PendingDownloadsDialog | None = None
         self._setup_queue_and_downloader()
         self._setup_timers()
         self._setup_podcast_state()
 
         self._failed_dialog: FailedDownloadsDialog | None = None
         self._refresh_failed_button()
+        self._refresh_pending_button()
 
         QShortcut(QKeySequence("Ctrl+H"), self).activated.connect(self._show_history)
         QShortcut(QKeySequence("Ctrl+U"), self).activated.connect(
@@ -303,6 +307,35 @@ class MyWindow(QWidget):
         container.setLayout(inner)
         return container
 
+    def _build_top_buttons(self) -> QWidget:
+        """Build the top-row button strip (pending/failed/update/settings)."""
+        self.buttonUpdate = QPushButton("⤓")
+        self.buttonUpdate.clicked.connect(lambda: self.request_detected([], "Update"))
+        self.buttonUpdate.setVisible(True)
+        self.buttonSettings = QPushButton("⚙")
+        self.buttonSettings.clicked.connect(self._open_settings)
+        self.buttonFailed = QPushButton("⚠")
+        self.buttonFailed.setToolTip("Failed downloads — click to view")
+        self.buttonFailed.setStyleSheet("color:#d9534f;font-weight:bold;")
+        self.buttonFailed.clicked.connect(self._show_failed_downloads)
+        self.buttonFailed.setVisible(False)
+        self.buttonPending = QPushButton("⏳")
+        self.buttonPending.setToolTip("Pending downloads — waiting to become available")
+        self.buttonPending.setStyleSheet("color:#8a6d3b;font-weight:bold;")
+        self.buttonPending.clicked.connect(self._show_pending_downloads)
+        self.buttonPending.setVisible(False)
+
+        top_buttons = QWidget()
+        top_inner = QHBoxLayout()
+        top_inner.setContentsMargins(0, 0, 0, 0)
+        top_inner.addStretch()
+        top_inner.addWidget(self.buttonPending)
+        top_inner.addWidget(self.buttonFailed)
+        top_inner.addWidget(self.buttonUpdate)
+        top_inner.addWidget(self.buttonSettings)
+        top_buttons.setLayout(top_inner)
+        return top_buttons
+
     def _setup_ui_layout(self) -> None:
         """Create and arrange all UI widgets and layout."""
         layout = QGridLayout()
@@ -319,16 +352,6 @@ class MyWindow(QWidget):
         self.checkIgnoreArchive.setChecked(False)
         self.checkSkipDownload = QCheckBox("Skip Download")
         self.checkSkipDownload.setChecked(False)
-        self.buttonUpdate = QPushButton("⤓")
-        self.buttonUpdate.clicked.connect(lambda: self.request_detected([], "Update"))
-        self.buttonUpdate.setVisible(True)
-        self.buttonSettings = QPushButton("⚙")
-        self.buttonSettings.clicked.connect(self._open_settings)
-        self.buttonFailed = QPushButton("⚠")
-        self.buttonFailed.setToolTip("Failed downloads — click to view")
-        self.buttonFailed.setStyleSheet("color:#d9534f;font-weight:bold;")
-        self.buttonFailed.clicked.connect(self._show_failed_downloads)
-        self.buttonFailed.setVisible(False)
         self.label1080 = DropLabel(
             LABEL_DROP_1080, "#424769", self.request_detected, source_key="1080"
         )
@@ -346,15 +369,7 @@ class MyWindow(QWidget):
 
         layout.addWidget(self.checkSkipDownload, 0, 0)
         layout.addWidget(self.checkIgnoreArchive, 0, 1)
-        top_buttons = QWidget()
-        top_inner = QHBoxLayout()
-        top_inner.setContentsMargins(0, 0, 0, 0)
-        top_inner.addStretch()
-        top_inner.addWidget(self.buttonFailed)
-        top_inner.addWidget(self.buttonUpdate)
-        top_inner.addWidget(self.buttonSettings)
-        top_buttons.setLayout(top_inner)
-        layout.addWidget(top_buttons, 0, 2, 1, 2)
+        layout.addWidget(self._build_top_buttons(), 0, 2, 1, 2)
         layout.addWidget(self.buttonPlaylists, 1, 0)
         layout.addWidget(self.button720Playlists, 1, 1)
         layout.addWidget(self._build_podcast_container(), 1, 2, 1, 2)
@@ -928,8 +943,10 @@ class MyWindow(QWidget):
         )
 
     def check_pending_queue(self) -> list[PendingRecord]:
-        """Poll parked downloads and queue any that became available."""
-        return run_pending_check(self._pending_deps())
+        """Poll parked downloads, queue any that became available, refresh the UI."""
+        remaining = run_pending_check(self._pending_deps())
+        self._refresh_pending_button(remaining)
+        return remaining
 
     def _episode_already_archived(
         self,
@@ -1285,6 +1302,57 @@ class MyWindow(QWidget):
         count = len(load_failed_downloads(FAILED_DOWNLOADS_FILE))
         self.buttonFailed.setText(f"⚠ {count}")
         self.buttonFailed.setVisible(count > 0)
+
+    def _refresh_pending_button(self, records: list[PendingRecord] | None = None) -> None:
+        """Sync the pending button's count and visibility with the store."""
+        if records is None:
+            records = load_pending_queue(self.pending_queue_path)
+        self.buttonPending.setText(f"⏳ {len(records)}")
+        self.buttonPending.setVisible(bool(records))
+        if self._pending_dialog is not None:
+            self._pending_dialog.set_records(records)
+
+    def _show_pending_downloads(self) -> None:
+        """Open (or refocus) the non-blocking pending-downloads dialog."""
+        existing = self._pending_dialog
+        if existing is not None:
+            try:
+                # Closing the dialog only hides it (no WA_DeleteOnClose), so a cached
+                # instance may be alive but invisible; show() is what makes the button
+                # work on every click, not just the first.
+                existing.show()
+                existing.raise_()
+                existing.activateWindow()
+            except RuntimeError as exc:
+                utils.log_exception(exc, "Failed to focus pending-downloads dialog")
+            else:
+                return
+
+        dialog = PendingDownloadsDialog(load_pending_queue(self.pending_queue_path), self)
+        dialog.download_now_requested.connect(self._download_pending_now)
+        dialog.remove_requested.connect(self._remove_pending_download)
+        dialog.destroyed.connect(self._on_pending_dialog_destroyed)
+        dialog.show()
+        self._pending_dialog = dialog
+
+    def _on_pending_dialog_destroyed(self) -> None:
+        self._pending_dialog = None
+
+    def _remove_pending_download(self, url: str) -> None:
+        """Drop a parked download and refresh the button and dialog."""
+        self._refresh_pending_button(remove_pending(self.pending_queue_path, url))
+
+    def _download_pending_now(self, record: dict) -> None:
+        """Force a parked download through the normal pipeline, ignoring its release time."""
+        url = record.get("url")
+        if not url:
+            return
+        # Remove-first mirrors _retry_failed_download: if it is still unreleased the
+        # failure path re-parks it with a fresh release time, and a success leaves the
+        # pending list clean.
+        self._remove_pending_download(url)
+        self.handle_log_entry(f"Downloading pending item now: {record.get('title') or url}")
+        self.request_detected([url], record.get("source") or "1080")
 
     def _on_download_failed(self, record: dict) -> None:
         """Persist a failure reported by the download thread (GUI-thread slot)."""

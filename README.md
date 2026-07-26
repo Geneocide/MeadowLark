@@ -23,6 +23,7 @@ A simple desktop app for downloading videos, playlists, and podcasts from YouTub
 - [cookies.txt — What It Is and How to Get One](#cookiestxt--what-it-is-and-how-to-get-one)
 - [Download History](#download-history)
 - [Failed Downloads](#failed-downloads)
+- [Pending Downloads](#pending-downloads)
 - [Updates](#updates)
 - [Developer Setup](#developer-setup)
 - [Environment Variable Reference](#environment-variable-reference)
@@ -52,6 +53,7 @@ It also handles:
 | **SponsorBlock integration** | Skips sponsor segments when downloading podcasts |
 | **Mark as watched** | Optionally tells YouTube a video is watched after you download it |
 | **Live video queue** | Queues live streams and retries them automatically until they're available |
+| **Pending download list** | Surfaces premieres/live-streams not yet available on a ⏳ button; force-download now or remove |
 | **Failed download list** | Surfaces failures on a ⚠ button; review why each one failed and retry or dismiss it |
 
 ---
@@ -298,6 +300,24 @@ Select a row and use:
 Retry is disabled for any record whose download type can no longer be recognised (for example, a record written by an older version); Delete still works on those.
 
 The list lives in `failed_downloads.json` next to the app's other resources and survives restarts — if failures are pending when you close the app, the ⚠ button is there again at next launch.
+
+---
+
+## Pending Downloads
+
+A **⏳ N** button appears in the top-right corner showing how many downloads are parked waiting to become available; it is hidden when there are none.
+
+Click it to open the **Pending Downloads** window, a list of every parked item with its expected availability time, kind (`live` or `premiere`), download type, and title. Hover any row to see the error or reason why nothing has downloaded yet, or the URL.
+
+Select a row and use:
+
+- **Download Now** — force the item through the normal download pipeline immediately, ignoring its release time. If it's genuinely not available yet, it will simply re-park itself with a fresh release time.
+- **Remove** — drop it from the list without downloading it.
+- **Right-click → Open in Browser** — opens the original URL so you can check the video page.
+
+The list lives in `pending_queue.json` next to the app's other resources and survives restarts — if pending downloads are waiting when you close the app, the ⏳ button is there again at next launch.
+
+The app polls automatically every `VID_DL_LIVE_QUEUE_CHECK_INTERVAL_MINUTES` minutes (documented in the [Environment Variable Reference](#environment-variable-reference)).
 
 ---
 
