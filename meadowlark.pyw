@@ -91,7 +91,6 @@ from PyQt6.QtWidgets import (
 
 import QYT
 import utils
-from src import live_queue
 from src.config import (
     ALWAYS_ON_TOP,
     ARCHIVE_PATH,
@@ -108,6 +107,7 @@ from src.config import (
     LABEL_READY_TEXT,
     LIVE_QUEUE_CHECK_INTERVAL_MINUTES,
     LIVE_QUEUE_FILE,
+    PENDING_QUEUE_FILE,
     PLAYLISTS_720_FILE,
     PLAYLISTS_AUDIO_FILE,
     PLAYLISTS_FILE,
@@ -126,6 +126,18 @@ from src.failed_downloads_dialog import FailedDownloadsDialog
 from src.first_run_wizard import FirstRunWizard, needs_first_run
 from src.history_dialog import HistoryDialog
 from src.match_filter import build_match_filter
+from src.pending_check import PendingCheckDeps
+from src.pending_check import check_pending_queue as run_pending_check
+from src.pending_queue import (
+    KIND_LIVE,
+    KIND_PREMIERE,
+    PendingRecord,
+    load_pending_queue,
+    make_pending_record,
+    migrate_legacy_live_queue,
+    save_pending_queue,
+    upsert_pending,
+)
 from src.podcast_filtering import (
     PODCAST_MIN_DURATION_SECONDS,
     append_to_archive_and_mark_skipped,
@@ -138,6 +150,11 @@ from src.podcast_filtering import (
 )
 from src.podcast_helpers import fetch_latest_accessible_entry
 from src.pot_provider import check_pot_provider, warm_deno_cache
+from src.release_status import (
+    is_not_yet_released,
+    parse_relative_release,
+    to_release_at,
+)
 from src.settings_dialog import (
     SettingsDialog,
     _init_runtime_settings,
@@ -363,16 +380,16 @@ class MyWindow(QWidget):
 
     def _setup_timers(self) -> None:
         """Create and start timers for live queue and podcast checks."""
-        # Live queue setup and periodic recheck every 30 minutes
-        self.live_queue_path = LIVE_QUEUE_FILE
-        self.live_queue_path.parent.mkdir(parents=True, exist_ok=True)
-        self.live_queue_path.touch(exist_ok=True)
+        # Pending queue setup (live streams + unreleased premieres) and periodic recheck
+        self.pending_queue_path = PENDING_QUEUE_FILE
+        self.pending_queue_path.parent.mkdir(parents=True, exist_ok=True)
+        migrate_legacy_live_queue(LIVE_QUEUE_FILE, self.pending_queue_path)
         self.live_check_timer = QTimer(self)
         self.live_check_timer.setInterval(LIVE_QUEUE_CHECK_INTERVAL_MINUTES * 60 * 1000)
-        self.live_check_timer.timeout.connect(self.check_live_queue)
+        self.live_check_timer.timeout.connect(self.check_pending_queue)
         self.live_check_timer.start()
         # Do an initial check on startup
-        self.check_live_queue()
+        self.check_pending_queue()
 
         # Schedule hourly automated YT Podcasts check (runs at :15 past the hour)
         if PODCAST_AUTO_CHECK:
@@ -819,7 +836,7 @@ class MyWindow(QWidget):
                     if self._stop_requested:
                         errors.append("Podcast check aborted (stop requested).")
                         to_download, pending, had_error = [], [], True
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 to_download, pending, had_error = [], [], True
                 errors.append(f"Podcast check worker exception: {exc}")
                 utils.log_exception(exc, "Podcast check worker exception")
@@ -836,7 +853,7 @@ class MyWindow(QWidget):
         Args:
             source: The download source identifier.
             label: Destination folder label the skipped item was bound for, so
-                ``check_live_queue`` can restore it once the stream ends.
+                ``check_pending_queue`` can restore it once the stream ends.
         """
         return build_match_filter(
             source,
@@ -844,13 +861,13 @@ class MyWindow(QWidget):
             log_fn=self.live_queue_log.emit,
         )
 
-    def load_live_queue(self) -> live_queue.LiveQueueEntries:
-        """Load live queue entries; returns {url: (source, playlist_id)}."""
-        return live_queue.load_live_queue(self.live_queue_path)
+    def load_pending_queue(self) -> list[PendingRecord]:
+        """Load parked downloads (live streams and unreleased premieres)."""
+        return load_pending_queue(self.pending_queue_path)
 
-    def save_live_queue(self, entries: live_queue.LiveQueueEntries) -> None:
-        """Save the live queue entries to file."""
-        live_queue.save_live_queue(self.live_queue_path, entries)
+    def save_pending_queue(self, records: list[PendingRecord]) -> None:
+        """Save the parked-download records to the store."""
+        save_pending_queue(self.pending_queue_path, records)
 
     def _create_download_context(self) -> tuple[QYT.QHook, QYT.QLogger, dict]:
         """Create a fresh QHook, QLogger, and base ydl_opts dict."""
@@ -883,85 +900,36 @@ class MyWindow(QWidget):
         playlist_id: str | None = None,
         label: str | None = None,
     ) -> None:
-        """Add a URL to the live queue."""
-        live_queue.add_to_live_queue(
-            self.live_queue_path, url, source, playlist_id, label
+        """Park a live/upcoming item. Signature is fixed by build_match_filter's callback."""
+        upsert_pending(
+            self.pending_queue_path,
+            make_pending_record(
+                url, source, playlist_id=playlist_id, label=label, kind=KIND_LIVE
+            ),
         )
 
-    def check_live_queue(self) -> None:
-        """Check the live queue for ended streams and queue them for download."""
-        entries = self.load_live_queue()
-        if not entries:
-            return
-        remaining: live_queue.LiveQueueEntries = {}
-        for url, (source, playlist_id, label) in entries.items():
-            try:
-                with yt_dlp.YoutubeDL(
-                    {
-                        "quiet": True,
-                        "skip_download": True,
-                        "cookiefile": get_setting("VID_DL_COOKIES_FILE")
-                        or str(COOKIES_FILE),
-                        "extract_flat": True,
-                    },
-                ) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                if info is None:
-                    remaining[url] = (source, playlist_id, label)
-                    continue
-                is_live = info.get("is_live")
-                live_status = info.get("live_status")
-                if is_live or live_status in ("is_live", "is_upcoming"):
-                    # Still live; keep it in the queue
-                    remaining[url] = (source, playlist_id, label)
-                else:
-                    self.logEdit.appendPlainText(
-                        f"Live ended, queued: {url} [{source}]",
-                    )
-                    qhook, qlogger, ydl_opts = self._create_download_context()
-                    properties = self.get_options(
-                        [url],
-                        source,
-                        skip_playlist_dialog=True,
-                    )
-                    if properties:
-                        # Don't re-apply match_filter: stream already confirmed ended
-                        properties.pop("match_filter", None)
-                        ydl_opts = self.append_properties(ydl_opts, properties)
-                        if source == "audio_playlists":
-                            # get_options rebuilds the flat misc-directory
-                            # template; the show folder this episode was bound
-                            # for survives only as the parked label.
-                            ydl_opts["outtmpl"] = build_podcast_outtmpl(label)
-                        qmeta: dict = {
-                            "site": utils.detect_site_from_urls([url]),
-                            "type": source,
-                        }
-                        if playlist_id:
-                            playlist_comments = utils.load_playlist_comments_for_source(
-                                source,
-                            )
-                            if playlist_comments:
-                                qmeta["playlist_comments"] = playlist_comments
-                                qmeta["playlist_id"] = playlist_id
-                        ydl_opts["qmeta"] = qmeta
+    def _pending_deps(self) -> PendingCheckDeps:
+        """Bind this window's callbacks to the shared pending-queue poll loop."""
+        return PendingCheckDeps(
+            path=self.pending_queue_path,
+            cookiefile=get_setting("VID_DL_COOKIES_FILE") or str(COOKIES_FILE),
+            get_options=lambda urls, source: self.get_options(
+                urls, source, skip_playlist_dialog=True
+            ),
+            append_properties=self.append_properties,
+            create_context=self._create_download_context,
+            wire_signals=self._wire_download_signals,
+            enqueue=lambda urls, opts: self.downloadQueue.put((urls, opts)),
+            log=self.logEdit.appendPlainText,
+            set_progress_range=self.barProgress.setRange,
+            detect_site=utils.detect_site_from_urls,
+            load_playlist_comments=utils.load_playlist_comments_for_source,
+            ydl_class=yt_dlp.YoutubeDL,
+        )
 
-                        self.downloadQueue.put(([url], ydl_opts))
-                        self._wire_download_signals(qhook, qlogger)
-            except YDL_EXTRACTION_ERRORS as e:
-                # If any error in checking, keep it for later
-                self.logEdit.appendPlainText(
-                    f"Error checking live url {url}: {e}",
-                )
-                utils.log_exception(e, f"Error checking live url {url}")
-                remaining[url] = (source, playlist_id, label)
-            except Exception as e:  # noqa: BLE001
-                self.logEdit.appendPlainText(
-                    f"Unexpected error checking live url {url}: {e}",
-                )
-                utils.log_exception(e, f"Unexpected error checking live url {url}")
-                remaining[url] = (source, playlist_id, label)
-        self.save_live_queue(remaining)
+    def check_pending_queue(self) -> list[PendingRecord]:
+        """Poll parked downloads and queue any that became available."""
+        return run_pending_check(self._pending_deps())
 
     def _episode_already_archived(
         self,
@@ -1070,7 +1038,7 @@ class MyWindow(QWidget):
             pending.append(obj)
             status_entry["status"] = "Pending SponsorBlock"
 
-    def _filter_audio_playlist_urls(  # noqa: C901, PLR0912, PLR0915
+    def _filter_audio_playlist_urls(  # noqa: PLR0912, PLR0915
         self,
         urls: list,
         ydl_opts: dict,
@@ -1320,6 +1288,9 @@ class MyWindow(QWidget):
 
     def _on_download_failed(self, record: dict) -> None:
         """Persist a failure reported by the download thread (GUI-thread slot)."""
+        if is_not_yet_released(record.get("error")):
+            self._park_not_yet_released(record)
+            return
         try:
             records = add_failed_download(FAILED_DOWNLOADS_FILE, record)
             self._refresh_failed_button()
@@ -1328,6 +1299,38 @@ class MyWindow(QWidget):
         except OSError as exc:
             # A broken store file must never take down the slot.
             utils.log_exception(exc, "Failed to persist failed download")
+
+    def _park_not_yet_released(self, record: dict) -> None:
+        """
+        Park an announced-but-unaired item instead of filing it as a failure.
+
+        yt-dlp raises "Premieres in 6 hours" out of extraction before any info_dict
+        exists, so match_filter never sees the video and the error is the only signal
+        we get. The relative time parsed from that message is coarse; the immediate
+        check_pending_queue() below replaces it with the exact release_timestamp (and
+        downloads straight away if the premiere already aired).
+        """
+        urls = record.get("urls") or []
+        url = urls[0] if urls else record.get("key")
+        if not url:
+            return
+        error = record.get("error") or ""
+        try:
+            upsert_pending(
+                self.pending_queue_path,
+                make_pending_record(
+                    url,
+                    record.get("source") or "unknown",
+                    kind=KIND_PREMIERE,
+                    title=record.get("title") or url,
+                    release_at=to_release_at(parse_relative_release(error)),
+                ),
+            )
+        except OSError as exc:
+            utils.log_exception(exc, "Failed to park not-yet-released download")
+            return
+        self.handle_log_entry(f"Not released yet, parked: {record.get('title') or url}")
+        self.check_pending_queue()
 
     def _show_failed_downloads(self) -> None:
         """Open (or refocus) the non-blocking failed-downloads dialog."""
@@ -1482,7 +1485,7 @@ class MyWindow(QWidget):
         """
         try:
             action(row)
-        except Exception as exc:  # noqa: BLE001 - UI event boundary
+        except Exception as exc:
             self.logEdit.appendPlainText(f"Failed to {error_label}: {exc}")
             utils.log_exception(exc, f"Error in status menu action: {error_label}")
 

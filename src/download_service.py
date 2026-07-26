@@ -16,20 +16,34 @@ import yt_dlp
 
 import QYT
 import utils
-from src import live_queue
 from src.config import (
     ARCHIVE_PATH,
     COOKIES_FILE,
     LIVE_QUEUE_FILE,
+    PENDING_QUEUE_FILE,
     PLAYLISTS_720_FILE,
     PLAYLISTS_AUDIO_FILE,
     PLAYLISTS_FILE,
-    YDL_EXTRACTION_ERRORS,
 )
 from src.match_filter import build_match_filter
+from src.pending_check import (
+    PendingCheckDeps,
+)
+from src.pending_check import (
+    check_pending_queue as run_pending_check,
+)
+from src.pending_queue import (
+    KIND_LIVE,
+    PendingRecord,
+    load_pending_queue,
+    make_pending_record,
+    migrate_legacy_live_queue,
+    save_pending_queue,
+    upsert_pending,
+)
 from src.playlist_utils import load_playlist_urls
 from src.podcast_filtering import load_downloaded_video_ids
-from src.ydl_options import build_podcast_outtmpl, build_shared_extraction_opts
+from src.ydl_options import build_shared_extraction_opts
 
 
 class DownloadService:
@@ -91,7 +105,8 @@ class DownloadService:
         self.qhook_factory = qhook_factory
         self.qlogger_factory = qlogger_factory
 
-        self.live_queue_path = LIVE_QUEUE_FILE
+        self.pending_queue_path = PENDING_QUEUE_FILE
+        migrate_legacy_live_queue(LIVE_QUEUE_FILE, self.pending_queue_path)
 
     def request_detected(self, urls: list, source: str) -> tuple[str, list, dict]:
         """
@@ -234,7 +249,7 @@ class DownloadService:
         Args:
             source: The download source identifier.
             label: Destination folder label the skipped item was bound for, so
-                the live-queue re-queue can restore it (see check_live_queue).
+                the pending-queue re-queue can restore it (see check_pending_queue).
         """
         return build_match_filter(
             source,
@@ -242,13 +257,13 @@ class DownloadService:
             log_fn=self.log_edit_append_callback,
         )
 
-    def load_live_queue(self) -> live_queue.LiveQueueEntries:
-        """Load live queue entries; returns {url: (source, playlist_id)}."""
-        return live_queue.load_live_queue(self.live_queue_path)
+    def load_pending_queue(self) -> list[PendingRecord]:
+        """Load parked downloads (live streams and unreleased premieres)."""
+        return load_pending_queue(self.pending_queue_path)
 
-    def save_live_queue(self, entries: live_queue.LiveQueueEntries) -> None:
-        """Save the live queue entries to file."""
-        live_queue.save_live_queue(self.live_queue_path, entries)
+    def save_pending_queue(self, records: list[PendingRecord]) -> None:
+        """Save the parked-download records to the store."""
+        save_pending_queue(self.pending_queue_path, records)
 
     def add_to_live_queue(
         self,
@@ -257,86 +272,44 @@ class DownloadService:
         playlist_id: str | None = None,
         label: str | None = None,
     ) -> None:
-        """Add a URL to the live queue."""
-        live_queue.add_to_live_queue(
-            self.live_queue_path, url, source, playlist_id, label
+        """Park a live/upcoming item. Signature is fixed by build_match_filter's callback."""
+        upsert_pending(
+            self.pending_queue_path,
+            make_pending_record(
+                url, source, playlist_id=playlist_id, label=label, kind=KIND_LIVE
+            ),
         )
 
-    def check_live_queue(self) -> None:
-        """Check the live queue for ended lives and queue them for download."""
-        entries = self.load_live_queue()
-        if not entries:
-            return
-        remaining: live_queue.LiveQueueEntries = {}
-        for url, (source, playlist_id, label) in entries.items():
-            try:
-                with yt_dlp.YoutubeDL(
-                    {
-                        **build_shared_extraction_opts(),
-                        "quiet": True,
-                        "skip_download": True,
-                        "cookiefile": str(COOKIES_FILE),
-                        "extract_flat": True,
-                    },
-                ) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                if info is None:
-                    remaining[url] = (source, playlist_id, label)
-                    continue
-                is_live = info.get("is_live")
-                live_status = info.get("live_status")
-                if is_live or live_status in ("is_live", "is_upcoming"):
-                    # Still live; keep it in the queue
-                    remaining[url] = (source, playlist_id, label)
-                else:
-                    self.log_edit_append_callback(
-                        f"Live ended, queued: {url} [{source}]",
-                    )
-                    qhook = self.qhook_factory()
-                    qlogger = self.qlogger_factory()
-                    ydl_opts = utils.build_base_ydl_opts(qlogger, qhook)
-                    properties = self.get_options(
-                        [url],
-                        source,
-                        skip_playlist_dialog=True,
-                    )
-                    if properties:
-                        # Don't re-apply match_filter: stream already confirmed ended
-                        properties.pop("match_filter", None)
-                        ydl_opts = self.append_properties(ydl_opts, properties)
-                        if source == "audio_playlists":
-                            # get_options rebuilds the flat misc-directory
-                            # template; the show folder this episode was bound
-                            # for survives only as the parked label.
-                            ydl_opts["outtmpl"] = build_podcast_outtmpl(label)
-                        qmeta: dict = {
-                            "site": utils.detect_site_from_urls([url]),
-                            "type": source,
-                        }
-                        if playlist_id:
-                            playlist_comments = utils.load_playlist_comments_for_source(
-                                source
-                            )
-                            if playlist_comments:
-                                qmeta["playlist_comments"] = playlist_comments
-                                qmeta["playlist_id"] = playlist_id
-                        ydl_opts["qmeta"] = qmeta
+    def _create_download_context(self) -> tuple[Any, Any, dict]:
+        """Create a fresh QHook, QLogger, and base ydl_opts dict."""
+        qhook = self.qhook_factory()
+        qlogger = self.qlogger_factory()
+        return qhook, qlogger, utils.build_base_ydl_opts(qlogger, qhook)
 
-                        self.download_queue.put(([url], ydl_opts))
-                        qhook.info_changed.connect(self.handle_info_changed_callback)
-                        qlogger.message_changed.connect(self.handle_log_entry_callback)
-                        self.bar_progress_set_range_callback(0, 1)
-            except YDL_EXTRACTION_ERRORS as e:
-                # If any error in checking, keep it for later
-                remaining[url] = (source, playlist_id, label)
-                self.log_edit_append_callback(
-                    f"Error checking live queue: {e}",
-                )
-                utils.log_exception(e, f"Error checking live queue: {url}")
-            except Exception as e:
-                remaining[url] = (source, playlist_id, label)
-                self.log_edit_append_callback(
-                    f"Unexpected error checking live queue: {e}",
-                )
-                utils.log_exception(e, f"Unexpected error checking live queue: {url}")
-        self.save_live_queue(remaining)
+    def _wire_download_signals(self, qhook: Any, qlogger: Any) -> None:
+        """Connect qhook/qlogger signals to the injected handler callbacks."""
+        qhook.info_changed.connect(self.handle_info_changed_callback)
+        qlogger.message_changed.connect(self.handle_log_entry_callback)
+
+    def _pending_deps(self) -> PendingCheckDeps:
+        """Bind this service's callbacks to the shared pending-queue poll loop."""
+        return PendingCheckDeps(
+            path=self.pending_queue_path,
+            cookiefile=str(COOKIES_FILE),
+            get_options=lambda urls, source: self.get_options(
+                urls, source, skip_playlist_dialog=True
+            ),
+            append_properties=self.append_properties,
+            create_context=self._create_download_context,
+            wire_signals=self._wire_download_signals,
+            enqueue=lambda urls, opts: self.download_queue.put((urls, opts)),
+            log=self.log_edit_append_callback,
+            set_progress_range=self.bar_progress_set_range_callback,
+            detect_site=utils.detect_site_from_urls,
+            load_playlist_comments=utils.load_playlist_comments_for_source,
+            ydl_class=yt_dlp.YoutubeDL,
+        )
+
+    def check_pending_queue(self) -> list[PendingRecord]:
+        """Poll parked downloads and queue any that became available."""
+        return run_pending_check(self._pending_deps())

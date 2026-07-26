@@ -5,8 +5,15 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+from src import download_service
 from src.config import ARCHIVE_PATH, PODCAST_MISC_OUTPUT_DIR
 from src.download_service import DownloadService
+from src.pending_queue import (
+    KIND_LIVE,
+    load_pending_queue,
+    make_pending_record,
+    save_pending_queue,
+)
 
 
 def make_service(**kwargs):
@@ -186,56 +193,63 @@ def test_request_detected_loads_urls_from_file_when_empty_urls_provided() -> Non
 
 
 # ---------------------------------------------------------------------------
-# check_live_queue: empty queue returns immediately (line 243)
+# check_pending_queue: empty queue returns immediately
 # ---------------------------------------------------------------------------
 
 
-def test_check_live_queue_empty_queue_does_not_call_save() -> None:
+def test_check_pending_queue_empty_queue_does_not_call_save(tmp_path) -> None:
     service = make_service()
-    service.load_live_queue = MagicMock(return_value={})  # type: ignore[method-assign]
-    service.save_live_queue = MagicMock()  # type: ignore[method-assign]
+    service.pending_queue_path = tmp_path / "pending_queue.json"
 
-    service.check_live_queue()
+    with patch("src.pending_check.save_pending_queue") as mock_save:
+        result = service.check_pending_queue()
 
-    service.load_live_queue.assert_called_once()
-    service.save_live_queue.assert_not_called()
+    assert result == []
+    mock_save.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# check_live_queue: YDL extraction error keeps URL in remaining (lines 288-291)
+# check_pending_queue: YDL extraction error keeps URL in remaining
 # ---------------------------------------------------------------------------
 
 
-def test_check_live_queue_ydl_error_keeps_url_in_remaining() -> None:
+def test_check_pending_queue_ydl_error_keeps_url_in_remaining(tmp_path) -> None:
     log_callback = Mock()
     service = make_service(log_edit_append_callback=log_callback)
-
-    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None, None)}
-    service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
-    service.save_live_queue = MagicMock()  # type: ignore[method-assign]
+    path = tmp_path / "pending_queue.json"
+    service.pending_queue_path = path
+    save_pending_queue(
+        path, [make_pending_record("https://youtube.com/watch?v=abc", "1080playlists")]
+    )
 
     with patch("src.download_service.yt_dlp.YoutubeDL") as MockYDL:
         ydl_instance = MockYDL.return_value.__enter__.return_value
         ydl_instance.extract_info.side_effect = OSError("extraction failed")
-        service.check_live_queue()
+        service.check_pending_queue()
 
-    saved_remaining = service.save_live_queue.call_args[0][0]
-    assert "https://youtube.com/watch?v=abc" in saved_remaining
+    remaining_urls = {r["url"] for r in load_pending_queue(path)}
+    assert "https://youtube.com/watch?v=abc" in remaining_urls
     log_callback.assert_called()
 
 
-def test_check_live_queue_still_live_and_upcoming_preserved() -> None:
+def test_check_pending_queue_still_live_and_upcoming_preserved(tmp_path) -> None:
     """Verify still-live and upcoming URLs are preserved in queue and saved."""
     service = make_service()
+    path = tmp_path / "pending_queue.json"
+    service.pending_queue_path = path
+    save_pending_queue(
+        path,
+        [
+            make_pending_record("https://youtube.com/watch?v=still_live", "1080playlists"),
+            make_pending_record(
+                "https://youtube.com/watch?v=upcoming",
+                "720playlists",
+                playlist_id="PLtest",
+            ),
+        ],
+    )
 
-    queue_entries = {
-        "https://youtube.com/watch?v=still_live": ("1080playlists", None, None),
-        "https://youtube.com/watch?v=upcoming": ("720playlists", "PLtest", None),
-    }
-    service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
-    service.save_live_queue = MagicMock()  # type: ignore[method-assign]
-
-    def extract_info_side_effect(url, download):
+    def extract_info_side_effect(url, download=False):
         if "still_live" in url:
             return {"is_live": True, "live_status": "is_live"}
         if "upcoming" in url:
@@ -245,30 +259,22 @@ def test_check_live_queue_still_live_and_upcoming_preserved() -> None:
     with patch("src.download_service.yt_dlp.YoutubeDL") as MockYDL:
         ydl_instance = MockYDL.return_value.__enter__.return_value
         ydl_instance.extract_info.side_effect = extract_info_side_effect
-        service.check_live_queue()
+        service.check_pending_queue()
 
-    saved_remaining = service.save_live_queue.call_args[0][0]
-    assert "https://youtube.com/watch?v=still_live" in saved_remaining
-    assert saved_remaining["https://youtube.com/watch?v=still_live"] == (
-        "1080playlists",
-        None,
-        None,
+    remaining = {r["url"]: r for r in load_pending_queue(path)}
+    assert "https://youtube.com/watch?v=still_live" in remaining
+    assert remaining["https://youtube.com/watch?v=still_live"]["source"] == "1080playlists"
+    assert "https://youtube.com/watch?v=upcoming" in remaining
+    assert remaining["https://youtube.com/watch?v=upcoming"]["playlist_id"] == "PLtest"
+
+
+def test_check_pending_queue_generic_exception_keeps_url_in_remaining(tmp_path) -> None:
+    service = make_service()
+    path = tmp_path / "pending_queue.json"
+    service.pending_queue_path = path
+    save_pending_queue(
+        path, [make_pending_record("https://youtube.com/watch?v=abc", "1080playlists")]
     )
-    assert "https://youtube.com/watch?v=upcoming" in saved_remaining
-    assert saved_remaining["https://youtube.com/watch?v=upcoming"] == (
-        "720playlists",
-        "PLtest",
-        None,
-    )
-
-
-def test_check_live_queue_generic_exception_keeps_url_in_remaining() -> None:
-    log_callback = Mock()
-    service = make_service(log_edit_append_callback=log_callback)
-
-    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None, None)}
-    service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
-    service.save_live_queue = MagicMock()  # type: ignore[method-assign]
     service.get_options = MagicMock(side_effect=TypeError("unexpected"))  # type: ignore[method-assign]
 
     with patch("src.download_service.yt_dlp.YoutubeDL") as MockYDL:
@@ -277,20 +283,19 @@ def test_check_live_queue_generic_exception_keeps_url_in_remaining() -> None:
             "is_live": False,
             "live_status": None,
         }
-        service.check_live_queue()
+        service.check_pending_queue()
 
-    saved_remaining = service.save_live_queue.call_args[0][0]
-    assert "https://youtube.com/watch?v=abc" in saved_remaining
-    log_callback.assert_called()
+    remaining_urls = {r["url"] for r in load_pending_queue(path)}
+    assert "https://youtube.com/watch?v=abc" in remaining_urls
 
 
-def test_check_live_queue_runtime_error_keeps_url_in_remaining() -> None:
-    log_callback = Mock()
-    service = make_service(log_edit_append_callback=log_callback)
-
-    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None, None)}
-    service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
-    service.save_live_queue = MagicMock()  # type: ignore[method-assign]
+def test_check_pending_queue_runtime_error_keeps_url_in_remaining(tmp_path) -> None:
+    service = make_service()
+    path = tmp_path / "pending_queue.json"
+    service.pending_queue_path = path
+    save_pending_queue(
+        path, [make_pending_record("https://youtube.com/watch?v=abc", "1080playlists")]
+    )
     service.get_options = MagicMock(side_effect=RuntimeError("qt-like failure"))  # type: ignore[method-assign]
 
     with patch("src.download_service.yt_dlp.YoutubeDL") as MockYDL:
@@ -299,15 +304,14 @@ def test_check_live_queue_runtime_error_keeps_url_in_remaining() -> None:
             "is_live": False,
             "live_status": None,
         }
-        service.check_live_queue()
+        service.check_pending_queue()
 
-    saved_remaining = service.save_live_queue.call_args[0][0]
-    assert "https://youtube.com/watch?v=abc" in saved_remaining
-    log_callback.assert_called()
+    remaining_urls = {r["url"] for r in load_pending_queue(path)}
+    assert "https://youtube.com/watch?v=abc" in remaining_urls
 
 
 # ---------------------------------------------------------------------------
-# skip_downloading / check_live_queue: shared PO-token provider wiring
+# skip_downloading / check_pending_queue: shared PO-token provider wiring
 #
 # Both build a YoutubeDL dict inline rather than via utils.build_base_ydl_opts,
 # so they need build_shared_extraction_opts() merged in explicitly. A bare
@@ -369,13 +373,15 @@ def test_skip_downloading_single_url_extract_flat_true_survives_merge(
     assert "extractor_args" in opts
 
 
-def test_check_live_queue_carries_pot_provider_wiring() -> None:
+def test_check_pending_queue_carries_pot_provider_wiring(tmp_path) -> None:
     from src.config import POT_PROVIDER_SERVER_HOME
 
     service = make_service()
-    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None, None)}
-    service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
-    service.save_live_queue = MagicMock()  # type: ignore[method-assign]
+    path = tmp_path / "pending_queue.json"
+    service.pending_queue_path = path
+    save_pending_queue(
+        path, [make_pending_record("https://youtube.com/watch?v=abc", "1080playlists")]
+    )
 
     with patch("src.download_service.yt_dlp.YoutubeDL") as mock_ydl_class:
         ydl_instance = mock_ydl_class.return_value.__enter__.return_value
@@ -383,25 +389,28 @@ def test_check_live_queue_carries_pot_provider_wiring() -> None:
             "is_live": True,
             "live_status": "is_live",
         }
-        service.check_live_queue()
+        service.check_pending_queue()
 
     opts = mock_ydl_class.call_args.args[0]
     assert opts["extractor_args"]["youtubepot-bgutilscript"]["server_home"] == [
         str(POT_PROVIDER_SERVER_HOME)
     ]
     assert opts["extractor_args"]["youtube"]["player_client"]
-    # per-call keys must survive the merge
-    assert opts["extract_flat"] is True
+    assert "js_runtimes" in opts
+    # extract_release_info's own opts must survive the merge
     assert opts["skip_download"] is True
+    assert opts["ignore_no_formats_error"] is True
+    assert opts["noplaylist"] is True
     assert opts["quiet"] is True
 
 
-def test_check_live_queue_keyboard_interrupt_not_caught() -> None:
+def test_check_pending_queue_keyboard_interrupt_not_caught(tmp_path) -> None:
     service = make_service()
-
-    queue_entries = {"https://youtube.com/watch?v=abc": ("1080playlists", None, None)}
-    service.load_live_queue = MagicMock(return_value=queue_entries)  # type: ignore[method-assign]
-    service.save_live_queue = MagicMock()  # type: ignore[method-assign]
+    path = tmp_path / "pending_queue.json"
+    service.pending_queue_path = path
+    save_pending_queue(
+        path, [make_pending_record("https://youtube.com/watch?v=abc", "1080playlists")]
+    )
     service.get_options = MagicMock(side_effect=KeyboardInterrupt())  # type: ignore[method-assign]
 
     with patch("src.download_service.yt_dlp.YoutubeDL") as MockYDL:
@@ -411,6 +420,61 @@ def test_check_live_queue_keyboard_interrupt_not_caught() -> None:
             "live_status": None,
         }
         with pytest.raises(KeyboardInterrupt):
-            service.check_live_queue()
+            service.check_pending_queue()
 
-    service.save_live_queue.assert_not_called()
+    # save_pending_queue is only reached after the loop finishes; a KeyboardInterrupt
+    # mid-loop must leave the on-disk store untouched.
+    remaining_urls = {r["url"] for r in load_pending_queue(path)}
+    assert "https://youtube.com/watch?v=abc" in remaining_urls
+
+
+def test_add_to_live_queue_writes_pending_record(tmp_path) -> None:
+    service = make_service()
+    path = tmp_path / "pending_queue.json"
+    service.pending_queue_path = path
+
+    service.add_to_live_queue(
+        "https://youtube.com/watch?v=abc", "1080playlists", "PLx", label="Show"
+    )
+
+    records = load_pending_queue(path)
+    assert len(records) == 1
+    assert records[0]["kind"] == KIND_LIVE
+    assert records[0]["playlist_id"] == "PLx"
+    assert records[0]["label"] == "Show"
+
+
+def test_pending_deps_ydl_class_is_explicitly_wired_not_frozen_default(tmp_path) -> None:
+    """
+    ``_pending_deps`` must pass ``ydl_class`` explicitly, not rely on the dataclass default.
+
+    ``PendingCheckDeps.ydl_class`` defaults to the real ``yt_dlp.YoutubeDL`` bound once
+    at ``src.pending_check`` import time. If a future edit dropped the explicit
+    ``ydl_class=yt_dlp.YoutubeDL`` kwarg from ``_pending_deps``, tests that patch
+    ``src.download_service.yt_dlp.YoutubeDL`` would silently stop being honored and
+    fall through to a real network call instead -- this test asserts the identity
+    directly so that regression fails clearly instead of via a flaky network timeout.
+    """
+    service = make_service()
+    service.pending_queue_path = tmp_path / "pending_queue.json"
+
+    sentinel_class = type("SentinelYDL", (), {})
+    with patch("src.download_service.yt_dlp.YoutubeDL", sentinel_class):
+        deps = service._pending_deps()
+
+    assert deps.ydl_class is sentinel_class
+
+
+def test_service_migrates_legacy_txt_on_construction(tmp_path, monkeypatch) -> None:
+    legacy_path = tmp_path / "live_queue.txt"
+    legacy_path.write_text("1080playlists|https://youtube.com/watch?v=legacy\n")
+    pending_path = tmp_path / "pending_queue.json"
+    monkeypatch.setattr(download_service, "LIVE_QUEUE_FILE", legacy_path)
+    monkeypatch.setattr(download_service, "PENDING_QUEUE_FILE", pending_path)
+
+    service = make_service()
+
+    records = load_pending_queue(service.pending_queue_path)
+    assert {r["url"] for r in records} == {"https://youtube.com/watch?v=legacy"}
+    assert not legacy_path.exists()
+    assert legacy_path.with_suffix(".txt.migrated").exists()

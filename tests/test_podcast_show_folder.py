@@ -2,8 +2,8 @@
 Regression tests for the invariant that every podcast episode is filed under its show folder.
 
 A podcast episode that is still live when the podcast check runs is skipped by
-``build_match_filter`` and parked in the live queue.  When the stream ends the
-episode is re-queued from the live queue, and that path must rebuild the same
+``build_match_filter`` and parked in the pending queue.  When the stream ends the
+episode is re-queued from the pending queue, and that path must rebuild the same
 ``<podcast base>/<show label>/`` output template the grouped podcast download
 used -- otherwise the episode lands in the "misc" directory that
 ``get_source_options("audio_playlists")`` points at.
@@ -14,11 +14,16 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
 import src.settings_dialog as sd
-from src.live_queue import add_to_live_queue, load_live_queue, save_live_queue
 from src.path_utils import sanitize_for_path
+from src.pending_queue import (
+    KIND_LIVE,
+    load_pending_queue,
+    make_pending_record,
+    save_pending_queue,
+)
 from src.ydl_options import build_podcast_outtmpl, podcast_base_dir
 from tests.test_cache_early_exit import import_vid_module
-from tests.test_live_queue import make_service
+from tests.test_download_service import make_service
 
 SHOW = "Android Faithful"
 
@@ -97,40 +102,41 @@ def test_build_podcast_outtmpl_uses_custom_misc_dir_override() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Live-queue persistence of the show label
+# Pending-queue persistence of the show label
 # ---------------------------------------------------------------------------
 
 
-def test_live_queue_round_trips_show_label(tmp_path: Path) -> None:
+def test_pending_queue_round_trips_show_label(tmp_path: Path) -> None:
     """The show label survives the file round-trip so it can rebuild the outtmpl."""
-    path = tmp_path / "live_queue.txt"
-    entries = {"https://yt.com/watch?v=abc": ("audio_playlists", "PLxyz", SHOW)}
-    save_live_queue(path, entries)
-    assert load_live_queue(path) == entries
-
-
-def test_live_queue_loads_legacy_lines_without_label(tmp_path: Path) -> None:
-    """Entries written before the label field parse with label None."""
-    path = tmp_path / "live_queue.txt"
-    path.write_text("720playlists|https://yt.com/watch?v=abc|PLxyz\n", encoding="utf-8")
-    assert load_live_queue(path) == {
-        "https://yt.com/watch?v=abc": ("720playlists", "PLxyz", None),
-    }
+    path = tmp_path / "pending_queue.json"
+    record = make_pending_record(
+        "https://yt.com/watch?v=abc", "audio_playlists", playlist_id="PLxyz", label=SHOW
+    )
+    save_pending_queue(path, [record])
+    loaded = load_pending_queue(path)
+    assert len(loaded) == 1
+    assert loaded[0]["url"] == "https://yt.com/watch?v=abc"
+    assert loaded[0]["playlist_id"] == "PLxyz"
+    assert loaded[0]["label"] == SHOW
 
 
 def test_add_to_live_queue_stores_label(tmp_path: Path) -> None:
     """The label passed at queue time is persisted with the entry."""
-    path = tmp_path / "live_queue.txt"
-    add_to_live_queue(path, "https://yt.com/watch?v=abc", "audio_playlists", None, SHOW)
-    assert load_live_queue(path)["https://yt.com/watch?v=abc"] == (
-        "audio_playlists",
-        None,
-        SHOW,
-    )
+    path = tmp_path / "pending_queue.json"
+    service = make_service()
+    service.pending_queue_path = path
+
+    service.add_to_live_queue("https://yt.com/watch?v=abc", "audio_playlists", None, SHOW)
+
+    records = load_pending_queue(path)
+    assert len(records) == 1
+    assert records[0]["source"] == "audio_playlists"
+    assert records[0]["label"] == SHOW
+    assert records[0]["kind"] == KIND_LIVE
 
 
 # ---------------------------------------------------------------------------
-# Re-queue from the live queue must restore the show folder
+# Re-queue from the pending queue must restore the show folder
 # ---------------------------------------------------------------------------
 
 
@@ -141,7 +147,7 @@ def test_add_to_live_queue_stores_label(tmp_path: Path) -> None:
     "src.download_service.utils.build_base_ydl_opts",
     return_value={"logger": None, "progress_hooks": []},
 )
-def test_check_live_queue_restores_show_folder_for_podcast(
+def test_check_pending_queue_restores_show_folder_for_podcast(
     mock_build_base,
     mock_detect_site,
     mock_load_comments,
@@ -149,10 +155,14 @@ def test_check_live_queue_restores_show_folder_for_podcast(
     tmp_path: Path,
 ) -> None:
     """An ended podcast livestream is re-queued into its show folder, not misc."""
-    path = tmp_path / "live_queue.txt"
-    path.write_text(
-        f"audio_playlists|https://youtube.com/watch?v=ended||{SHOW}\n",
-        encoding="utf-8",
+    path = tmp_path / "pending_queue.json"
+    save_pending_queue(
+        path,
+        [
+            make_pending_record(
+                "https://youtube.com/watch?v=ended", "audio_playlists", label=SHOW
+            )
+        ],
     )
 
     queue = MagicMock()
@@ -164,13 +174,13 @@ def test_check_live_queue_restores_show_folder_for_podcast(
         handle_info_changed_callback=Mock(),
         handle_log_entry_callback=Mock(),
     )
-    service.live_queue_path = path
+    service.pending_queue_path = path
 
     mock_instance = MagicMock()
     mock_instance.extract_info.return_value = {"is_live": False, "live_status": None}
     mock_ydl_class.return_value.__enter__.return_value = mock_instance
 
-    service.check_live_queue()
+    service.check_pending_queue()
 
     _urls, queued_opts = queue.put.call_args[0][0]
     assert queued_opts["outtmpl"] == build_podcast_outtmpl(SHOW)
@@ -183,7 +193,7 @@ def test_check_live_queue_restores_show_folder_for_podcast(
     "src.download_service.utils.build_base_ydl_opts",
     return_value={"logger": None, "progress_hooks": []},
 )
-def test_check_live_queue_leaves_video_outtmpl_untouched(
+def test_check_pending_queue_leaves_video_outtmpl_untouched(
     mock_build_base,
     mock_detect_site,
     mock_load_comments,
@@ -191,10 +201,9 @@ def test_check_live_queue_leaves_video_outtmpl_untouched(
     tmp_path: Path,
 ) -> None:
     """Video sources keep their own %(playlist)s template; only podcasts are relabelled."""
-    path = tmp_path / "live_queue.txt"
-    path.write_text(
-        "1080playlists|https://youtube.com/watch?v=ended\n",
-        encoding="utf-8",
+    path = tmp_path / "pending_queue.json"
+    save_pending_queue(
+        path, [make_pending_record("https://youtube.com/watch?v=ended", "1080playlists")]
     )
 
     queue = MagicMock()
@@ -206,42 +215,45 @@ def test_check_live_queue_leaves_video_outtmpl_untouched(
         handle_info_changed_callback=Mock(),
         handle_log_entry_callback=Mock(),
     )
-    service.live_queue_path = path
+    service.pending_queue_path = path
 
     mock_instance = MagicMock()
     mock_instance.extract_info.return_value = {"is_live": False, "live_status": None}
     mock_ydl_class.return_value.__enter__.return_value = mock_instance
 
-    service.check_live_queue()
+    service.check_pending_queue()
 
     _urls, queued_opts = queue.put.call_args[0][0]
     assert "%(playlist)s" in queued_opts["outtmpl"]
 
 
 # ---------------------------------------------------------------------------
-# The label reaches the live queue in the first place
+# The label reaches the pending queue in the first place
 # ---------------------------------------------------------------------------
 
 
-def test_window_check_live_queue_restores_show_folder(tmp_path: Path) -> None:
+def test_window_check_pending_queue_restores_show_folder(tmp_path: Path) -> None:
     """MyWindow (the path the app actually runs) re-files an ended stream by label."""
     vd = import_vid_module()
-    path = tmp_path / "live_queue.txt"
-    path.write_text(
-        f"audio_playlists|https://youtube.com/watch?v=ended||{SHOW}\n",
-        encoding="utf-8",
+    path = tmp_path / "pending_queue.json"
+    save_pending_queue(
+        path,
+        [
+            make_pending_record(
+                "https://youtube.com/watch?v=ended", "audio_playlists", label=SHOW
+            )
+        ],
     )
 
     queued: list = []
 
     class DummyWin:
-        live_queue_path = path
+        pending_queue_path = path
         logEdit = SimpleNamespace(appendPlainText=lambda _msg: None)
         barProgress = SimpleNamespace(setRange=lambda _a, _b: None)
         downloadQueue = SimpleNamespace(put=queued.append)
-        load_live_queue = vd.MyWindow.load_live_queue
-        save_live_queue = vd.MyWindow.save_live_queue
-        check_live_queue = vd.MyWindow.check_live_queue
+        _pending_deps = vd.MyWindow._pending_deps
+        check_pending_queue = vd.MyWindow.check_pending_queue
 
         def _create_download_context(self):
             return (
@@ -264,7 +276,7 @@ def test_window_check_live_queue_restores_show_folder(tmp_path: Path) -> None:
     ydl.extract_info.return_value = {"is_live": False, "live_status": None}
     with patch.object(vd.yt_dlp, "YoutubeDL") as mock_ydl:
         mock_ydl.return_value.__enter__.return_value = ydl
-        DummyWin().check_live_queue()
+        DummyWin().check_pending_queue()
 
     (_urls, queued_opts) = queued[0]
     assert queued_opts["outtmpl"] == build_podcast_outtmpl(SHOW)
@@ -279,7 +291,7 @@ def test_grouped_podcast_batch_binds_show_label_to_match_filter(
     queued: list = []
 
     class DummyWin:
-        live_queue_path = tmp_path / "live_queue.txt"
+        pending_queue_path = tmp_path / "pending_queue.json"
         live_queue_log = SimpleNamespace(emit=lambda _msg: None)
         downloadQueue = SimpleNamespace(put=queued.append)
         barProgress = SimpleNamespace(setRange=lambda _a, _b: None)
@@ -312,16 +324,20 @@ def test_grouped_podcast_batch_binds_show_label_to_match_filter(
         },
         False,
     )
-    assert load_live_queue(DummyWin.live_queue_path)[
-        "https://youtube.com/watch?v=live"
-    ] == ("audio_playlists", None, SHOW)
+    records = {r["url"]: r for r in load_pending_queue(DummyWin.pending_queue_path)}
+    parked = records["https://youtube.com/watch?v=live"]
+    assert (parked["source"], parked["playlist_id"], parked["label"]) == (
+        "audio_playlists",
+        None,
+        SHOW,
+    )
 
 
 def test_match_filter_records_show_label_for_live_episode(tmp_path: Path) -> None:
     """A live podcast episode is parked in the queue together with its show label."""
-    path = tmp_path / "live_queue.txt"
+    path = tmp_path / "pending_queue.json"
     service = make_service()
-    service.live_queue_path = path
+    service.pending_queue_path = path
     service.add_to_live_queue_callback = service.add_to_live_queue
 
     match_filter = service.make_match_filter("audio_playlists", label=SHOW)
@@ -334,7 +350,9 @@ def test_match_filter_records_show_label_for_live_episode(tmp_path: Path) -> Non
         False,
     )
 
-    assert load_live_queue(path)["https://youtube.com/watch?v=live"] == (
+    records = {r["url"]: r for r in load_pending_queue(path)}
+    parked = records["https://youtube.com/watch?v=live"]
+    assert (parked["source"], parked["playlist_id"], parked["label"]) == (
         "audio_playlists",
         None,
         SHOW,
