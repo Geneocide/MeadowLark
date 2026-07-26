@@ -3,7 +3,13 @@
 from collections.abc import Callable
 from unittest.mock import MagicMock
 
-from src.ydl_utils import extract_playlist_info, extract_video_entries
+import pytest
+
+from src.ydl_utils import (
+    extract_playlist_info,
+    extract_release_info,
+    extract_video_entries,
+)
 
 _PLAYLISTEND_SENTINEL = 5
 
@@ -248,3 +254,114 @@ def test_extract_video_entries_carries_pot_provider_wiring() -> None:
     ]
     # per-call key must survive the merge
     assert captured[0]["extract_flat"] is True
+
+
+# ---------------------------------------------------------------------------
+# Tests for extract_release_info: metadata-only probe tolerating no formats.
+# ---------------------------------------------------------------------------
+
+
+def test_extract_release_info_sets_ignore_no_formats_error() -> None:
+    captured: list[dict] = []
+    factory = _make_ydl_factory({}, captured_opts=captured)
+    extract_release_info("https://example.com", ydl_class=factory)
+
+    assert captured[0]["ignore_no_formats_error"] is True
+    assert captured[0]["skip_download"] is True
+    assert captured[0]["noplaylist"] is True
+
+
+def test_extract_release_info_carries_pot_provider_wiring() -> None:
+    from src.config import POT_PROVIDER_SERVER_HOME
+
+    captured: list[dict] = []
+    factory = _make_ydl_factory({}, captured_opts=captured)
+    extract_release_info("https://example.com", ydl_class=factory)
+
+    assert captured[0]["extractor_args"]["youtubepot-bgutilscript"]["server_home"] == [
+        str(POT_PROVIDER_SERVER_HOME)
+    ]
+    assert captured[0]["extractor_args"]["youtube"]["player_client"]
+    assert "js_runtimes" in captured[0]
+
+
+def test_extract_release_info_none_result_returns_empty_dict() -> None:
+    captured: list[dict] = []
+    factory = _make_ydl_factory(None, captured_opts=captured)
+    result = extract_release_info("https://example.com", ydl_class=factory)
+
+    assert result == {}
+
+
+def test_extract_release_info_omits_cookiefile_when_not_given() -> None:
+    captured: list[dict] = []
+    factory = _make_ydl_factory({}, captured_opts=captured)
+    extract_release_info("https://example.com", ydl_class=factory)
+
+    assert "cookiefile" not in captured[0]
+
+
+def test_extract_release_info_cookiefile_provided_is_set_as_string() -> None:
+    captured: list[dict] = []
+    factory = _make_ydl_factory({}, captured_opts=captured)
+    extract_release_info("https://example.com", cookiefile="/cookies.txt", ydl_class=factory)
+
+    assert captured[0]["cookiefile"] == "/cookies.txt"
+
+
+def test_extract_release_info_cookiefile_empty_string_is_omitted() -> None:
+    """cookiefile="" is falsy -- the `if cookiefile:` guard skips it, same as None."""
+    captured: list[dict] = []
+    factory = _make_ydl_factory({}, captured_opts=captured)
+    extract_release_info("https://example.com", cookiefile="", ydl_class=factory)
+
+    assert "cookiefile" not in captured[0]
+
+
+def test_extract_release_info_uses_default_ydl_class_when_none() -> None:
+    from unittest.mock import patch
+
+    mock_instance = MagicMock()
+    mock_instance.__enter__ = MagicMock(return_value=mock_instance)
+    mock_instance.__exit__ = MagicMock(return_value=False)
+    mock_instance.extract_info.return_value = {"live_status": "is_upcoming"}
+
+    with patch("src.ydl_utils.yt_dlp.YoutubeDL", return_value=mock_instance):
+        result = extract_release_info("https://example.com")
+    assert result == {"live_status": "is_upcoming"}
+
+
+def test_extract_release_info_propagates_exception_from_extract_info() -> None:
+    """
+    A genuinely different extraction failure must still propagate.
+
+    ignore_no_formats_error only downgrades the *no-formats* failure to a
+    warning -- e.g. a private video or network error must still propagate to
+    the caller, not be swallowed here.
+    """
+
+    def factory(opts: dict) -> MagicMock:
+        mock = MagicMock()
+        mock.__enter__ = MagicMock(return_value=mock)
+        mock.__exit__ = MagicMock(return_value=False)
+        mock.extract_info.side_effect = ValueError("boom")
+        return mock
+
+    with pytest.raises(ValueError, match="boom"):
+        extract_release_info("https://example.com", ydl_class=factory)
+
+
+def test_extract_release_info_full_opts_key_set() -> None:
+    """The three new keys must survive alongside the shared PO-token wiring intact."""
+    captured: list[dict] = []
+    factory = _make_ydl_factory({}, captured_opts=captured)
+    extract_release_info("https://example.com", cookiefile="/c.txt", ydl_class=factory)
+
+    assert captured[0]["skip_download"] is True
+    assert captured[0]["ignore_no_formats_error"] is True
+    assert captured[0]["noplaylist"] is True
+    assert captured[0]["cookiefile"] == "/c.txt"
+    assert captured[0]["quiet"] is True
+    assert captured[0]["no_warnings"] is True
+    assert "js_runtimes" in captured[0]
+    assert "extractor_args" in captured[0]

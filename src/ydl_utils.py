@@ -73,3 +73,41 @@ def extract_video_entries(
     with ydl_class(opts) as ydl:
         info = ydl.extract_info(url, download=False)
         return info.get("entries", [info])
+
+
+def extract_release_info(
+    url: str,
+    cookiefile: str | None = None,
+    ydl_class: type | None = None,
+) -> dict:
+    """
+    Metadata-only probe that tolerates a video with no downloadable formats.
+
+    An upcoming premiere has no formats, so a normal extraction dies inside
+    ``raise_no_formats`` ("Premieres in 6 hours") before any info_dict is built --
+    which is exactly why such items reach the failed-downloads store today.
+    ``ignore_no_formats_error`` downgrades that to a warning so the info_dict comes
+    back carrying ``live_status`` and ``release_timestamp``. ``noplaylist`` keeps a
+    watch URL that also names a list from expanding into the whole playlist.
+
+    Args:
+        url: The video URL to probe.
+        cookiefile: Optional cookies file path for age-restricted lookups.
+        ydl_class: Optional custom YoutubeDL class for injection.
+
+    Returns:
+        The extracted info dict, or {} when yt-dlp returns nothing.
+    """
+    if ydl_class is None:
+        ydl_class = yt_dlp.YoutubeDL
+    opts: dict = {
+        **build_shared_extraction_opts(),
+        **_QUIET_YDL_OPTS,
+        "skip_download": True,
+        "ignore_no_formats_error": True,
+        "noplaylist": True,
+    }
+    if cookiefile:
+        opts["cookiefile"] = str(cookiefile)
+    with ydl_class(opts) as ydl:
+        return ydl.extract_info(url, download=False) or {}

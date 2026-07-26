@@ -69,6 +69,10 @@ COOKIES_FILE: Final[Path] = _resolve_path(
 )
 LIVE_QUEUE_FILE: Final[Path] = RESOURCES_DIR / "live_queue.txt"
 FAILED_DOWNLOADS_FILE: Final[Path] = RESOURCES_DIR / "failed_downloads.json"
+# Deferred downloads: live streams parked by match_filter plus premieres that were
+# announced but had not aired at download time (see src/pending_queue.py). Supersedes
+# LIVE_QUEUE_FILE, which is now read once and migrated.
+PENDING_QUEUE_FILE: Final[Path] = RESOURCES_DIR / "pending_queue.json"
 
 # Playlist files
 PLAYLISTS_DIR: Final[Path] = RESOURCES_DIR / "playlists"
