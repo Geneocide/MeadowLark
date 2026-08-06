@@ -95,7 +95,7 @@ class TestBuildSharedExtractionOpts:
 
 def test_get_source_options_numeric_height_format() -> None:
     opts = get_source_options("480")
-    assert "height=480" in opts["format"]
+    assert "height<=480" in opts["format"]
 
 
 def test_get_source_options_non_numeric_fallback_format() -> None:

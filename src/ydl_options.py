@@ -95,22 +95,31 @@ def build_base_ydl_opts(logger: YdlLogger, qhook: YdlProgressHook) -> dict[str, 
 
 
 def _build_video_format_selector(height: int | None, vfmt: str) -> str:
-    h = f"[height={height}]" if height else ""
+    # ``height<=`` rather than ``height==``: a quality rung names a rendition
+    # tier, not a literal pixel height. Letterboxed / ultrawide masters are
+    # encoded at 1920x816, 1280x544, 2560x1088 and so on, so an equality match
+    # excludes *every* rendition of such a video and yt-dlp fails the whole
+    # download with "Requested format is not available".
+    h = f"[height<={height}]" if height else ""
     if vfmt == "webm":
         # Only allow webm-native streams: VP9/VP8 video + Opus/Vorbis audio.
         # Mixed-codec fallbacks (e.g. VP9+AAC) cannot be stream-copied into webm
         # and would trigger an ffmpeg postprocessing error.
-        # If the exact height has no VP9 stream, fall back to the best webm at
-        # any height up to the requested height rather than failing entirely.
-        lte = f"[height<={height}]" if height else ""
+        # If nothing under the requested height has a VP9 stream, fall back to
+        # the best webm at any height rather than failing entirely.
         return (
             f"bestvideo*{h}[ext=webm]+bestaudio[ext=webm]/"
-            f"bestvideo*{lte}[ext=webm]+bestaudio[ext=webm]"
+            f"bestvideo*[ext=webm]+bestaudio[ext=webm]"
         )
     return (
         f"bestvideo*{h}[ext=mp4]+bestaudio[ext=m4a]/"
         f"bestvideo*{h}+bestaudio/"
-        f"best{h}/best"
+        f"best{h}/"
+        # Unconstrained catch-all. Bare ``best`` only matches *muxed* formats,
+        # so on sites that publish HLS as separate video-only and audio-only
+        # renditions (Nebula) it can never fire; pair it with a merge rung that
+        # can.
+        "bestvideo*+bestaudio/best"
     )
 
 

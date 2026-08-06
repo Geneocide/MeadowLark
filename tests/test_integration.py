@@ -61,4 +61,4 @@ def test_request_detected_1080playlists_returns_queue_action() -> None:
     assert action == "queue"
     assert urls == ["https://youtube.com/playlist?list=PL123"]
     assert ydl_opts["qmeta"]["site"] == "youtube"
-    assert ydl_opts["format"].startswith("bestvideo*[height=1080]")
+    assert ydl_opts["format"].startswith("bestvideo*[height<=1080]")

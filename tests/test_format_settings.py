@@ -175,7 +175,7 @@ class TestGetSourceOptionsFormatPropagation:
     def test_numeric_height_contains_height_in_format(self) -> None:
         with _patch_formats("mp4", "m4a"):
             opts = get_source_options("720")
-        assert "height=720" in opts["format"]
+        assert "height<=720" in opts["format"]
 
     # --- Unknown / non-numeric fallback source ---
 
@@ -804,7 +804,7 @@ class TestNumericHeightBoundaries:
         """Source '-720' must fall back to generic format, not embed 'height=-720'."""
         with _patch_formats("mp4", "m4a"):
             opts = get_source_options("-720")
-        assert "height=-720" not in opts["format"], (
+        assert "-720" not in opts["format"], (
             "Negative height embedded in format selector — yt-dlp will reject it."
         )
         assert opts["format"] == "bestvideo*+bestaudio/best"

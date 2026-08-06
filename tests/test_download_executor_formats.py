@@ -169,7 +169,7 @@ class TestTry720FallbackTriggersOn403:
 
         assert success is True, "403 should have triggered the 720p fallback"
         assert captured, "fallback never attempted a download"
-        assert "height=720" in captured[0]["format"]
+        assert "height<=720" in captured[0]["format"]
 
 
 # ===========================================================================
@@ -208,7 +208,7 @@ class TestTry720FallbackFormatString:
     def test_format_string_contains_height_720(self) -> None:
         """The fallback must request 720p height, not some other resolution."""
         opts = _run_fallback_and_capture_options("mp4", "m4a", {})
-        assert "height=720" in opts["format"]
+        assert "height<=720" in opts["format"]
 
     def test_format_selector_uses_mp4_even_when_vfmt_is_mkv(self) -> None:
         """Format selector stays ext=mp4 even when vfmt='mkv'; container is mkv via merge_output_format."""
@@ -222,11 +222,14 @@ class TestTry720FallbackFormatString:
         assert "ext=m4a" in opts["format"]
 
     def test_format_string_has_generic_fallback_tiers(self) -> None:
-        """The format string must include bare 'bestvideo*[height=720]+bestaudio' fallback tier."""
+        """The format string must include bare 'bestvideo*[height<=720]+bestaudio' fallback tier."""
         opts = _run_fallback_and_capture_options("mp4", "m4a", {})
         # The second and third tiers have no ext= constraint — verify they're present
-        assert "bestvideo*[height=720]+bestaudio/" in opts["format"]
-        assert "best[height=720]" in opts["format"]
+        assert "bestvideo*[height<=720]+bestaudio/" in opts["format"]
+        assert "best[height<=720]" in opts["format"]
+        # ...and an unconstrained merge tier, so sites that publish only
+        # video-only + audio-only renditions still have a reachable catch-all.
+        assert opts["format"].endswith("bestvideo*+bestaudio/best")
 
 
 # ===========================================================================
