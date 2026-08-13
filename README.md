@@ -225,6 +225,23 @@ unable to download video data: HTTP Error 403: Forbidden
 
 MeadowLark mints the token with the **[bgutil-ytdlp-pot-provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider)** plugin running in **script (Deno) mode**. The plugin is a pinned dependency (installed by `uv sync`), and the Deno runtime is auto-installed into `.venv/Scripts`. The provider's generate script is **vendored** into the repo under `vendor/bgutil-pot-provider/server` (pinned to the same version as the plugin); its Node dependencies (`node_modules`) are generated once by `scripts/setup_pot_provider.py`.
 
+### The token is necessary but not sufficient: the ~1 MB cutoff
+
+As of **August 2026** a valid token stopped being enough. With the `mweb` client, media URLs carry a correct `pot=`, the transfer starts, and YouTube then 403s it after roughly **one megabyte**. Measured on one video within a single minute, varying only the request:
+
+| Request | Result |
+| --- | --- |
+| `--test` (10 KB range) | succeeds |
+| full download | 403 |
+| `--http-chunk-size` 10 KB / 256 KB / 1 MB | reaches ~1.00–1.07 MB, then 403 |
+| `--http-chunk-size` 5 MB / 10 MB | 403 immediately |
+
+This is SABR enforcement: YouTube expects its own streaming protocol rather than plain range GETs, and allows non-SABR clients only a small byte quota. The trap for debugging is that **any short-range probe passes** — a `--test` repro reports success while every real download fails.
+
+`tv`, `ios`, `android`, `android_vr`, `web` and `web_safari` fail earlier still, exposing only SABR formats (`Requested format is not available`). **`tv_embedded`** is the one client measured to serve complete files — full 1080p downloads of 37 MB, 173 MB and 228 MB finished with no 403 — so it is the default (`VID_DL_YT_PLAYER_CLIENT`). Do **not** add `mweb` as a fallback: the first client supplying a format id wins, so it would take rungs `tv_embedded` could have served and bring the cutoff back.
+
+Upgrading yt-dlp does not help (the 2026.08.04 nightly fails identically), and neither cookies nor the user agent affect it — the gating is server-side and per client.
+
 ### What the app checks at startup
 
 On launch MeadowLark probes the provider and, if anything is missing, shows a **"PO Token Providers: none"** warning naming the missing pieces. It looks for:
@@ -270,7 +287,20 @@ MeadowLark fills the cache for you, so there is normally nothing to do:
 - **From source:** `scripts/setup_pot_provider.py` warms it at the end of the run.
 - **Installer users:** the app warms it in a background thread at startup (the first launch pulls the ~63 MB; the UI stays responsive throughout, and later launches are a no-op).
 
-If a first 1080p download still 403s on a brand-new machine, the warm-up likely has not finished — retry the download, or run `uv run python scripts/setup_pot_provider.py` to fill the cache in the foreground.
+A download queued before that warm-up finishes would race the plugin's 15-second probe and lose, so the download worker waits for the warm-up to complete before starting its first item — the log shows `Preparing downloader (warming Deno cache)...` while it does. On a first launch that wait can last as long as the download of the npm payload; every later launch passes straight through.
+
+### Diagnosing a 403 that survives all of the above
+
+Set `VID_DL_YTDLP_VERBOSE=true` to capture yt-dlp's own diagnostic stream to `resources/ytdlp_debug.log` (rotating, 5 MB). Without it the error log holds only the final exception, which cannot distinguish "no token was minted" from "a token was minted but the served format did not carry it". Four lines in the capture settle that:
+
+| Line | Meaning |
+| --- | --- |
+| `[pot:bgutil:script-deno] Generating a gvs PO Token …` | the provider ran |
+| `Retrieved a gvs PO Token for <client>` | which client obtained a token |
+| `Downloading N format(s): <ids>` | which formats were selected |
+| `Invoking http downloader` — is `pot=` in the URL? | **decisive**: no `pot=` means the format came from a client that does not consume the token, and it will 403 on any gated video |
+
+> The capture contains PO tokens, visitor data and signed media URLs. It is gitignored; do not paste it into issues without redacting. Leave the setting off for normal use.
 
 ---
 
@@ -379,3 +409,6 @@ Advanced users can override defaults by editing the `.env` file in `AppData\Roam
 | `VID_DL_APP_UPDATE_LAST_CHECKED` | _(empty)_ | ISO date of the last automatic update check; written by the app, not normally set by hand |
 | `VID_DL_MARK_WATCHED` | `false` | Auto-mark downloaded YouTube videos as watched via cookies session (requires valid `cookies.txt`) |
 | `VID_DL_POT_SERVER_HOME` | `vendor/bgutil-pot-provider/server` (dev) / bundled `bgutil-server` (frozen) | PO-token provider server home (bgutil script-deno mode); must contain `src/generate_once.ts` and `node_modules` (run `scripts/setup_pot_provider.py`). See [YouTube 1080p Downloads](#youtube-1080p-downloads--the-po-token-provider). |
+| `VID_DL_YT_PLAYER_CLIENT` | `tv_embedded` | YouTube player clients, comma-separated in priority order. See [the ~1 MB cutoff](#the-token-is-necessary-but-not-sufficient-the-1-mb-cutoff) before changing this — most clients now 403 mid-transfer or expose no downloadable formats. |
+| `VID_DL_YTDLP_VERBOSE` | `false` | Capture yt-dlp's verbose output for diagnosing 403s. Contains PO tokens and signed URLs — leave off unless debugging. |
+| `VID_DL_YTDLP_DEBUG_LOG` | `resources/ytdlp_debug.log` | Where that capture is written (rotating, 5 MB × 2 backups) |

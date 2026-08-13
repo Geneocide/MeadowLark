@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -277,3 +278,96 @@ def warm_deno_cache(
     else:
         logger.debug("Deno cache already warm (%.1fs)", elapsed)
     return DenoWarmResult(True, elapsed, (proc.stdout or "").strip())
+
+
+class _WarmupState:
+    """
+    Progress and outcome of the startup DENO_DIR warm-up.
+
+    Warming happens off the UI thread, but a download that starts before it
+    finishes races the plugin's cold script probe and loses -- the probe raises
+    subprocess.TimeoutExpired straight out of ydl.download() and the whole item
+    fails. Downloads wait on ``finished`` rather than hoping the warm-up won.
+
+    Written by exactly one warm-up thread; ``lock`` guards only the start-once
+    decision, and ``finished`` publishes ``result`` to readers.
+    """
+
+    def __init__(self) -> None:
+        self.started = False
+        self.finished = threading.Event()
+        self.result: DenoWarmResult | None = None
+        self.lock = threading.Lock()
+
+
+_warm = _WarmupState()
+
+
+def start_deno_warmup(
+    server_home: Path | None = None,
+    scripts_dir: Path | None = None,
+) -> threading.Thread | None:
+    """
+    Warm DENO_DIR on a daemon thread, recording the outcome for ``wait_for_deno_warm``.
+
+    Args:
+        server_home: Provider server root; defaults to ``POT_PROVIDER_SERVER_HOME``.
+        scripts_dir: Dir holding ``deno.exe``; defaults to ``VENV_SCRIPTS_DIR``.
+
+    Returns:
+        The started thread, or None if a warm-up was already started.
+    """
+    with _warm.lock:
+        if _warm.started:
+            return None
+        _warm.started = True
+
+    def _run() -> None:
+        try:
+            _warm.result = warm_deno_cache(
+                server_home=server_home,
+                scripts_dir=scripts_dir,
+            )
+        except Exception:
+            # warm_deno_cache is documented not to raise, but this runs on a bare
+            # thread: anything escaping here would go to threading.excepthook and
+            # then to a stderr that pythonw discards, losing the diagnosis.
+            logger.exception("Deno cache warm-up thread failed")
+        finally:
+            # Unconditional: a waiter blocked on an unset event would hang every
+            # download for the full budget.
+            _warm.finished.set()
+
+    thread = threading.Thread(target=_run, name="deno-cache-warm", daemon=True)
+    thread.start()
+    return thread
+
+
+def deno_warmup_pending() -> bool:
+    """Return True if a warm-up is running, i.e. a waiter would actually block."""
+    return _warm.started and not _warm.finished.is_set()
+
+
+def wait_for_deno_warm(timeout: float = _DENO_WARM_TIMEOUT_S) -> DenoWarmResult | None:
+    """
+    Block until the startup warm-up finishes.
+
+    Returns immediately when no warm-up was started (provider incomplete, or a
+    context that never called ``start_deno_warmup`` such as the test suite), so
+    this can be called unconditionally before a download.
+
+    Args:
+        timeout: Seconds to wait before giving up and letting the download proceed.
+
+    Returns:
+        The warm-up's ``DenoWarmResult``, or None when none ran or it timed out.
+    """
+    if not _warm.started:
+        return None
+    if not _warm.finished.wait(timeout):
+        logger.warning(
+            "Gave up after %.0fs waiting for the Deno cache warm-up; proceeding",
+            timeout,
+        )
+        return None
+    return _warm.result

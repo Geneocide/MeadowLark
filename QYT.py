@@ -24,7 +24,11 @@ from src.config import (  # noqa: E402
 )
 from src.download_executor import DownloadExecutor  # noqa: E402
 from src.failed_downloads import FailureHook, make_failed_record  # noqa: E402
-from src.logging_utils import get_local_timestamp  # noqa: E402
+from src.logging_utils import (  # noqa: E402
+    get_local_timestamp,
+    get_ytdlp_debug_logger,
+)
+from src.pot_provider import deno_warmup_pending, wait_for_deno_warm  # noqa: E402
 
 configure_logging("ERROR", log_file=ERROR_LOG_PATH, console="none")
 
@@ -58,11 +62,21 @@ class QLogger(QObject):
         super().__init__()
         self.downloadQueue = download_queue
         self.daemon = True
+        # yt-dlp routes its whole diagnostic stream through this object, so this
+        # is the only place it can be captured. Resolved once per logger: the
+        # setting cannot change mid-session.
+        self._debug_logger = get_ytdlp_debug_logger()
+
+    def _tee(self, level: int, msg: str) -> None:
+        """Mirror a yt-dlp message into the verbose capture, when it is enabled."""
+        if self._debug_logger is not None:
+            self._debug_logger.log(level, msg)
 
     def debug(self, msg: str) -> None:
         """Log a debug message using the module logger and emits the message via the message_changed signal, unless the message contains 'ETA' or 'iB/s'."""
         logger = logging.getLogger(__name__)
         logger.debug(msg)
+        self._tee(logging.DEBUG, msg)
         if "ETA" not in msg and "iB/s" not in msg:
             self.message_changed.emit(msg)
 
@@ -75,6 +89,7 @@ class QLogger(QObject):
         """
         logger = logging.getLogger(__name__)
         logger.warning(msg)
+        self._tee(logging.WARNING, msg)
         self.message_changed.emit(msg)
 
     def error(self, msg: str) -> None:
@@ -86,6 +101,7 @@ class QLogger(QObject):
         """
         logger = logging.getLogger(__name__)
         logger.error(msg)
+        self._tee(logging.ERROR, msg)
         self.message_changed.emit(msg)
 
     def exception(self, msg: str) -> None:
@@ -97,6 +113,9 @@ class QLogger(QObject):
         """
         logger = logging.getLogger(__name__)
         logger.exception(msg)
+        if self._debug_logger is not None:
+            # exception() rather than _tee: keep the traceback in the capture.
+            self._debug_logger.exception(msg)
         self.message_changed.emit(msg)
 
     # def download(self, urls, options):
@@ -401,12 +420,28 @@ class QYTQueue(QThread):
         self.downloadQueue = download_queue
         self.daemon = True
         self.executor = DownloadExecutor(message_callback=self.message_changed.emit)
+        self._announced_deno_wait = False
+
+    def _await_deno_warm(self) -> None:
+        """
+        Hold the first download until the startup Deno warm-up has finished.
+
+        A download that starts on a cold DENO_DIR races the PO-token plugin's
+        hard 15s script probe; the probe loses, raises subprocess.TimeoutExpired
+        out of ydl.download(), and the item fails outright. Waiting costs a few
+        seconds once per launch and only when the warm-up is still running.
+        """
+        if not self._announced_deno_wait and deno_warmup_pending():
+            self.message_changed.emit("Preparing downloader (warming Deno cache)...")
+        self._announced_deno_wait = True
+        wait_for_deno_warm()
 
     def run(self) -> None:
         """Continuously processes download tasks from the queue in a background thread, emitting progress and completion messages, and signals when the queue becomes empty. Keeps the system awake during execution using a wake lock."""
         with keep.running():
             while True:
                 item = self.downloadQueue.get()
+                self._await_deno_warm()
                 self.message_changed.emit(f"------  Downloading  ------\n{item[0]}")
                 try:
                     self.download(item[0], item[1])

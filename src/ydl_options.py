@@ -5,13 +5,14 @@ from typing import Any
 
 from .config import (
     COOKIES_FILE,
+    DENO_EXECUTABLE,
     MAX_FRAGMENT_RETRIES,
     PODCAST_MISC_OUTPUT_DIR,
     POT_PROVIDER_SERVER_HOME,
     SOCKET_TIMEOUT_SECONDS,
-    VENV_SCRIPTS_DIR,
     VIDEO_STORAGE_DIR,
     YOUTUBE_PLAYER_CLIENTS,
+    YTDLP_VERBOSE,
 )
 from .dict_utils import DEFAULT_POSTPROCESSORS
 from .path_utils import slugify_if_too_long
@@ -21,12 +22,34 @@ from .settings_dialog import get_setting
 MISC_PODCAST_LABEL = "misc"
 """Folder used for audio episodes whose show cannot be resolved."""
 
-# JavaScript runtimes configuration
-JS_RUNTIMES_CONFIG = {
-    "deno": {
-        "path": VENV_SCRIPTS_DIR,
-    },
+# JavaScript runtimes configuration. yt-dlp documents ``path`` as the path to the
+# *executable*, and it must be absolute: the value used to be VENV_SCRIPTS_DIR,
+# which is both a directory and (by default) the relative ".venv/Scripts", so the
+# resulting "deno" invocation only resolved while the process CWD was the repo
+# root. When the bundled runtime is absent, omit ``path`` entirely so yt-dlp falls
+# back to searching PATH -- config.py prepends the scripts dir there.
+JS_RUNTIMES_CONFIG: dict[str, dict[str, str]] = {
+    "deno": {"path": str(DENO_EXECUTABLE)} if DENO_EXECUTABLE is not None else {},
 }
+
+
+def resolve_cookiefile() -> str:
+    """
+    Return the cookie jar path as an absolute string.
+
+    The configured default is the relative ``resources/cookies.txt``; handing
+    that to yt-dlp silently yields an empty cookie jar whenever the process CWD
+    is not the repo root, which costs age-restricted and members-only videos.
+
+    Returns:
+        Absolute path to the cookies file (it need not exist yet).
+    """
+    # get_setting is untyped and backed by a generic store, so a non-string here
+    # is not a path at all -- fall back to the configured default rather than
+    # letting Path() raise and take the whole option build down with it.
+    configured = get_setting("VID_DL_COOKIES_FILE")
+    raw = configured if isinstance(configured, str) and configured else str(COOKIES_FILE)
+    return str(Path(raw).expanduser().resolve())
 
 
 def build_shared_extraction_opts() -> dict[str, Any]:
@@ -84,13 +107,17 @@ def build_base_ydl_opts(logger: YdlLogger, qhook: YdlProgressHook) -> dict[str, 
         "max_fragment_retries": MAX_FRAGMENT_RETRIES,
         "mtime": True,
         # Custom match_filter will be set per-source by callers
-        "cookiefile": get_setting("VID_DL_COOKIES_FILE") or str(COOKIES_FILE),
+        "cookiefile": resolve_cookiefile(),
         "postprocessors": list(DEFAULT_POSTPROCESSORS),
         "remote_components": ["ejs:github"],
         **build_shared_extraction_opts(),
     }
     if get_setting("VID_DL_MARK_WATCHED"):
         opts["mark_watched"] = True
+    if YTDLP_VERBOSE:
+        # Makes yt-dlp emit its [debug] stream through ``logger``; QLogger tees it
+        # to resources/ytdlp_debug.log. See get_ytdlp_debug_logger.
+        opts["verbose"] = True
     return opts
 
 

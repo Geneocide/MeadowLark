@@ -123,27 +123,46 @@ if VENV_SCRIPTS_DIR.exists() and _scripts_abs not in os.environ.get("PATH", "").
 ):
     os.environ["PATH"] = _scripts_abs + os.pathsep + os.environ.get("PATH", "")
 
+# Absolute path to the bundled Deno executable, or None when it is not there.
+# VENV_SCRIPTS_DIR defaults to the *relative* ".venv/Scripts", so any consumer
+# that hands that path to a subprocess only works while the process CWD happens
+# to be the repo root -- which it is under `uv run`, but not under a pythonw
+# shortcut. Resolve it once here so every consumer gets an absolute path.
+_deno_exe = VENV_SCRIPTS_DIR.resolve() / "deno.exe"
+DENO_EXECUTABLE: Final[Path | None] = _deno_exe if _deno_exe.is_file() else None
+
 # ============================================================================
 # yt-dlp extractor behavior
 # ============================================================================
 
 # YouTube gates 1080p+ media URLs behind a per-video "GVS PO token" (SABR
-# experiment, yt-dlp #12482), enforced per video on a rolling basis: a flagged
-# video 403s on every tokenless URL for hours-to-days while others download
-# fine. The bgutil provider (script mode via the bundled Deno runtime) mints
-# that token, but only clients that *consume* it emit media URLs carrying
-# "pot=". As of 2026-07, "web_safari" no longer qualifies -- YouTube forces
-# SABR on it, so its https formats are skipped ("missing a URL") and every
-# served format silently came from "tv", whose URLs carry NO token and 403 on
-# flagged videos. "mweb" both requires and consumes the GVS token (the PO Token
-# Guide's recommended client), so it is listed FIRST; "tv" stays as a tokenless
-# fallback for formats mweb lacks. WITHOUT the provider, every 1080p download
-# 403s regardless of client order -- reordering clients or clearing caches
-# cannot substitute for the token.
-# Order matters: the first client that supplies a given format id wins. Override
-# with VID_DL_YT_PLAYER_CLIENT (comma-separated, in priority order).
+# experiment, yt-dlp #12482). The bgutil provider (script mode via the bundled
+# Deno runtime) mints that token, and it is still REQUIRED -- without it every
+# 1080p download 403s regardless of which client is selected here.
+#
+# But a valid token is no longer sufficient. As of 2026-08, YouTube enforces
+# SABR on "mweb" for this account: its media URLs carry a correct "pot=", the
+# first request succeeds, and the server then cuts the transfer off with HTTP
+# 403 after roughly ONE MEGABYTE. Measured directly, same video and second,
+# varying only the request: --test (10 KB range) succeeded, while a full
+# download 403'd; with --http-chunk-size the file reached ~1.0-1.07 MB at every
+# chunk size (10 KB, 256 KB, 1 MB) before 403. That byte allowance is why the
+# failure looks like "all downloads are broken" while any short-range probe
+# passes -- and it is why a test-mode repro cannot detect this bug.
+# "tv" and every other client tried (ios, android, android_vr, web, web_safari)
+# now expose only SABR formats, so they fail earlier still, with "Requested
+# format is not available".
+#
+# "tv_embedded" is the one client measured to serve complete files: full 1080p
+# video+audio downloads of 37 MB / 173 MB / 228 MB completed with no 403.
+# Upgrading yt-dlp does not help (2026.08.04 nightly fails identically), nor do
+# cookies, nor the user agent -- this is server-side client gating.
+# Order matters: the first client that supplies a given format id wins, so do
+# NOT append "mweb" as a fallback -- it would win rungs that tv_embedded could
+# have served and reintroduce the 1 MB cutoff. Override with
+# VID_DL_YT_PLAYER_CLIENT (comma-separated, in priority order).
 YOUTUBE_PLAYER_CLIENTS: Final[str] = os.getenv(
-    "VID_DL_YT_PLAYER_CLIENT", "mweb,tv"
+    "VID_DL_YT_PLAYER_CLIENT", "tv_embedded"
 )
 
 # PO Token provider (bgutil "script-deno" mode) server home. In script mode the
@@ -264,4 +283,20 @@ DEFAULT_AUDIO_FORMAT: Final[str] = os.getenv("VID_DL_AUDIO_FORMAT", "m4a")
 
 LOGFILE_MIGRATION_ENABLED: Final[bool] = (
     os.getenv("VID_DL_LOGFILE_MIGRATION", "true").lower() == "true"
+)
+
+# yt-dlp's own diagnostic stream. Off by default: it is verbose and the media
+# URLs it prints carry PO tokens and session identifiers. Turn it on to diagnose
+# extraction/403 failures -- error_log.txt only ever receives the final exception
+# string, which does not say which player client served the chosen format or
+# whether its media URL carried a "pot=" token.
+YTDLP_VERBOSE: Final[bool] = (
+    os.getenv("VID_DL_YTDLP_VERBOSE", "false").lower() == "true"
+)
+# Absolute: the point of this file is that someone can find it and read it, and
+# the app is not always launched from the repo root.
+YTDLP_DEBUG_LOG_PATH: Final[Path] = (
+    _resolve_path("VID_DL_YTDLP_DEBUG_LOG", RESOURCES_DIR / "ytdlp_debug.log")
+    .expanduser()
+    .resolve()
 )

@@ -39,7 +39,6 @@ import queue
 import shutil
 import subprocess
 import sys
-import threading
 import time
 import webbrowser
 from collections.abc import Callable
@@ -94,7 +93,6 @@ import utils
 from src.config import (
     ALWAYS_ON_TOP,
     ARCHIVE_PATH,
-    COOKIES_FILE,
     FAILED_DOWNLOADS_FILE,
     LABEL_BTN_720,
     LABEL_BTN_PLAYLISTS,
@@ -151,7 +149,7 @@ from src.podcast_filtering import (
     parse_video_timestamp,
 )
 from src.podcast_helpers import fetch_latest_accessible_entry
-from src.pot_provider import check_pot_provider, warm_deno_cache
+from src.pot_provider import check_pot_provider, start_deno_warmup
 from src.release_status import (
     is_not_yet_released,
     parse_relative_release,
@@ -164,7 +162,11 @@ from src.settings_dialog import (
     get_setting,
 )
 from src.url_utils import extract_playlist_id
-from src.ydl_options import build_podcast_outtmpl, podcast_base_dir
+from src.ydl_options import (
+    build_podcast_outtmpl,
+    podcast_base_dir,
+    resolve_cookiefile,
+)
 from src.ydl_utils import extract_playlist_info
 from UIClasses import DropLabel, PlaylistButton, PlaylistDialog
 
@@ -927,7 +929,7 @@ class MyWindow(QWidget):
         """Bind this window's callbacks to the shared pending-queue poll loop."""
         return PendingCheckDeps(
             path=self.pending_queue_path,
-            cookiefile=get_setting("VID_DL_COOKIES_FILE") or str(COOKIES_FILE),
+            cookiefile=resolve_cookiefile(),
             get_options=lambda urls, source: self.get_options(
                 urls, source, skip_playlist_dialog=True
             ),
@@ -2266,14 +2268,11 @@ if __name__ == "__main__":
     else:
         # Cold DENO_DIR makes the provider's own 15s script probe time out (~26s cold
         # vs ~1.5s warm), which silently kills PO-token minting and 403s the first
-        # 1080p download. Warm it off-thread so the UI never waits on it; daemon so it
-        # cannot hold up shutdown. Only worth doing when the provider is otherwise
-        # complete -- warm_deno_cache() no-ops anyway if it is not.
-        threading.Thread(
-            target=warm_deno_cache,
-            name="deno-cache-warm",
-            daemon=True,
-        ).start()
+        # 1080p download. Warm it off-thread so the UI never waits on it; the download
+        # worker waits on the result before its first item (see QYTQueue._await_deno_warm)
+        # so an early download cannot race a cold probe and lose. Only worth doing when
+        # the provider is otherwise complete -- warm_deno_cache() no-ops anyway if not.
+        start_deno_warmup()
 
     app.exec()
 

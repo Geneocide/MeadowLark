@@ -559,6 +559,79 @@ class TestQYTQueue:
         )
         assert success is False
 
+    def test_await_deno_warm_announces_once_while_pending(self) -> None:
+        """
+        The "Preparing downloader" message fires on the first pending call only.
+
+        _await_deno_warm() runs at the top of every queue iteration, so a
+        multi-item queue calls it repeatedly while the startup warm-up is
+        still in flight; the message must not spam once per item.
+        """
+        queue = Queue()
+        ydl_queue = QYTQueue(queue)
+        messages: list[str] = []
+        ydl_queue.message_changed.connect(messages.append)
+
+        with (
+            patch("QYT.deno_warmup_pending", return_value=True) as mock_pending,
+            patch("QYT.wait_for_deno_warm") as mock_wait,
+        ):
+            ydl_queue._await_deno_warm()
+            ydl_queue._await_deno_warm()
+            ydl_queue._await_deno_warm()
+
+        assert messages == ["Preparing downloader (warming Deno cache)..."]
+        # `not self._announced_deno_wait and deno_warmup_pending()` short-circuits
+        # once the flag latches True, so pending() is consulted exactly once per
+        # process -- not once per queue iteration.
+        assert mock_pending.call_count == 1
+        # But the wait itself is unconditional every iteration -- that is what
+        # actually gates the download, not the announcement.
+        assert mock_wait.call_count == 3
+
+    def test_await_deno_warm_no_message_when_never_pending(self) -> None:
+        """No warm-up in flight (feature off / already finished): silent wait."""
+        queue = Queue()
+        ydl_queue = QYTQueue(queue)
+        messages: list[str] = []
+        ydl_queue.message_changed.connect(messages.append)
+
+        with (
+            patch("QYT.deno_warmup_pending", return_value=False),
+            patch("QYT.wait_for_deno_warm") as mock_wait,
+        ):
+            ydl_queue._await_deno_warm()
+
+        assert messages == []
+        assert mock_wait.call_count == 1
+
+    def test_await_deno_warm_flag_latches_after_first_call_regardless_of_result(
+        self,
+    ) -> None:
+        """
+        The announced flag latches on the very first call, pending() or not.
+
+        Item 1 is dequeued while the warm-up has already finished (pending()
+        False) -- no message, flag still latches True. Item 2's call must
+        therefore skip the pending() check entirely (short-circuited), yet
+        still perform the mandatory wait.
+        """
+        queue = Queue()
+        ydl_queue = QYTQueue(queue)
+        messages: list[str] = []
+        ydl_queue.message_changed.connect(messages.append)
+
+        with (
+            patch("QYT.deno_warmup_pending", return_value=False) as mock_pending,
+            patch("QYT.wait_for_deno_warm") as mock_wait,
+        ):
+            ydl_queue._await_deno_warm()
+            ydl_queue._await_deno_warm()
+
+        assert messages == []
+        assert mock_pending.call_count == 1
+        assert mock_wait.call_count == 2
+
     def test_try_without_sponsorblock_conditions(self) -> None:
         """Test _try_without_sponsorblock early exit conditions."""
         queue = Queue()

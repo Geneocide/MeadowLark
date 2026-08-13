@@ -12,6 +12,9 @@ __pycache__
 .coverage
 .env
 resources/failed_downloads.json
+# yt-dlp verbose capture (VID_DL_YTDLP_VERBOSE). Contains PO tokens, visitor data
+# and signed media URLs -- never commit it. Covers the rotation backups too.
+resources/ytdlp_debug.log*
 dist/
 build/
 installer_output/

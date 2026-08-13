@@ -4,12 +4,14 @@ Boundary tests for the YouTube player-client override (yt-dlp #14680 fix).
 Coverage map
 ============
 config.YOUTUBE_PLAYER_CLIENTS
-    - default (absent env var)        -> "mweb,tv" (mweb preferred: it consumes
-                                         the provider-minted GVS PO token, #12482)
+    - default (absent env var)        -> "tv_embedded" (the only client measured
+                                         to serve complete files; mweb's URLs
+                                         carry a valid pot= but 403 after ~1 MB)
+    - default must not contain mweb   -> regression guard for that 1 MB cutoff
     - custom VID_DL_YT_PLAYER_CLIENT  -> verbatim string
 
 ydl_options.build_base_ydl_opts -> extractor_args["youtube"]["player_client"]
-    - default "mweb,tv"               -> ["mweb", "tv"]
+    - default "tv_embedded"           -> ["tv_embedded"]
     - single "tv"                     -> ["tv"]
     - trailing comma                  -> no empty entries
     - internal / surrounding spaces   -> stripped
@@ -53,24 +55,29 @@ class TestConfigPlayerClients:
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("VID_DL_YT_PLAYER_CLIENT", None)
             importlib.reload(_config_mod)
-            assert _config_mod.YOUTUBE_PLAYER_CLIENTS == "mweb,tv"
+            assert _config_mod.YOUTUBE_PLAYER_CLIENTS == "tv_embedded"
         importlib.reload(_config_mod)
 
-    def test_default_prefers_token_consuming_client_over_tv(self) -> None:
+    def test_default_excludes_clients_cut_off_after_one_megabyte(self) -> None:
         """
-        Regression (#12482): default leads with a GVS-token-consuming client.
+        Regression (2026-08): the default must not fall back to 'mweb'.
 
-        The first client must CONSUME the provider-minted GVS PO token (media
-        URLs carry pot=), currently 'mweb'. tv URLs are tokenless and 403
-        whenever YouTube's rolling per-video gating flags a video; web_safari
-        mints a token but its https formats are SABR-skipped, so leading with
-        it left every download on tokenless tv URLs.
+        A valid GVS PO token stopped being sufficient. YouTube now enforces SABR
+        on mweb: its media URLs carry a correct pot=, the transfer starts, and
+        the server 403s it after ~1 MB (measured 1.00-1.07 MB across 10 KB,
+        256 KB and 1 MB chunk sizes). Because the first client supplying a
+        format id wins, listing mweb at all lets it take rungs tv_embedded could
+        have served, reintroducing the cutoff. A short-range probe (--test, 10 KB)
+        succeeds against mweb, so only a full download detects this.
         """
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("VID_DL_YT_PLAYER_CLIENT", None)
             importlib.reload(_config_mod)
-            clients = _config_mod.YOUTUBE_PLAYER_CLIENTS.split(",")
-            assert clients.index("mweb") < clients.index("tv")
+            clients = [
+                c.strip() for c in _config_mod.YOUTUBE_PLAYER_CLIENTS.split(",")
+            ]
+            assert "mweb" not in clients
+            assert clients[0] == "tv_embedded"
         importlib.reload(_config_mod)
 
     def test_custom_env_value(self) -> None:
