@@ -12,6 +12,11 @@ __pycache__
 .coverage
 .env
 resources/failed_downloads.json
+# Per-user deferred-download state (live/premiere URLs awaiting airtime).
+# load_pending_queue() returns [] when the file is absent, so a clean checkout is fine.
+resources/pending_queue.json
+# Legacy live-queue file the pending-queue migration renames on first run.
+resources/live_queue.txt.migrated
 # yt-dlp verbose capture (VID_DL_YTDLP_VERBOSE). Contains PO tokens, visitor data
 # and signed media URLs -- never commit it. Covers the rotation backups too.
 resources/ytdlp_debug.log*

@@ -153,17 +153,23 @@ DENO_EXECUTABLE: Final[Path | None] = _deno_exe if _deno_exe.is_file() else None
 # now expose only SABR formats, so they fail earlier still, with "Requested
 # format is not available".
 #
-# "tv_embedded" is the one client measured to serve complete files: full 1080p
-# video+audio downloads of 37 MB / 173 MB / 228 MB completed with no 403.
-# Upgrading yt-dlp does not help (2026.08.04 nightly fails identically), nor do
-# cookies, nor the user agent -- this is server-side client gating.
+# "tv_embedded" was the client measured to serve complete files (full 1080p
+# video+audio downloads of 37 MB / 173 MB / 228 MB completed with no 403), but
+# yt-dlp has since dropped it from INNERTUBE_CLIENTS entirely -- it no longer
+# appears in extractor/youtube/_base.py's client registry. Requesting a name
+# yt-dlp doesn't recognize doesn't error; _get_requested_clients logs
+# "Skipping unsupported client" and silently substitutes its authenticated-
+# default set instead (since we always pass a cookiefile), which currently
+# resolves to "tv_downgraded" -- a client YouTube broke for cookie-
+# authenticated requests server-side in August 2026 (yt-dlp#17389), producing
+# "The page needs to be reloaded" on every video. "web_embedded" is yt-dlp's
+# confirmed-working replacement (verified 2026-08-18: full untruncated
+# downloads, no SABR cutoff) and actually exists in the client registry.
 # Order matters: the first client that supplies a given format id wins, so do
-# NOT append "mweb" as a fallback -- it would win rungs that tv_embedded could
+# NOT append "mweb" as a fallback -- it would win rungs web_embedded could
 # have served and reintroduce the 1 MB cutoff. Override with
 # VID_DL_YT_PLAYER_CLIENT (comma-separated, in priority order).
-YOUTUBE_PLAYER_CLIENTS: Final[str] = os.getenv(
-    "VID_DL_YT_PLAYER_CLIENT", "tv_embedded"
-)
+YOUTUBE_PLAYER_CLIENTS: Final[str] = os.getenv("VID_DL_YT_PLAYER_CLIENT", "web_embedded")
 
 # PO Token provider (bgutil "script-deno" mode) server home. In script mode the
 # provider looks for {server_home}/src/generate_once.ts and {server_home}/
@@ -178,7 +184,8 @@ else:
         Path(__file__).parent.parent / "vendor" / "bgutil-pot-provider" / "server"
     )
 POT_PROVIDER_SERVER_HOME: Final[Path] = _resolve_path(
-    "VID_DL_POT_SERVER_HOME", _pot_default_home,
+    "VID_DL_POT_SERVER_HOME",
+    _pot_default_home,
 )
 
 
@@ -236,15 +243,11 @@ PODCAST_LOOKAHEAD_MAX_ATTEMPTS: Final[int] = int(
 PODCAST_AUTO_CHECK: Final[bool] = (
     os.getenv("VID_DL_PODCAST_AUTO_CHECK", "true").lower() == "true"
 )
-ALWAYS_ON_TOP: Final[bool] = (
-    os.getenv("VID_DL_ALWAYS_ON_TOP", "true").lower() == "true"
-)
+ALWAYS_ON_TOP: Final[bool] = os.getenv("VID_DL_ALWAYS_ON_TOP", "true").lower() == "true"
 APP_UPDATE_AUTO_CHECK: Final[bool] = (
     os.getenv("VID_DL_APP_UPDATE_AUTO_CHECK", "true").lower() == "true"
 )
-MARK_WATCHED: Final[bool] = (
-    os.getenv("VID_DL_MARK_WATCHED", "false").lower() == "true"
-)
+MARK_WATCHED: Final[bool] = os.getenv("VID_DL_MARK_WATCHED", "false").lower() == "true"
 APP_UPDATE_LAST_CHECKED: Final[str] = os.getenv("VID_DL_APP_UPDATE_LAST_CHECKED", "")
 PODCAST_CHECK_INTERVAL_MINUTES: Final[int] = int(
     os.getenv("VID_DL_PODCAST_CHECK_INTERVAL_MINUTES", "60"),

@@ -4,14 +4,17 @@ Boundary tests for the YouTube player-client override (yt-dlp #14680 fix).
 Coverage map
 ============
 config.YOUTUBE_PLAYER_CLIENTS
-    - default (absent env var)        -> "tv_embedded" (the only client measured
+    - default (absent env var)        -> "web_embedded" (the client measured
                                          to serve complete files; mweb's URLs
-                                         carry a valid pot= but 403 after ~1 MB)
+                                         carry a valid pot= but 403 after ~1 MB.
+                                         tv_embedded served complete files too
+                                         but yt-dlp dropped it from its client
+                                         registry -- see yt-dlp#17389)
     - default must not contain mweb   -> regression guard for that 1 MB cutoff
     - custom VID_DL_YT_PLAYER_CLIENT  -> verbatim string
 
 ydl_options.build_base_ydl_opts -> extractor_args["youtube"]["player_client"]
-    - default "tv_embedded"           -> ["tv_embedded"]
+    - default "web_embedded"          -> ["web_embedded"]
     - single "tv"                     -> ["tv"]
     - trailing comma                  -> no empty entries
     - internal / surrounding spaces   -> stripped
@@ -55,7 +58,7 @@ class TestConfigPlayerClients:
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("VID_DL_YT_PLAYER_CLIENT", None)
             importlib.reload(_config_mod)
-            assert _config_mod.YOUTUBE_PLAYER_CLIENTS == "tv_embedded"
+            assert _config_mod.YOUTUBE_PLAYER_CLIENTS == "web_embedded"
         importlib.reload(_config_mod)
 
     def test_default_excludes_clients_cut_off_after_one_megabyte(self) -> None:
@@ -66,9 +69,10 @@ class TestConfigPlayerClients:
         on mweb: its media URLs carry a correct pot=, the transfer starts, and
         the server 403s it after ~1 MB (measured 1.00-1.07 MB across 10 KB,
         256 KB and 1 MB chunk sizes). Because the first client supplying a
-        format id wins, listing mweb at all lets it take rungs tv_embedded could
-        have served, reintroducing the cutoff. A short-range probe (--test, 10 KB)
-        succeeds against mweb, so only a full download detects this.
+        format id wins, listing mweb at all lets it take rungs web_embedded
+        could have served, reintroducing the cutoff. A short-range probe
+        (--test, 10 KB) succeeds against mweb, so only a full download detects
+        this.
         """
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("VID_DL_YT_PLAYER_CLIENT", None)
@@ -77,7 +81,7 @@ class TestConfigPlayerClients:
                 c.strip() for c in _config_mod.YOUTUBE_PLAYER_CLIENTS.split(",")
             ]
             assert "mweb" not in clients
-            assert clients[0] == "tv_embedded"
+            assert clients[0] == "web_embedded"
         importlib.reload(_config_mod)
 
     def test_custom_env_value(self) -> None:
