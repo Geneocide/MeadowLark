@@ -15,6 +15,7 @@ from src.playlist_utils import (
     is_primitive_technology,
     load_playlist_comments_for_source,
     load_playlist_urls,
+    write_template_playlist_file,
 )
 
 # ---------------------------------------------------------------------------
@@ -407,6 +408,60 @@ def test_load_playlist_comments_bare_playlist_id(tmp_path: Path) -> None:
     ):
         result = load_playlist_comments_for_source("1080playlists")
     assert result == {"PLRWvNQVqAeWIafhw3XHnmz_EHOp32qoZW": "Taskmaster S21"}
+
+
+def test_write_template_playlist_file_creates_missing_parent_dirs(
+    tmp_path: Path,
+) -> None:
+    """write_template_playlist_file must create nested parent dirs that don't exist yet."""
+    target = tmp_path / "nested" / "deeper" / "playlists.txt"
+    assert not target.parent.exists()
+
+    write_template_playlist_file(target)
+
+    assert target.is_file()
+    content = target.read_text(encoding="utf-8")
+    assert "MeadowLark Playlist File" in content
+
+
+def test_write_template_playlist_file_silently_overwrites_existing_content(
+    tmp_path: Path,
+) -> None:
+    """
+    Known gap: write_template_playlist_file unconditionally truncates and rewrites.
+
+    PlaylistButton.mousePressEvent only calls this when path.exists() was False at
+    check time, but there is a TOCTOU window between that check and this write: if
+    another process (or a second rapid right-click racing a slow filesystem) creates
+    the file with real content in between, this call destroys it with no warning,
+    since write_text(mode='w') truncates unconditionally and there is no re-check.
+    """
+    f = tmp_path / "playlists.txt"
+    f.write_text("https://youtube.com/playlist?list=PLprecious\n", encoding="utf-8")
+
+    write_template_playlist_file(f)
+
+    content = f.read_text(encoding="utf-8")
+    assert "PLprecious" not in content
+    assert "MeadowLark Playlist File" in content
+
+
+def test_write_template_playlist_file_embedded_null_byte_raises_valueerror(
+    tmp_path: Path,
+) -> None:
+    """
+    Known gap: a null byte in the path raises ValueError, not OSError.
+
+    Path.exists() (used as the guard in PlaylistButton.mousePressEvent) swallows
+    both OSError and ValueError internally and reports False for such a path, but
+    write_template_playlist_file's mkdir/write_text calls raise a bare ValueError
+    for an embedded null byte. mousePressEvent only catches OSError, so this
+    exception would propagate uncaught out of the Qt event handler.
+    """
+    bad_path = tmp_path / "evil\x00name" / "playlists.txt"
+
+    with pytest.raises(ValueError, match="null"):
+        write_template_playlist_file(bad_path)
 
 
 def test_request_detected_skips_file_load_when_urls_provided(

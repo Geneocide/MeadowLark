@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 import utils
+from src.playlist_utils import write_template_playlist_file
 from src.settings_dialog import get_setting
 
 
@@ -98,6 +99,10 @@ class DropLabel(QLabel):
         text (str): The label's initial text.
         color (str): The background color for the label.
         connection (callable): Slot to connect to the urls_dropped signal.
+        source_key (str | None): Stable routing key emitted on drop; defaults to text if not provided.
+        text_color (str): Foreground text color.
+        min_size (int): Minimum width and height of the label, in pixels.
+        font_size (int): Point size of the label's font.
 
     Signals:
         urls_dropped (list, str): Emitted with a list of dropped URLs and the original label text.
@@ -112,6 +117,10 @@ class DropLabel(QLabel):
         color: str,
         connection: Any,
         source_key: str | None = None,
+        *,
+        text_color: str = "#FFFFFF",
+        min_size: int = 150,
+        font_size: int = 32,
     ) -> None:
         """
         Initialize the label with custom text, background color, and a connection for the URLs dropped signal.
@@ -121,16 +130,20 @@ class DropLabel(QLabel):
             color (str): The background color.
             connection (callable): Slot to connect to the urls_dropped signal.
             source_key (str | None): Stable routing key emitted on drop; defaults to text if not provided.
+            text_color (str): Foreground text color.
+            min_size (int): Minimum width and height of the label, in pixels.
+            font_size (int): Point size of the label's font.
         """
         super().__init__(text)
-        min_width = 150
-        min_height = 150
         font_family = "Arial"
-        font_size = 32
         self.originalText = text
         self.source_key = source_key if source_key is not None else text
-        self.setStyleSheet(f"background-color:{color}")
-        self.setMinimumSize(min_width, min_height)
+        # Foreground must be explicit. The app runs the Fusion style with no custom
+        # palette, so an unstyled QLabel inherits the *system* text colour — near
+        # black under Windows light mode, which is unreadable on the dark rungs and
+        # was already marginal for the two colours that shipped before presets.
+        self.setStyleSheet(f"background-color:{color};color:{text_color};")
+        self.setMinimumSize(min_size, min_size)
         self.setAcceptDrops(True)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setFont(QFont(font_family, font_size))
@@ -217,13 +230,17 @@ class PlaylistButton(QPushButton):
             event: The mouse press event.
         """
         if event.button() == Qt.MouseButton.RightButton:
-            if self.playlist_path.exists():
-                startfile(self.playlist_path)  # noqa: S606  (os.startfile, no shell/subprocess)
-            else:
-                msg = f"Playlist file not found: {self.playlist_path}"
-                utils.log_exception(
-                    FileNotFoundError(msg),
-                    "Failed to open playlist file on right-click",
-                )
+            if not self.playlist_path.exists():
+                try:
+                    write_template_playlist_file(self.playlist_path)
+                except (OSError, ValueError) as exc:
+                    # ValueError: Path.exists() swallows an embedded-null-byte path and
+                    # returns False, but mkdir/write_text raise ValueError for the same path.
+                    utils.log_exception(
+                        exc,
+                        "Failed to create template playlist file on right-click",
+                    )
+                    return
+            startfile(self.playlist_path)  # noqa: S606  (os.startfile, no shell/subprocess)
         else:
             super().mousePressEvent(event)

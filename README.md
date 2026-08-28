@@ -16,6 +16,7 @@ A simple desktop app for downloading videos, playlists, and podcasts from YouTub
   - [Downloading Podcasts](#downloading-podcasts)
   - [Live Videos](#live-videos)
 - [Settings Reference](#settings-reference)
+  - [Resolutions Tab](#resolutions-tab)
   - [Downloads Tab](#downloads-tab)
   - [Playlists Tab](#playlists-tab)
   - [Interface Tab](#interface-tab)
@@ -46,7 +47,7 @@ It also handles:
 
 | Feature | What it does |
 |---|---|
-| **Drag-and-drop downloads** | Drop a URL onto the 1080p, 720p, or Audio zone to start downloading immediately |
+| **Drag-and-drop downloads** | Drop a URL onto any enabled resolution zone (2160 / 1440 / 1080 / 720 / 480 / 360) or the Audio zone to start downloading immediately |
 | **Playlist downloader** | Point the app at a text file of playlist URLs; it downloads new entries on a schedule |
 | **Podcast mode** | Downloads audio-only (m4a/mp3) and skips anything shorter than 3 minutes |
 | **Archive / skip already-downloaded** | Keeps a log so videos are never downloaded twice |
@@ -83,10 +84,7 @@ Pick your folders and click **OK**. The app remembers these choices in `AppData\
 
 ### Downloading a Single Video or Audio File
 
-1. Drag the URL from your browser's address bar and drop it onto one of the three drop zones in the app window:
-   - **1080** — saves the video at up to 1080p
-   - **720** — saves the video at 720p (smaller file)
-   - **audio** — extracts audio only and saves as m4a
+1. Drag the URL from your browser's address bar and drop it onto one of the drop zones in the app window: one per enabled resolution (2160/1440/1080/720/480/360), plus **audio** which extracts audio only and saves as m4a. Each zone downloads the best available quality **at or below** its number, so a video that only exists at a lower resolution still downloads rather than being skipped — and if a resolution is blocked, the download automatically retries at the next lower enabled preset.
 2. The status bar at the bottom shows download progress. When it says **[ Ready ]** again, the file is in your folder.
 
 ### Downloading a Playlist
@@ -326,7 +324,7 @@ You can view recent history inside the app via the **History** menu item (if ava
 
 When a download fails, MeadowLark records it instead of letting it scroll past in the log. A red **⚠ N** button appears in the top-right corner showing how many failures are waiting; it is hidden entirely when there are none.
 
-Click it to open the **Failed Downloads** window, a list of every failed item with the time it failed, the site, the download type (1080/720/audio/playlist), and the title. Hover any row to see the error message that caused the failure.
+Click it to open the **Failed Downloads** window, a list of every failed item with the time it failed, the site, the download type (the resolution preset, audio, or playlist), and the title. Hover any row to see the error message that caused the failure.
 
 Select a row and use:
 

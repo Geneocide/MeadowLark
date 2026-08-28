@@ -5,7 +5,7 @@ This application provides a user-friendly interface for batch downloading videos
 
 Features:
 - Drag-and-drop support for video/audio URLs.
-- Batch downloading of playlists (1080p, 720p, audio-only).
+- Batch downloading of playlists (any enabled resolution preset, plus audio-only).
 - Custom output templates and post-processing (e.g., SponsorBlock, chapter modification).
 - Progress bar and real-time log output.
 - Optional archive checking to avoid duplicate downloads.
@@ -82,6 +82,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -94,11 +95,7 @@ from src.config import (
     ALWAYS_ON_TOP,
     ARCHIVE_PATH,
     FAILED_DOWNLOADS_FILE,
-    LABEL_BTN_720,
-    LABEL_BTN_PLAYLISTS,
     LABEL_BTN_PODCASTS,
-    LABEL_DROP_720,
-    LABEL_DROP_1080,
     LABEL_DROP_AUDIO,
     LABEL_OUTPUT_FONT_NAME,
     LABEL_OUTPUT_FONT_SIZE,
@@ -106,14 +103,14 @@ from src.config import (
     LIVE_QUEUE_CHECK_INTERVAL_MINUTES,
     LIVE_QUEUE_FILE,
     PENDING_QUEUE_FILE,
-    PLAYLISTS_720_FILE,
     PLAYLISTS_AUDIO_FILE,
-    PLAYLISTS_FILE,
     PODCAST_AUTO_CHECK,
     VENV_SCRIPTS_DIR,
     VIDEO_STORAGE_DIR,
     YDL_COMMON_ERRORS,
     YDL_EXTRACTION_ERRORS,
+    drop_label_for_height,
+    playlist_path_for_height,
 )
 from src.failed_downloads import (
     add_failed_download,
@@ -156,10 +153,21 @@ from src.release_status import (
     parse_relative_release,
     to_release_at,
 )
+from src.resolutions import (
+    RESOLUTION_PRESETS,
+    button_label_key,
+    drop_label_key,
+    get_preset,
+    height_from_source,
+    playlist_file_key,
+    playlist_source_key,
+    source_key,
+)
 from src.settings_dialog import (
     SettingsDialog,
     _init_runtime_settings,
     _persist_setting,
+    enabled_heights,
     get_setting,
 )
 from src.url_utils import extract_playlist_id
@@ -196,6 +204,40 @@ logger = logging.getLogger(__name__)
 MAX_INT_PROGRESS = 2147483647
 THREAD_QUIT_TIMEOUT_MS = 2000
 THREAD_TERMINATE_TIMEOUT_MS = 1000
+
+# Resolution tiles wrap after this many columns. Three keeps the default
+# (1080 + 720 + audio) window exactly as wide as it is today.
+_TILE_COLUMNS = 3
+
+
+def _shrink_with_column(widget: QWidget) -> None:
+    """
+    Let ``widget`` shrink below its text width so it never sets a column's floor.
+
+    A layout item's minimum width is the widget's own size hint unless its
+    horizontal policy is ``Ignored``. Every resolution column stacks a button area
+    above a drop target, so the *button areas* -- not the tiles -- decided how
+    narrow each column could get, and they disagree: the audio column's area is a
+    playlist button plus the fixed 34px podcastIndicator, the widest floor of the
+    set. Once seven cells pushed the tile minimum down to 100px that floor stopped
+    being redundant, and the leftmost column (where the audio cell lands at
+    position 6) refused to shrink with its neighbours. Ignoring the button areas'
+    width leaves ``_tile_min_size`` as every column's only floor, so all the drop
+    targets stay the same size at every window width.
+    """
+    widget.setSizePolicy(
+        QSizePolicy.Policy.Ignored,
+        widget.sizePolicy().verticalPolicy(),
+    )
+
+
+def _tile_min_size(cell_count: int) -> int:
+    """Shrink the tiles as more resolutions are enabled so the window stays usable."""
+    if cell_count <= 3:
+        return 150
+    if cell_count <= 6:
+        return 120
+    return 100
 
 
 def _make_podcast_status_entry(
@@ -309,6 +351,9 @@ class MyWindow(QWidget):
         inner.addWidget(self.buttonAudioPlaylists, 0, 0)
         inner.addWidget(self.podcastIndicator, 0, 1)
         container.setLayout(inner)
+        # The container is shrunk by _add_grid_cell; the button has to give way
+        # inside it too, or the inner layout just clips the indicator instead.
+        _shrink_with_column(self.buttonAudioPlaylists)
         return container
 
     def _build_top_buttons(self) -> QWidget:
@@ -340,31 +385,130 @@ class MyWindow(QWidget):
         top_buttons.setLayout(top_inner)
         return top_buttons
 
+    def _build_resolution_cell(
+        self, height: int, min_size: int, font_size: int
+    ) -> tuple[PlaylistButton, DropLabel]:
+        """Build one column's playlist button and drop target, unparented."""
+        preset = get_preset(height)
+        if preset is None:
+            msg = f"Unregistered resolution height: {height}"
+            raise ValueError(msg)
+
+        btn_label = get_setting(button_label_key(height)) or f"{preset.label} Playlists"
+        playlist_path = get_setting(playlist_file_key(height)) or str(
+            playlist_path_for_height(height)
+        )
+        button = PlaylistButton(str(btn_label), str(playlist_path))
+        # Default-argument capture: a bare closure over `height` would make every
+        # button route to the last rung built.
+        button.clicked.connect(
+            lambda _checked=False, h=height: self.playlist_button_clicked(
+                playlist_source_key(h)
+            )
+        )
+        self._playlist_buttons[height] = button
+
+        drop_text = get_setting(drop_label_key(height)) or drop_label_for_height(height)
+        tile = DropLabel(
+            str(drop_text),
+            preset.color,
+            self.request_detected,
+            source_key=source_key(height),
+            text_color=preset.text_color,
+            min_size=min_size,
+            font_size=font_size,
+        )
+        self._drop_labels[height] = tile
+
+        return button, tile
+
+    def _add_grid_cell(
+        self, position: int, top_widget: QWidget, tile: DropLabel
+    ) -> None:
+        """
+        Place one cell's button area and drop target into the shared grid.
+
+        The button area and the tile go in *separate* grid rows (2r and 2r+1 for
+        visual row r) rather than a per-cell QVBoxLayout, so QGridLayout equalizes
+        the button-area height and the tile height across every column. That
+        matters because the audio column's button area is a container holding the
+        fixed 34px podcastIndicator, 10px taller than a bare PlaylistButton: with
+        per-cell layouts that extra height pushed the audio drop target down and
+        left it shorter than its neighbours.
+
+        The button area also gives up its say over the column's *width* (see
+        ``_shrink_with_column``) so that every column's minimum is the tile
+        minimum and all the drop targets stay identically sized.
+        """
+        grid = self._resolution_grid
+        visual_row = position // _TILE_COLUMNS
+        column = position % _TILE_COLUMNS
+        _shrink_with_column(top_widget)
+        grid.addWidget(top_widget, visual_row * 2, column)
+        grid.addWidget(tile, visual_row * 2 + 1, column)
+
+    def _build_resolution_container(self) -> QWidget:
+        """Build the wrapping grid of resolution tiles plus the audio tile."""
+        container = QWidget()
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        container.setLayout(grid)
+        self._resolution_grid = grid
+        self._populate_resolution_grid()
+        return container
+
+    def _populate_resolution_grid(self) -> None:
+        """Fill the resolution grid from the enabled set, replacing whatever is there."""
+        grid = self._resolution_grid
+        # Tear down first. takeAt(0) detaches the item; setParent(None) removes it
+        # from the widget tree immediately so a rebuild in the same event does not
+        # briefly show two copies, and deleteLater() frees it once Qt unwinds. Doing
+        # only deleteLater() leaves the old tiles visible until the event loop turns.
+        while (item := grid.takeAt(0)) is not None:
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+        self._drop_labels.clear()
+        self._playlist_buttons.clear()
+
+        heights = enabled_heights()
+        cell_count = len(heights) + 1  # + the audio cell
+        min_size = _tile_min_size(cell_count)
+        font_size = max(18, min_size // 5)
+
+        for position, height in enumerate(heights):
+            button, tile = self._build_resolution_cell(height, min_size, font_size)
+            self._add_grid_cell(position, button, tile)
+
+        # Contrast fix on an existing colour: the orange background was too light
+        # for the white text it effectively never had. Background hex unchanged.
+        self.labelAudio = DropLabel(
+            str(get_setting("VID_DL_LABEL_DROP_AUDIO") or LABEL_DROP_AUDIO),
+            "#FF9843",
+            self.request_detected,
+            source_key="audio",
+            text_color="#1A1B2E",
+            min_size=min_size,
+            font_size=font_size,
+        )
+        self._add_grid_cell(
+            len(heights), self._build_podcast_container(), self.labelAudio
+        )
+
+        for column in range(_TILE_COLUMNS):
+            grid.setColumnStretch(column, 1)
+
     def _setup_ui_layout(self) -> None:
         """Create and arrange all UI widgets and layout."""
-        layout = QGridLayout()
+        self._drop_labels: dict[int, DropLabel] = {}
+        self._playlist_buttons: dict[int, PlaylistButton] = {}
 
-        self.buttonPlaylists = PlaylistButton(LABEL_BTN_PLAYLISTS, str(PLAYLISTS_FILE))
-        self.buttonPlaylists.clicked.connect(
-            lambda: self.playlist_button_clicked("1080playlists"),
-        )
-        self.button720Playlists = PlaylistButton(LABEL_BTN_720, str(PLAYLISTS_720_FILE))
-        self.button720Playlists.clicked.connect(
-            lambda: self.playlist_button_clicked("720playlists"),
-        )
+        layout = QGridLayout()
         self.checkIgnoreArchive = QCheckBox("Ignore Archive?")
         self.checkIgnoreArchive.setChecked(False)
         self.checkSkipDownload = QCheckBox("Skip Download")
         self.checkSkipDownload.setChecked(False)
-        self.label1080 = DropLabel(
-            LABEL_DROP_1080, "#424769", self.request_detected, source_key="1080"
-        )
-        self.label720 = DropLabel(
-            LABEL_DROP_720, "#7077A1", self.request_detected, source_key="720"
-        )
-        self.labelAudio = DropLabel(
-            LABEL_DROP_AUDIO, "#FF9843", self.request_detected, source_key="audio"
-        )
         self.labelOutput = QLabel(self._ready_text)
         self.labelOutput.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.labelOutput.setFont(QFont(LABEL_OUTPUT_FONT_NAME, LABEL_OUTPUT_FONT_SIZE))
@@ -373,17 +517,12 @@ class MyWindow(QWidget):
 
         layout.addWidget(self.checkSkipDownload, 0, 0)
         layout.addWidget(self.checkIgnoreArchive, 0, 1)
-        layout.addWidget(self._build_top_buttons(), 0, 2, 1, 2)
-        layout.addWidget(self.buttonPlaylists, 1, 0)
-        layout.addWidget(self.button720Playlists, 1, 1)
-        layout.addWidget(self._build_podcast_container(), 1, 2, 1, 2)
+        layout.addWidget(self._build_top_buttons(), 0, 2)
+        layout.addWidget(self._build_resolution_container(), 1, 0, 1, 3)
+        layout.addWidget(self.labelOutput, 2, 0, 1, 3)
+        layout.addWidget(self.barProgress, 3, 0, 1, 3)
+        layout.addWidget(self.logEdit, 4, 0, 1, 3)
         layout.setColumnStretch(2, 1)
-        layout.addWidget(self.label1080, 2, 0)
-        layout.addWidget(self.label720, 2, 1)
-        layout.addWidget(self.labelAudio, 2, 2, 1, 2)
-        layout.addWidget(self.labelOutput, 3, 0, 1, 4)
-        layout.addWidget(self.barProgress, 4, 0, 1, 4)
-        layout.addWidget(self.logEdit, 5, 0, 1, 4)
 
         self.setLayout(layout)
 
@@ -629,7 +768,8 @@ class MyWindow(QWidget):
                 }
                 # Pass playlist comments for fallback folder naming
                 if (
-                    source in ["720playlists", "1080playlists"]
+                    height_from_source(source) is not None
+                    and source.endswith("playlists")
                     and self.playlist_comments
                 ):
                     ydl_opts["qmeta"]["playlist_comments"] = self.playlist_comments
@@ -1369,7 +1509,12 @@ class MyWindow(QWidget):
         # pending list clean.
         self._remove_pending_download(url)
         self.handle_log_entry(f"Downloading pending item now: {record.get('title') or url}")
-        self.request_detected([url], record.get("source") or "1080")
+        # enabled_heights() never returns an empty tuple (falls back to the default
+        # pair), so [0] is safe. Falling back to the highest enabled rung rather than
+        # a literal "1080" avoids silently dropping to 1080 for a user who only
+        # enabled 2160.
+        fallback_source = source_key(enabled_heights()[0])
+        self.request_detected([url], record.get("source") or fallback_source)
 
     def _on_download_failed(self, record: dict) -> None:
         """Persist a failure reported by the download thread (GUI-thread slot)."""
@@ -2056,6 +2201,20 @@ class MyWindow(QWidget):
 
     def reload_settings(self, changes: dict) -> None:
         """Apply live setting changes emitted by the Settings dialog."""
+        resolution_keys = {"VID_DL_ENABLED_RESOLUTIONS"}
+        for preset in RESOLUTION_PRESETS:
+            resolution_keys.add(drop_label_key(preset.height))
+            resolution_keys.add(button_label_key(preset.height))
+            resolution_keys.add(playlist_file_key(preset.height))
+        if resolution_keys & changes.keys():
+            # A label, a playlist path, or the enabled set moved. Rebuilding the
+            # whole grid is cheaper to reason about than patching individual
+            # widgets, and it is the only path that handles a rung appearing or
+            # disappearing. This also recreates self.labelAudio and
+            # self.buttonAudioPlaylists, so the audio handlers below must run
+            # after this, not before, or they would style widgets about to be
+            # deleted.
+            self._populate_resolution_grid()
         self._apply_label_changes(changes)
         self._apply_path_changes(changes)
         podcast_keys = {
@@ -2078,12 +2237,6 @@ class MyWindow(QWidget):
 
     def _apply_label_changes(self, changes: dict) -> None:
         """Update widget text from settings changes."""
-        if "VID_DL_LABEL_DROP_1080" in changes:
-            self.label1080.setText(changes["VID_DL_LABEL_DROP_1080"])
-            self.label1080.originalText = changes["VID_DL_LABEL_DROP_1080"]
-        if "VID_DL_LABEL_DROP_720" in changes:
-            self.label720.setText(changes["VID_DL_LABEL_DROP_720"])
-            self.label720.originalText = changes["VID_DL_LABEL_DROP_720"]
         if "VID_DL_LABEL_DROP_AUDIO" in changes:
             self.labelAudio.setText(changes["VID_DL_LABEL_DROP_AUDIO"])
             self.labelAudio.originalText = changes["VID_DL_LABEL_DROP_AUDIO"]
@@ -2091,21 +2244,11 @@ class MyWindow(QWidget):
             self._ready_text = changes["VID_DL_LABEL_READY_TEXT"]
             if self.labelOutput.text() != "Checking podcasts for SponsorBlock info...":
                 self.labelOutput.setText(self._ready_text)
-        if "VID_DL_LABEL_BTN_PLAYLISTS" in changes:
-            self.buttonPlaylists.setText(changes["VID_DL_LABEL_BTN_PLAYLISTS"])
-        if "VID_DL_LABEL_BTN_720" in changes:
-            self.button720Playlists.setText(changes["VID_DL_LABEL_BTN_720"])
         if "VID_DL_LABEL_BTN_PODCASTS" in changes:
             self.buttonAudioPlaylists.setText(changes["VID_DL_LABEL_BTN_PODCASTS"])
 
     def _apply_path_changes(self, changes: dict) -> None:
         """Update playlist paths from settings changes."""
-        if "VID_DL_PLAYLISTS_FILE" in changes:
-            self.buttonPlaylists.playlist_path = Path(changes["VID_DL_PLAYLISTS_FILE"])
-        if "VID_DL_PLAYLISTS_720_FILE" in changes:
-            self.button720Playlists.playlist_path = Path(
-                changes["VID_DL_PLAYLISTS_720_FILE"]
-            )
         if "VID_DL_PLAYLISTS_AUDIO_FILE" in changes:
             self.buttonAudioPlaylists.playlist_path = Path(
                 changes["VID_DL_PLAYLISTS_AUDIO_FILE"]
@@ -2276,7 +2419,7 @@ if __name__ == "__main__":
             "PO Token Providers: none",
             "The YouTube PO-token provider is not fully set up "
             f"(missing: {_pot.summary()}).\n\n"
-            "1080p downloads will fail with HTTP 403 "
+            "High-resolution downloads (1080p and above) will fail with HTTP 403 "
             '("unable to download video data"). Lower resolutions still work.\n\n'
             "See the README PO-token setup section to fix this.",
         )
@@ -2292,5 +2435,4 @@ if __name__ == "__main__":
     app.exec()
 
 # TODO: size control for error logs (low priority)
-# TODO: resizing makes Audio big (low priority)
 # TODO: make sure tests don't leave logs in the real error log

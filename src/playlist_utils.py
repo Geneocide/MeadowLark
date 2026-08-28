@@ -92,7 +92,8 @@ _PLAYLIST_TEMPLATE = """\
 """
 
 
-def _write_template_playlist_file(path: Path) -> None:
+def write_template_playlist_file(path: Path) -> None:
+    """Create *path* (and its parent dir) with the boilerplate playlist template."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_PLAYLIST_TEMPLATE, encoding="utf-8")
 
@@ -104,7 +105,7 @@ def load_playlist_urls(path: Path) -> list[str]:
     Returns an empty list if the file does not exist or cannot be read.
     """
     if not path.exists():
-        _write_template_playlist_file(path)
+        write_template_playlist_file(path)
         return []
     try:
         with path.open("r", encoding="utf-8") as f:

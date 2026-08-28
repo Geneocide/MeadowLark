@@ -123,6 +123,51 @@ class TestDropLabel:
         # Timer should be set up
         assert label.timer.isSingleShot() is True
 
+    def test_droplabel_defaults_unchanged(self) -> None:
+        """Test DropLabel keeps its pre-Phase-4 defaults when no keyword args are given."""
+        connection = MagicMock()
+        label = DropLabel("Drop", "#424769", connection)
+
+        assert label.minimumWidth() == 150
+        assert label.font().pointSize() == 32
+        stylesheet = label.styleSheet()
+        assert "background-color:#424769" in stylesheet
+        assert "color:#FFFFFF" in stylesheet
+
+    def test_droplabel_applies_text_color(self) -> None:
+        """Test DropLabel applies a custom text_color to its stylesheet."""
+        connection = MagicMock()
+        label = DropLabel("x", "#CBCEE2", connection, text_color="#1A1B2E")
+
+        assert "color:#1A1B2E" in label.styleSheet()
+
+    def test_droplabel_applies_min_size_and_font(self) -> None:
+        """Test DropLabel applies custom min_size and font_size."""
+        connection = MagicMock()
+        label = DropLabel("x", "#FFF", connection, min_size=100, font_size=20)
+
+        assert label.minimumWidth() == 100
+        assert label.minimumHeight() == 100
+        assert label.font().pointSize() == 20
+
+    def test_droplabel_positional_construction_still_works(self) -> None:
+        """Test the pre-Phase-4 three-positional-arg construction still works unmodified."""
+        connection = MagicMock()
+
+        label_a = DropLabel("Drop Files", "#FFFFFF", connection)
+        assert label_a.originalText == "Drop Files"
+        assert label_a.text() == "Drop Files"
+        assert label_a.acceptDrops() is True
+
+        label_b = DropLabel("Drop", "#FFF", connection)
+        assert label_b.originalText == "Drop"
+
+        label_c = DropLabel("Original", "#FFF", connection)
+        assert label_c.originalText == "Original"
+
+        label_d = DropLabel("Original", "#FFF", connection)
+        assert label_d.text() == "Original"
+
 
 class TestPlaylistButton:
     """Tests for PlaylistButton class."""
@@ -167,11 +212,13 @@ class TestPlaylistButton:
             mock_startfile.assert_called_once_with(mock_path)
 
     @patch("UIClasses.startfile")
+    @patch("UIClasses.write_template_playlist_file")
     def test_playlist_button_mouse_press_right_click_not_exists(
         self,
+        mock_write_template: MagicMock,
         mock_startfile: MagicMock,
     ) -> None:
-        """Test right-click does nothing if playlist file doesn't exist."""
+        """Right-click on a missing playlist file creates a template then opens it."""
         with patch("UIClasses.Path") as mock_path_class:
             mock_path = MagicMock()
             mock_path.exists.return_value = False
@@ -185,5 +232,57 @@ class TestPlaylistButton:
 
             button.mousePressEvent(event)
 
-            # startfile should not be called when file doesn't exist
+            mock_write_template.assert_called_once_with(mock_path)
+            mock_startfile.assert_called_once_with(mock_path)
+
+    @patch("UIClasses.startfile")
+    @patch("UIClasses.write_template_playlist_file")
+    def test_playlist_button_mouse_press_right_click_template_write_fails(
+        self,
+        mock_write_template: MagicMock,
+        mock_startfile: MagicMock,
+    ) -> None:
+        """If template creation fails, the error is logged and the file is not opened."""
+        mock_write_template.side_effect = OSError("disk full")
+        with patch("UIClasses.Path") as mock_path_class:
+            mock_path = MagicMock()
+            mock_path.exists.return_value = False
+            mock_path_class.return_value = mock_path
+
+            button = PlaylistButton("Playlist", "/path/to/file.txt")
+            button.playlist_path = mock_path
+
+            event = MagicMock(spec=QMouseEvent)
+            event.button.return_value = Qt.MouseButton.RightButton
+
+            with patch("UIClasses.utils.log_exception") as mock_log:
+                button.mousePressEvent(event)
+                mock_log.assert_called_once()
+
             mock_startfile.assert_not_called()
+
+    @patch("UIClasses.startfile")
+    def test_playlist_button_mouse_press_right_click_null_byte_path_logged(
+        self,
+        mock_startfile: MagicMock,
+    ) -> None:
+        """
+        An embedded null byte in playlist_path is logged, not raised.
+
+        Path.exists() swallows the ValueError for a null-byte path and reports
+        False, but write_template_playlist_file's real mkdir/write_text calls
+        raise ValueError (not OSError) for that same path. mousePressEvent
+        catches both so the failure is logged like other failures instead of
+        escaping the Qt event handler.
+        """
+        button = PlaylistButton("Playlist", "/path/to/file.txt")
+        button.playlist_path = Path("evil\x00name/playlist.txt")
+
+        event = MagicMock(spec=QMouseEvent)
+        event.button.return_value = Qt.MouseButton.RightButton
+
+        with patch("UIClasses.utils.log_exception") as mock_log:
+            button.mousePressEvent(event)
+            mock_log.assert_called_once()
+
+        mock_startfile.assert_not_called()

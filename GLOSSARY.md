@@ -15,6 +15,7 @@ Shared vocabulary for this project. When in doubt, use these terms exactly as de
 | **Episode** | An individual item within a Podcast |
 | **Video Key** | The unique YouTube identifier from a URL (e.g. `Pyd3cOxuaQk` from `?v=Pyd3cOxuaQk`) |
 | **Drop Target** | A colored UI box that accepts URL drops to trigger a download |
+| **Resolution Preset** | One rung of the rendition ladder (e.g. 1080), identified by its height; owns a Drop Target, a Playlist File, and a colour |
 | **Archive** | File tracking downloaded Video Keys to prevent re-downloading |
 | **Live Queue** | File storing URLs of live/upcoming Videos awaiting download |
 | **Source** | *(Code)* Routing key determining format, output dir, and filtering rules |
@@ -80,6 +81,11 @@ The Archive stores Video Keys in the format `youtube <video_key>`. The code uses
 
 ### Drop Target
 A colored box in the main UI window that accepts URL drops (drag-and-drop or paste) to trigger a download. Each Drop Target is bound to a fixed Source, so dropping a URL onto the "Podcasts" Drop Target processes it as an audio download. Code name: `DropLabel`.
+
+---
+
+### Resolution Preset
+One rung of the rendition ladder (2160, 1440, 1080, 720, 480, or 360), identified by its height. Each Resolution Preset owns a Drop Target, a Playlist File, and a tile colour, and downloads the best available quality at or below its height. Which presets are enabled is configurable in **Settings → Resolutions**; at least one must stay enabled. Code name: `ResolutionPreset` (registry in `src/resolutions.py`).
 
 ---
 
