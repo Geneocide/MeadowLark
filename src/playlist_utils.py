@@ -2,8 +2,9 @@
 
 from pathlib import Path
 
-from .config import PLAYLISTS_720_FILE, PLAYLISTS_AUDIO_FILE, PLAYLISTS_FILE
+from .config import PLAYLISTS_AUDIO_FILE, playlist_path_for_height
 from .logging_utils import log_exception
+from .resolutions import height_from_source, playlist_file_key
 from .settings_dialog import get_setting
 from .url_utils import extract_playlist_id
 
@@ -60,19 +61,19 @@ def get_playlist_file_for_source(source: str) -> str | None:
     Return the on-disk playlist file path for a given source key.
 
     Args:
-        source: Source identifier ('1080playlists', '720playlists', 'audio_playlists').
+        source: Source identifier ('<height>playlists' for any enabled rung, or
+            'audio_playlists').
 
     Returns:
         File path string or None if source is not recognized.
     """
-    mapping = {
-        "1080playlists": get_setting("VID_DL_PLAYLISTS_FILE") or str(PLAYLISTS_FILE),
-        "720playlists": get_setting("VID_DL_PLAYLISTS_720_FILE")
-        or str(PLAYLISTS_720_FILE),
-        "audio_playlists": get_setting("VID_DL_PLAYLISTS_AUDIO_FILE")
-        or str(PLAYLISTS_AUDIO_FILE),
-    }
-    return mapping.get(source)
+    if source == "audio_playlists":
+        return get_setting("VID_DL_PLAYLISTS_AUDIO_FILE") or str(PLAYLISTS_AUDIO_FILE)
+    height = height_from_source(source)
+    if height is None or not source.endswith("playlists"):
+        return None
+    configured = get_setting(playlist_file_key(height))
+    return str(configured) if configured else str(playlist_path_for_height(height))
 
 
 _PLAYLIST_TEMPLATE = """\
@@ -127,7 +128,8 @@ def load_playlist_comments_for_source(source: str) -> dict[str, str]:
     and maps each playlist ID to its preceding comment.
 
     Args:
-        source: Source identifier ('1080playlists', '720playlists', 'audio_playlists').
+        source: Source identifier ('<height>playlists' for any enabled rung, or
+            'audio_playlists').
 
     Returns:
         Dict mapping playlist_id -> comment text. Empty if file missing or no comments.

@@ -213,7 +213,9 @@ def test_load_playlist_urls_wrapper_known_source_missing_file_returns_none(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Row 21 - known source whose playlist file does not exist must return None."""
-    monkeypatch.setattr(_ds, "PLAYLISTS_FILE", tmp_path / "nonexistent.txt")
+    monkeypatch.setattr(
+        _ds, "playlist_path_for_height", lambda _height: tmp_path / "nonexistent.txt"
+    )
     svc = _make_service()
     assert svc._load_playlist_urls("1080playlists") is None
 
@@ -231,7 +233,7 @@ def test_load_playlist_urls_wrapper_known_source_empty_file_returns_none(
     """
     f = tmp_path / "playlists.txt"
     f.write_text("")
-    monkeypatch.setattr(_ds, "PLAYLISTS_FILE", f)
+    monkeypatch.setattr(_ds, "playlist_path_for_height", lambda _height: f)
     svc = _make_service()
     result = svc._load_playlist_urls("1080playlists")
     assert result is None, (
@@ -246,7 +248,7 @@ def test_load_playlist_urls_wrapper_known_source_with_urls_returns_list(
     """Row 19 - known source with URLs in file must return a non-empty list."""
     f = tmp_path / "playlists.txt"
     f.write_text("https://youtube.com/playlist?list=PLabc\n")
-    monkeypatch.setattr(_ds, "PLAYLISTS_FILE", f)
+    monkeypatch.setattr(_ds, "playlist_path_for_height", lambda _height: f)
     svc = _make_service()
     result = svc._load_playlist_urls("1080playlists")
     assert result == ["https://youtube.com/playlist?list=PLabc"]
@@ -287,6 +289,28 @@ def test_get_playlist_file_for_source_audio() -> None:
 
 def test_get_playlist_file_for_source_unknown_returns_none() -> None:
     assert get_playlist_file_for_source("unknown_source") is None
+
+
+def test_playlist_file_for_new_rung() -> None:
+    with patch("src.playlist_utils.get_setting", return_value=None):
+        result = get_playlist_file_for_source("1440playlists")
+    assert result is not None
+    assert result.endswith("1440playlists.txt")
+
+
+def test_playlist_file_setting_overrides_default() -> None:
+    with patch(
+        "src.playlist_utils.get_setting",
+        side_effect=lambda key: (
+            "C:/tmp/x.txt" if key == "VID_DL_PLAYLISTS_2160_FILE" else None
+        ),
+    ):
+        result = get_playlist_file_for_source("2160playlists")
+    assert result == "C:/tmp/x.txt"
+
+
+def test_bare_height_source_is_not_a_playlist_file() -> None:
+    assert get_playlist_file_for_source("1080") is None
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +414,9 @@ def test_request_detected_skips_file_load_when_urls_provided(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Row 22 - if urls are already supplied, _load_playlist_urls must not be called."""
-    monkeypatch.setattr(_ds, "PLAYLISTS_FILE", tmp_path / "nonexistent.txt")
+    monkeypatch.setattr(
+        _ds, "playlist_path_for_height", lambda _height: tmp_path / "nonexistent.txt"
+    )
 
     svc = _make_service()
     svc._load_playlist_urls = MagicMock(return_value=None)  # type: ignore[method-assign]

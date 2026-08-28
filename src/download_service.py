@@ -21,9 +21,8 @@ from src.config import (
     COOKIES_FILE,
     LIVE_QUEUE_FILE,
     PENDING_QUEUE_FILE,
-    PLAYLISTS_720_FILE,
     PLAYLISTS_AUDIO_FILE,
-    PLAYLISTS_FILE,
+    playlist_path_for_height,
 )
 from src.match_filter import build_match_filter
 from src.pending_check import (
@@ -43,6 +42,7 @@ from src.pending_queue import (
 )
 from src.playlist_utils import load_playlist_urls
 from src.podcast_filtering import load_downloaded_video_ids
+from src.resolutions import height_from_source
 from src.ydl_options import build_shared_extraction_opts
 
 
@@ -146,14 +146,14 @@ class DownloadService:
 
     def _load_playlist_urls(self, source: str) -> list[str] | None:
         """Load playlist URLs from the appropriate file based on the source."""
-        playlist_files = {
-            "1080playlists": PLAYLISTS_FILE,
-            "720playlists": PLAYLISTS_720_FILE,
-            "audio_playlists": PLAYLISTS_AUDIO_FILE,
-        }
-        if source not in playlist_files:
-            return None
-        return load_playlist_urls(Path(playlist_files[source])) or None
+        if source == "audio_playlists":
+            path = Path(PLAYLISTS_AUDIO_FILE)
+        else:
+            height = height_from_source(source)
+            if height is None or not source.endswith("playlists"):
+                return None
+            path = playlist_path_for_height(height)
+        return load_playlist_urls(path) or None
 
     def get_options(
         self,

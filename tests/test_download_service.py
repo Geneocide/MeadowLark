@@ -109,9 +109,10 @@ def test_load_playlist_urls_reads_existing_file(tmp_path, monkeypatch) -> None:
 
     from src import download_service
 
-    monkeypatch.setattr(download_service, "PLAYLISTS_FILE", playlist_file)
-    monkeypatch.setattr(download_service, "PLAYLISTS_720_FILE", playlist_file)
     monkeypatch.setattr(download_service, "PLAYLISTS_AUDIO_FILE", playlist_file)
+    monkeypatch.setattr(
+        download_service, "playlist_path_for_height", lambda _height: playlist_file
+    )
 
     service = make_service()
     urls = service._load_playlist_urls("1080playlists")

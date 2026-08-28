@@ -331,6 +331,127 @@ class TestConfigConstants:
         assert isinstance(config.HTTP_OK, int)
 
 
+class TestResolutionRouting:
+    """Tests for the resolution-registry-backed routing helpers (Phase 1)."""
+
+    def test_playlist_path_for_height_1080_legacy_default(self) -> None:
+        """1080 must resolve to playlists.txt (legacy filename), not 1080playlists.txt."""
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VID_DL_PLAYLISTS_FILE", None)
+            path = config.playlist_path_for_height(1080)
+            assert path.name == "playlists.txt"
+
+    def test_playlist_path_for_height_720_legacy_default(self) -> None:
+        """720 must resolve to 720playlists.txt via its legacy key."""
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VID_DL_PLAYLISTS_720_FILE", None)
+            path = config.playlist_path_for_height(720)
+            assert path.name == "720playlists.txt"
+
+    def test_playlist_path_for_height_1080_env_override(self) -> None:
+        """The legacy VID_DL_PLAYLISTS_FILE env var must still override 1080's path."""
+        with mock.patch.dict(
+            os.environ, {"VID_DL_PLAYLISTS_FILE": "/custom/mine.txt"}
+        ):
+            path = config.playlist_path_for_height(1080)
+            assert path == Path("/custom/mine.txt")
+
+    def test_playlist_path_for_height_new_rung_default_filename(self) -> None:
+        """A new registry rung (1440) must default to '<height>playlists.txt'."""
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VID_DL_PLAYLISTS_1440_FILE", None)
+            path = config.playlist_path_for_height(1440)
+            assert path.name == "1440playlists.txt"
+
+    def test_playlist_path_for_height_new_rung_env_override(self) -> None:
+        """A new registry rung must honor its generated VID_DL_PLAYLISTS_<H>_FILE key."""
+        with mock.patch.dict(
+            os.environ, {"VID_DL_PLAYLISTS_1440_FILE": "/custom/1440.txt"}
+        ):
+            path = config.playlist_path_for_height(1440)
+            assert path == Path("/custom/1440.txt")
+
+    def test_playlist_path_for_height_unregistered_height_ignores_env_override(
+        self,
+    ) -> None:
+        """
+        An unregistered height's path bypasses env resolution entirely.
+
+        playlist_path_for_height short-circuits on get_preset(height) is None
+        and returns PLAYLISTS_DIR / '<height>playlists.txt' directly, never
+        consulting playlist_file_key/_resolve_path. Documented here because it
+        is inconsistent with every registered rung, which does honor an env
+        override - if a caller ever reaches this branch with a real height
+        (rather than one already screened by height_from_source), any env
+        override the user set for it is silently ignored.
+        """
+        with mock.patch.dict(
+            os.environ, {"VID_DL_PLAYLISTS_999_FILE": "/custom/999.txt"}
+        ):
+            path = config.playlist_path_for_height(999)
+            assert path != Path("/custom/999.txt")
+            assert path.name == "999playlists.txt"
+
+    def test_drop_label_for_height_default(self) -> None:
+        """A registered rung's drop label defaults to its bare height label."""
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VID_DL_LABEL_DROP_1440", None)
+            assert config.drop_label_for_height(1440) == "1440"
+
+    def test_drop_label_for_height_env_override(self) -> None:
+        """A registered rung's drop label must honor its env override."""
+        with mock.patch.dict(os.environ, {"VID_DL_LABEL_DROP_1080": "Custom"}):
+            assert config.drop_label_for_height(1080) == "Custom"
+
+    def test_drop_label_for_height_unregistered_falls_back_to_str_height(self) -> None:
+        """An unregistered height's drop label default is just str(height)."""
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VID_DL_LABEL_DROP_999", None)
+            assert config.drop_label_for_height(999) == "999"
+
+    def test_button_label_for_height_1080_uses_legacy_key(self) -> None:
+        """1080's button label must honor the legacy VID_DL_LABEL_BTN_PLAYLISTS key."""
+        with mock.patch.dict(
+            os.environ, {"VID_DL_LABEL_BTN_PLAYLISTS": "My Playlists"}
+        ):
+            assert config.button_label_for_height(1080) == "My Playlists"
+
+    def test_button_label_for_height_new_rung_default(self) -> None:
+        """A new registry rung's button label defaults to '<label> Playlists'."""
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VID_DL_LABEL_BTN_1440", None)
+            assert config.button_label_for_height(1440) == "1440 Playlists"
+
+    def test_enabled_resolutions_default(self) -> None:
+        """ENABLED_RESOLUTIONS must default to (1080, 720) with no env var set."""
+        import importlib
+
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VID_DL_ENABLED_RESOLUTIONS", None)
+            importlib.reload(config)
+            assert config.ENABLED_RESOLUTIONS == (1080, 720)
+
+    def test_enabled_resolutions_env_override(self) -> None:
+        """ENABLED_RESOLUTIONS must parse a comma-separated env override."""
+        import importlib
+
+        with mock.patch.dict(
+            os.environ, {"VID_DL_ENABLED_RESOLUTIONS": "2160,480"}
+        ):
+            importlib.reload(config)
+            assert config.ENABLED_RESOLUTIONS == (2160, 480)
+
+    def test_enabled_resolutions_garbage_env_falls_back_to_default(self) -> None:
+        """An all-garbage ENABLED_RESOLUTIONS env value must fall back, not crash import."""
+        import importlib
+
+        with mock.patch.dict(
+            os.environ, {"VID_DL_ENABLED_RESOLUTIONS": "abc,999"}
+        ):
+            importlib.reload(config)
+            assert config.ENABLED_RESOLUTIONS == (1080, 720)
+
+
 class TestAlwaysOnTopConfiguration:
     """Boundary tests for the ALWAYS_ON_TOP bool config constant."""
 

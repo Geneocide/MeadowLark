@@ -17,6 +17,7 @@ from .config import (
 from .dict_utils import DEFAULT_POSTPROCESSORS
 from .path_utils import slugify_if_too_long
 from .qt_protocols import YdlLogger, YdlProgressHook
+from .resolutions import RESOLUTION_PRESETS, playlist_source_key
 from .settings_dialog import get_setting
 
 MISC_PODCAST_LABEL = "misc"
@@ -200,7 +201,7 @@ def get_source_options(source: str) -> dict[str, Any]:
     video_dir = Path(get_setting("VID_DL_VIDEO_STORAGE_DIR") or str(VIDEO_STORAGE_DIR))
     podcast_dir = Path(get_setting("VID_DL_PODCAST_MISC_OUTPUT_DIR") or str(PODCAST_MISC_OUTPUT_DIR))
 
-    source_options = {
+    source_options: dict[str, dict[str, Any]] = {
         "audio": {
             "format": f"{afmt}/bestaudio/best",
             "postprocessors": [
@@ -216,29 +217,25 @@ def get_source_options(source: str) -> dict[str, Any]:
             "outtmpl": (podcast_dir / "%(title)s.%(ext)s").as_posix(),
             "ignoreerrors": "only_download",
         },
-        "720playlists": {
-            "format": _build_video_format_selector(720, vfmt),
-            "merge_output_format": vfmt,
-            "postprocessors": [{"key": "FFmpegVideoRemuxer", "preferedformat": vfmt}],
-            "outtmpl": (
-                video_dir
-                / "%(playlist)s"
-                / "%(playlist_index)s - %(title)s.%(ext)s"
-            ).as_posix(),
-            "ignoreerrors": "only_download",
-        },
-        "1080playlists": {
-            "format": _build_video_format_selector(1080, vfmt),
-            "merge_output_format": vfmt,
-            "postprocessors": [{"key": "FFmpegVideoRemuxer", "preferedformat": vfmt}],
-            "outtmpl": (
-                video_dir
-                / "%(playlist)s"
-                / "%(playlist_index)s - %(title)s.%(ext)s"
-            ).as_posix(),
-            "ignoreerrors": "only_download",
-        },
     }
+
+    playlist_outtmpl = (
+        video_dir / "%(playlist)s" / "%(playlist_index)s - %(title)s.%(ext)s"
+    ).as_posix()
+    # One entry per registered rung rather than two literals. The values are
+    # identical to the old 720/1080 entries apart from the requested height, so
+    # a new rung needs no edit here at all. Generating every registered rung
+    # (not just enabled ones) is deliberate: a failed-download record or a
+    # parked pending item can carry a rung the user has since disabled, and
+    # failed_downloads_dialog.py calls get_source_options on it.
+    for preset in RESOLUTION_PRESETS:
+        source_options[playlist_source_key(preset.height)] = {
+            "format": _build_video_format_selector(preset.height, vfmt),
+            "merge_output_format": vfmt,
+            "postprocessors": [{"key": "FFmpegVideoRemuxer", "preferedformat": vfmt}],
+            "outtmpl": playlist_outtmpl,
+            "ignoreerrors": "only_download",
+        }
 
     if source in source_options:
         return source_options[source].copy()

@@ -12,6 +12,14 @@ from typing import Final
 # Import yt-dlp exceptions for consistent error handling
 from yt_dlp.utils import DownloadError, ExtractorError, MaxDownloadsReached
 
+from .resolutions import (
+    button_label_key,
+    drop_label_key,
+    get_preset,
+    parse_enabled_heights,
+    playlist_file_key,
+)
+
 # Exception tuples for consistent error handling across the application.
 # SubprocessError covers the helper processes yt-dlp shells out to mid-extraction
 # -- notably the bgutil PO-token provider's Deno probe, which yt-dlp gives a hard
@@ -88,6 +96,44 @@ PLAYLISTS_AUDIO_FILE: Final[Path] = _resolve_path(
     "VID_DL_PLAYLISTS_AUDIO_FILE",
     PLAYLISTS_DIR / "audio playlists.txt",
 )
+
+
+def playlist_path_for_height(height: int) -> Path:
+    """
+    Return the playlist file for a resolution rung, honoring its env override.
+
+    1080 and 720 resolve through their pre-registry key names and pre-registry
+    filenames (see src/resolutions.py); every other rung uses
+    ``VID_DL_PLAYLISTS_<height>_FILE`` over ``PLAYLISTS_DIR/<height>playlists.txt``.
+
+    Args:
+        height: Rendition-ladder height, e.g. 1080.
+
+    Returns:
+        Resolved Path (it need not exist; load_playlist_urls creates a template).
+    """
+    preset = get_preset(height)
+    if preset is None:
+        return PLAYLISTS_DIR / f"{height}playlists.txt"
+    return _resolve_path(
+        playlist_file_key(height),
+        PLAYLISTS_DIR / preset.playlist_filename,
+    )
+
+
+def drop_label_for_height(height: int) -> str:
+    """Return the configured drop-target text for a rung, defaulting to its label."""
+    preset = get_preset(height)
+    default = preset.label if preset is not None else str(height)
+    return os.getenv(drop_label_key(height), default)
+
+
+def button_label_for_height(height: int) -> str:
+    """Return the configured playlist-button text for a rung."""
+    preset = get_preset(height)
+    default = f"{preset.label} Playlists" if preset is not None else f"{height} Playlists"
+    return os.getenv(button_label_key(height), default)
+
 
 # External storage paths
 ARCHIVE_PATH: Final[Path] = _resolve_path(
@@ -302,6 +348,13 @@ LABEL_DROP_AUDIO: Final[str] = os.getenv("VID_DL_LABEL_DROP_AUDIO", "audio")
 LABEL_BTN_PLAYLISTS: Final[str] = os.getenv("VID_DL_LABEL_BTN_PLAYLISTS", "Playlists")
 LABEL_BTN_720: Final[str] = os.getenv("VID_DL_LABEL_BTN_720", "720 Playlists")
 LABEL_BTN_PODCASTS: Final[str] = os.getenv("VID_DL_LABEL_BTN_PODCASTS", "YT Podcasts")
+
+# Which resolution rungs the UI shows. Comma-separated heights; unknown or
+# malformed entries are dropped and an empty result falls back to the default
+# pair, because an app with zero drop targets cannot be fixed from its own UI.
+ENABLED_RESOLUTIONS: Final[tuple[int, ...]] = parse_enabled_heights(
+    os.getenv("VID_DL_ENABLED_RESOLUTIONS"),
+)
 
 # ============================================================================
 # Post-Processing Configuration

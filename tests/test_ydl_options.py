@@ -1,6 +1,9 @@
 """Unit tests for src.ydl_options builders."""
 
+import pytest
+
 from src.dict_utils import DEFAULT_POSTPROCESSORS
+from src.resolutions import RESOLUTION_PRESETS
 from src.ydl_options import (
     JS_RUNTIMES_CONFIG,
     build_shared_extraction_opts,
@@ -130,3 +133,72 @@ def test_get_postprocessors_unknown_source_falls_back_to_default() -> None:
     default_keys = {pp["key"] for pp in DEFAULT_POSTPROCESSORS}
     result_keys = {pp["key"] for pp in postprocs}
     assert default_keys.issubset(result_keys)
+
+
+# ---------------------------------------------------------------------------
+# get_source_options - resolution-registry-driven playlist entries (Phase 1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("preset", RESOLUTION_PRESETS, ids=lambda p: str(p.height))
+def test_get_source_options_playlist_key_for_every_registered_rung(preset) -> None:
+    """
+    Every registered rung's playlist source key must produce a working format.
+
+    Loop-generated, not just the two legacy 1080/720 literals - covers rungs
+    (2160, 1440, 480, 360) that never had hand-written dict entries before
+    this phase.
+    """
+    opts = get_source_options(f"{preset.height}playlists")
+    assert f"height<={preset.height}" in opts["format"]
+    assert opts["ignoreerrors"] == "only_download"
+    assert "%(playlist_index)s" in opts["outtmpl"]
+
+
+def test_get_source_options_disabled_rung_playlist_key_still_resolves() -> None:
+    """
+    A playlist key for a rung NOT in ENABLED_RESOLUTIONS must still work.
+
+    get_source_options loops over every RESOLUTION_PRESETS entry, not just
+    the enabled subset, because failed_downloads_dialog.py's _can_retry can
+    hand it a source string for a rung the user has since disabled (a parked
+    or previously-failed record). Default ENABLED_RESOLUTIONS is (1080, 720),
+    so 2160 exercises exactly that path.
+    """
+    opts = get_source_options("2160playlists")
+    assert "height<=2160" in opts["format"]
+
+
+def test_get_source_options_audio_playlists_has_ignoreerrors_only_download() -> None:
+    opts = get_source_options("audio_playlists")
+    assert opts["ignoreerrors"] == "only_download"
+
+
+def test_get_source_options_bare_audio_has_no_ignoreerrors_key() -> None:
+    """Bare 'audio' (single-video) must not carry the playlist-only ignoreerrors flag."""
+    opts = get_source_options("audio")
+    assert "ignoreerrors" not in opts
+
+
+def test_get_source_options_height_zero_falls_back_to_unconstrained_format() -> None:
+    """height=0 is falsy, so '0' must fall back to the unconstrained format, not '[height<=0]'."""
+    opts = get_source_options("0")
+    assert opts["format"] == "bestvideo*+bestaudio/best"
+
+
+def test_get_source_options_negative_height_falls_back_to_unconstrained_format() -> None:
+    """A negative height parses but must not build a '[height<=-720]' selector."""
+    opts = get_source_options("-720")
+    assert opts["format"] == "bestvideo*+bestaudio/best"
+
+
+def test_get_source_options_whitespace_padded_numeric_source_still_parses() -> None:
+    """
+    int(source) strips whitespace, so ' 1080' is accepted just like '1080'.
+
+    Pins down this fallback branch's int() parsing independently of
+    height_from_source's identical quirk (different code path, same stdlib
+    behavior) - see test_height_from_source_accepts_leading_whitespace.
+    """
+    opts = get_source_options(" 1080")
+    assert "height<=1080" in opts["format"]
