@@ -132,6 +132,14 @@ If a video is currently live (not yet archived), MeadowLark adds it to an intern
 
 Open Settings from the menu or toolbar. Click **Apply** to save any change.
 
+### Resolutions Tab
+
+| Setting | What it does |
+|---|---|
+| **2160 / 1440 / 1080 / 720 / 480 / 360** | One checkbox per resolution rung. Checked rungs are the ones offered elsewhere in the app; at least one must stay checked, or Apply refuses the change and warns instead. |
+
+Each preset downloads the best available quality at or below its height — a video that only exists at a lower resolution still downloads, it is not skipped. If a resolution is blocked by YouTube, the app automatically retries at the next lower *enabled* preset. Disabling a rung here doesn't erase its playlist file or labels; it only hides its row (marked `(hidden)`) on the Playlists and Interface tabs so you can configure it before turning it on.
+
 ### Downloads Tab
 
 | Setting | What it does |
@@ -146,8 +154,7 @@ Open Settings from the menu or toolbar. Click **Apply** to save any change.
 
 | Setting | What it does |
 |---|---|
-| **Playlists file (1080p)** | Text file containing YouTube playlist URLs to download at 1080p |
-| **Playlists file (720p)** | Same, but downloads at 720p |
+| **Playlists file (2160p / 1440p / 1080p / 720p / 480p / 360p)** | Text file containing YouTube playlist URLs to download at that resolution. All six rungs are listed regardless of whether they're enabled on the Resolutions tab — a disabled rung's row is marked `(hidden)` but still configurable. |
 | **Playlists file (audio)** | Same, but downloads audio only (podcast mode) |
 | **Cookies.txt** | Path to your browser cookies export. Used for age-restricted or account gated (premium) videos and the "Mark watched" feature. See [below](#cookiestxt--what-it-is-and-how-to-get-one). |
 
@@ -157,9 +164,9 @@ Open Settings from the menu or toolbar. Click **Apply** to save any change.
 
 | Setting | What it does |
 |---|---|
-| **Drop label — 1080/720/audio** | The text shown on each drop zone. Cosmetic only; doesn't change behavior. |
+| **Drop label — 2160/1440/1080/720/480/360/audio** | The text shown on each drop zone. Cosmetic only; doesn't change behavior. All six resolution rungs are listed regardless of whether they're enabled on the Resolutions tab; a disabled rung's row is marked `(hidden)`. |
 | **Ready text** | Status bar text shown when the app is idle |
-| **Button labels** | Rename any of the three playlist/podcast buttons |
+| **Button labels** | Rename any of the playlist/podcast buttons, one per resolution rung plus podcasts |
 | **Always on top** | Keeps the MeadowLark window above all other windows |
 | **Auto-check for app updates** | Checks GitHub for a new release once a week at startup and asks if you'd like any available update. Uncheck to opt out. |
 
@@ -408,6 +415,10 @@ Advanced users can override defaults by editing the `.env` file in `AppData\Roam
 | `VID_DL_APP_UPDATE_AUTO_CHECK` | `true` | Check for a new app release once per week at startup (set to `false` to opt out) |
 | `VID_DL_APP_UPDATE_LAST_CHECKED` | _(empty)_ | ISO date of the last automatic update check; written by the app, not normally set by hand |
 | `VID_DL_MARK_WATCHED` | `false` | Auto-mark downloaded YouTube videos as watched via cookies session (requires valid `cookies.txt`) |
+| `VID_DL_ENABLED_RESOLUTIONS` | `1080,720` | Comma-separated resolution rungs offered by the app. Registered rungs: `2160,1440,1080,720,480,360`. Unknown/malformed entries are dropped; an empty result falls back to the default pair. Editable from **Settings → Resolutions**. |
+| `VID_DL_PLAYLISTS_<HEIGHT>_FILE` | see `.env.example` | Per-rung playlist file, e.g. `VID_DL_PLAYLISTS_2160_FILE`. 1080p and 720p keep their legacy names (`VID_DL_PLAYLISTS_FILE`, `VID_DL_PLAYLISTS_720_FILE`) for backward compatibility. |
+| `VID_DL_LABEL_DROP_<HEIGHT>` | rung height, e.g. `2160` | Per-rung drop-zone label |
+| `VID_DL_LABEL_BTN_<HEIGHT>` | see `.env.example` | Per-rung playlist button label. 1080p and 720p keep their legacy names (`VID_DL_LABEL_BTN_PLAYLISTS`, `VID_DL_LABEL_BTN_720`). |
 | `VID_DL_POT_SERVER_HOME` | `vendor/bgutil-pot-provider/server` (dev) / bundled `bgutil-server` (frozen) | PO-token provider server home (bgutil script-deno mode); must contain `src/generate_once.ts` and `node_modules` (run `scripts/setup_pot_provider.py`). See [YouTube 1080p Downloads](#youtube-1080p-downloads--the-po-token-provider). |
 | `VID_DL_YT_PLAYER_CLIENT` | `web_embedded` | YouTube player clients, comma-separated in priority order. See [the ~1 MB cutoff](#the-token-is-necessary-but-not-sufficient-the-1-mb-cutoff) before changing this — most clients now 403 mid-transfer or expose no downloadable formats. |
 | `VID_DL_YTDLP_VERBOSE` | `false` | Capture yt-dlp's verbose output for diagnosing 403s. Contains PO tokens and signed URLs — leave off unless debugging. |

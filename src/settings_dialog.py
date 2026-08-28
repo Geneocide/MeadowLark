@@ -33,21 +33,27 @@ from .config import (
     COOKIES_FILE,
     DEFAULT_AUDIO_FORMAT,
     DEFAULT_VIDEO_FORMAT,
-    LABEL_BTN_720,
-    LABEL_BTN_PLAYLISTS,
+    ENABLED_RESOLUTIONS,
     LABEL_BTN_PODCASTS,
-    LABEL_DROP_720,
-    LABEL_DROP_1080,
     LABEL_DROP_AUDIO,
     LABEL_READY_TEXT,
     MARK_WATCHED,
-    PLAYLISTS_720_FILE,
     PLAYLISTS_AUDIO_FILE,
-    PLAYLISTS_FILE,
     PODCAST_AUTO_CHECK,
     PODCAST_CHECK_INTERVAL_MINUTES,
     PODCAST_MISC_OUTPUT_DIR,
     VIDEO_STORAGE_DIR,
+    button_label_for_height,
+    drop_label_for_height,
+    playlist_path_for_height,
+)
+from .resolutions import (
+    RESOLUTION_PRESETS,
+    button_label_key,
+    drop_label_key,
+    format_enabled_heights,
+    parse_enabled_heights,
+    playlist_file_key,
 )
 from .version_utils import (
     APP_VERSION,
@@ -70,15 +76,13 @@ HELP_TEXT: dict[str, str] = {
         "Directory where podcast audio files (m4a) are saved.\n"
         "Changes take effect immediately for new downloads."
     ),
-    "VID_DL_PLAYLISTS_FILE": (
-        "Playlist file for 1080p video downloads.\n"
-        "The file is copied into AppData so the original can be moved or deleted.\n"
-        "Each line should be a YouTube playlist URL, optionally preceded by a #Comment line."
-    ),
-    "VID_DL_PLAYLISTS_720_FILE": (
-        "Playlist file for 720p video downloads.\n"
-        "The file is copied into AppData so the original can be moved or deleted.\n"
-        "Each line should be a YouTube playlist URL, optionally preceded by a #Comment line."
+    "VID_DL_ENABLED_RESOLUTIONS": (
+        "Which resolution presets appear as drop targets and playlist buttons.\n\n"
+        "Each preset downloads the best available quality at or below its height, so a\n"
+        "video that only exists at a lower resolution still downloads — it is not\n"
+        "skipped. If a resolution is blocked by YouTube, the app automatically retries\n"
+        "at the next lower preset you have enabled.\n\n"
+        "At least one must stay checked."
     ),
     "VID_DL_PLAYLISTS_AUDIO_FILE": (
         "Playlist file for podcast/audio downloads.\n"
@@ -90,14 +94,6 @@ HELP_TEXT: dict[str, str] = {
         "Used by yt-dlp for authenticated downloads (e.g. age-restricted videos).\n"
         "The file is NOT copied — it is referenced in place so browser extensions can keep it updated."
     ),
-    "VID_DL_LABEL_DROP_1080": (
-        "Display text for the 1080p drop target.\n"
-        "Routing behaviour is unchanged regardless of display text."
-    ),
-    "VID_DL_LABEL_DROP_720": (
-        "Display text for the 720p drop target.\n"
-        "Routing behaviour is unchanged regardless of display text."
-    ),
     "VID_DL_LABEL_DROP_AUDIO": (
         "Display text for the audio/podcast drop target.\n"
         "Routing behaviour is unchanged regardless of display text."
@@ -105,8 +101,6 @@ HELP_TEXT: dict[str, str] = {
     "VID_DL_LABEL_READY_TEXT": (
         "Text shown in the status bar when the app is idle and ready for new downloads."
     ),
-    "VID_DL_LABEL_BTN_PLAYLISTS": "Label for the 1080p Playlists button.",
-    "VID_DL_LABEL_BTN_720": "Label for the 720p Playlists button.",
     "VID_DL_LABEL_BTN_PODCASTS": "Label for the YT Podcasts button.",
     "VID_DL_PODCAST_AUTO_CHECK": (
         "When enabled, the app automatically checks your podcast playlists on the schedule below.\n"
@@ -140,6 +134,20 @@ HELP_TEXT: dict[str, str] = {
     ),
 }
 
+for _preset in RESOLUTION_PRESETS:
+    HELP_TEXT[drop_label_key(_preset.height)] = (
+        f"Display text for the {_preset.label} drop target ({_preset.description}).\n"
+        "Routing behaviour is unchanged regardless of display text."
+    )
+    HELP_TEXT[button_label_key(_preset.height)] = (
+        f"Label for the {_preset.label} Playlists button."
+    )
+    HELP_TEXT[playlist_file_key(_preset.height)] = (
+        f"Playlist file for {_preset.label} video downloads ({_preset.description}).\n"
+        "The file is copied into AppData so the original can be moved or deleted.\n"
+        "Each line should be a YouTube playlist URL, optionally preceded by a #Comment line."
+    )
+
 # ============================================================================
 # AppData path (mirrors QYT.py and first_run_wizard.py)
 # ============================================================================
@@ -161,16 +169,10 @@ def _init_runtime_settings() -> None:
         {
             "VID_DL_VIDEO_STORAGE_DIR": str(VIDEO_STORAGE_DIR),
             "VID_DL_PODCAST_MISC_OUTPUT_DIR": str(PODCAST_MISC_OUTPUT_DIR),
-            "VID_DL_PLAYLISTS_FILE": str(PLAYLISTS_FILE),
-            "VID_DL_PLAYLISTS_720_FILE": str(PLAYLISTS_720_FILE),
             "VID_DL_PLAYLISTS_AUDIO_FILE": str(PLAYLISTS_AUDIO_FILE),
             "VID_DL_COOKIES_FILE": str(COOKIES_FILE),
-            "VID_DL_LABEL_DROP_1080": LABEL_DROP_1080,
-            "VID_DL_LABEL_DROP_720": LABEL_DROP_720,
             "VID_DL_LABEL_DROP_AUDIO": LABEL_DROP_AUDIO,
             "VID_DL_LABEL_READY_TEXT": LABEL_READY_TEXT,
-            "VID_DL_LABEL_BTN_PLAYLISTS": LABEL_BTN_PLAYLISTS,
-            "VID_DL_LABEL_BTN_720": LABEL_BTN_720,
             "VID_DL_LABEL_BTN_PODCASTS": LABEL_BTN_PODCASTS,
             "VID_DL_PODCAST_AUTO_CHECK": PODCAST_AUTO_CHECK,
             "VID_DL_PODCAST_CHECK_INTERVAL_MINUTES": PODCAST_CHECK_INTERVAL_MINUTES,
@@ -182,11 +184,26 @@ def _init_runtime_settings() -> None:
             "VID_DL_MARK_WATCHED": MARK_WATCHED,
         }
     )
+    # Enabled set is stored as its string form (not a tuple) so it matches what
+    # _persist_setting writes and what _apply's `new_val != get_setting(key)`
+    # comparison expects — a tuple here would make every Apply see a spurious change.
+    _runtime["VID_DL_ENABLED_RESOLUTIONS"] = format_enabled_heights(ENABLED_RESOLUTIONS)
+    for preset in RESOLUTION_PRESETS:
+        h = preset.height
+        _runtime[playlist_file_key(h)] = str(playlist_path_for_height(h))
+        _runtime[drop_label_key(h)] = drop_label_for_height(h)
+        _runtime[button_label_key(h)] = button_label_for_height(h)
 
 
 def get_setting(key: str) -> object:
     """Return the current runtime value for *key*, or None if not registered."""
     return _runtime.get(key)
+
+
+def enabled_heights() -> tuple[int, ...]:
+    """Return the currently enabled resolution rungs, highest first."""
+    raw = get_setting("VID_DL_ENABLED_RESOLUTIONS")
+    return parse_enabled_heights(raw if isinstance(raw, str) else None)
 
 
 def _persist_setting(key: str, value: object) -> None:
@@ -341,8 +358,10 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(520)
 
         self._edits: dict[str, QLineEdit | QCheckBox | QSpinBox] = {}
+        self._resolution_checks: dict[int, QCheckBox] = {}
 
         tabs = QTabWidget(self)
+        tabs.addTab(self._build_resolutions_tab(), "Resolutions")
         tabs.addTab(self._build_downloads_tab(), "Downloads")
         tabs.addTab(self._build_playlists_tab(), "Playlists")
         tabs.addTab(self._build_interface_tab(), "Interface")
@@ -363,6 +382,37 @@ class SettingsDialog(QDialog):
     # ------------------------------------------------------------------
     # Tab builders
     # ------------------------------------------------------------------
+
+    def _build_resolutions_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        intro = QLabel(
+            "Choose which resolutions appear in the main window. Each one gets its "
+            "own drop target, its own playlist file, and its own colour.",
+            self,
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        current = enabled_heights()
+        form = QFormLayout()
+        for preset in RESOLUTION_PRESETS:
+            check = QCheckBox(preset.description, self)
+            check.setChecked(preset.height in current)
+            self._resolution_checks[preset.height] = check
+            form.addRow(QLabel(f"{preset.label}p:"), check)
+        layout.addLayout(form)
+
+        help_row = QHBoxLayout()
+        help_row.addWidget(QLabel("About resolution presets:", self))
+        help_row.addWidget(_make_help_button("VID_DL_ENABLED_RESOLUTIONS", self))
+        help_row.addStretch()
+        layout.addLayout(help_row)
+        layout.addStretch()
+
+        tab.setLayout(layout)
+        return tab
 
     def _build_downloads_tab(self) -> QWidget:
         tab = QWidget()
@@ -403,15 +453,19 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         form = QFormLayout(tab)
 
-        specs = [
-            ("Playlists file (1080p):", "VID_DL_PLAYLISTS_FILE", "playlists.txt"),
-            ("Playlists file (720p):", "VID_DL_PLAYLISTS_720_FILE", "720playlists.txt"),
+        current = enabled_heights()
+        specs: list[tuple[str, str, str]] = [
             (
-                "Playlists file (audio):",
-                "VID_DL_PLAYLISTS_AUDIO_FILE",
-                "audio playlists.txt",
-            ),
+                f"Playlists file ({p.label}p):"
+                + ("" if p.height in current else "  (hidden)"),
+                playlist_file_key(p.height),
+                p.playlist_filename,
+            )
+            for p in RESOLUTION_PRESETS
         ]
+        specs.append(
+            ("Playlists file (audio):", "VID_DL_PLAYLISTS_AUDIO_FILE", "audio playlists.txt")
+        )
         for lbl, key, dest in specs:
             row, edit = _make_file_row(
                 lbl,
@@ -441,15 +495,19 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         form = QFormLayout(tab)
 
-        text_fields: list[tuple[str, str]] = [
-            ("Drop label — 1080:", "VID_DL_LABEL_DROP_1080"),
-            ("Drop label — 720:", "VID_DL_LABEL_DROP_720"),
-            ("Drop label — audio:", "VID_DL_LABEL_DROP_AUDIO"),
-            ("Ready text:", "VID_DL_LABEL_READY_TEXT"),
-            ("Button — Playlists:", "VID_DL_LABEL_BTN_PLAYLISTS"),
-            ("Button — 720 Playlists:", "VID_DL_LABEL_BTN_720"),
-            ("Button — YT Podcasts:", "VID_DL_LABEL_BTN_PODCASTS"),
-        ]
+        current = enabled_heights()
+        text_fields: list[tuple[str, str]] = []
+        for p in RESOLUTION_PRESETS:
+            suffix = "" if p.height in current else "  (hidden)"
+            text_fields.append((f"Drop label — {p.label}:{suffix}", drop_label_key(p.height)))
+        text_fields.append(("Drop label — audio:", "VID_DL_LABEL_DROP_AUDIO"))
+        text_fields.append(("Ready text:", "VID_DL_LABEL_READY_TEXT"))
+        for p in RESOLUTION_PRESETS:
+            suffix = "" if p.height in current else "  (hidden)"
+            text_fields.append(
+                (f"Button — {p.label} Playlists:{suffix}", button_label_key(p.height))
+            )
+        text_fields.append(("Button — YT Podcasts:", "VID_DL_LABEL_BTN_PODCASTS"))
         for lbl, key in text_fields:
             edit = QLineEdit(str(get_setting(key) or ""), self)
             help_btn = _make_help_button(key, self)
@@ -592,6 +650,30 @@ class SettingsDialog(QDialog):
 
     def _apply(self) -> None:
         changes: dict[str, Any] = {}
+
+        # Nested (rather than `if self._resolution_checks and not checked:` /
+        # `else:`) on purpose: `{} and X` short-circuits to `{}` without
+        # evaluating X, so a flat and/else would fall into the persist branch
+        # and write VID_DL_ENABLED_RESOLUTIONS="" whenever _resolution_checks is
+        # empty — the exact "worse" outcome the empty-selection guard exists to
+        # prevent. Nesting makes an empty _resolution_checks a true no-op.
+        if self._resolution_checks:
+            checked = tuple(
+                h for h, box in self._resolution_checks.items() if box.isChecked()
+            )
+            if not checked:
+                QMessageBox.warning(
+                    self,
+                    "At least one resolution required",
+                    "Keep at least one resolution checked — the main window needs a "
+                    "drop target. Leaving your previous selection unchanged.",
+                )
+            else:
+                new_enabled = format_enabled_heights(checked)
+                if new_enabled != get_setting("VID_DL_ENABLED_RESOLUTIONS"):
+                    _persist_setting("VID_DL_ENABLED_RESOLUTIONS", new_enabled)
+                    changes["VID_DL_ENABLED_RESOLUTIONS"] = new_enabled
+
         for key, widget in self._edits.items():
             if isinstance(widget, QCheckBox):
                 new_val: Any = widget.isChecked()
