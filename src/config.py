@@ -217,6 +217,40 @@ MAX_FRAGMENT_RETRIES: Final[int] = int(
 HTTP_OK: Final[int] = 200
 
 # ============================================================================
+# Progress Smoothing Configuration
+# ============================================================================
+
+# Shortest rolling-average window, used in the first seconds of a download (seconds)
+PROGRESS_MIN_WINDOW_SECONDS: Final[float] = float(
+    os.getenv("VID_DL_PROGRESS_MIN_WINDOW_SECONDS", "0.5"),
+)
+
+# Longest rolling-average window, reached on long downloads (seconds)
+PROGRESS_MAX_WINDOW_SECONDS: Final[float] = float(
+    os.getenv("VID_DL_PROGRESS_MAX_WINDOW_SECONDS", "30.0"),
+)
+
+# Rolling-average window grows as this fraction of elapsed download time
+PROGRESS_WINDOW_ELAPSED_FRACTION: Final[float] = float(
+    os.getenv("VID_DL_PROGRESS_WINDOW_ELAPSED_FRACTION", "0.25"),
+)
+
+# EMA weight applied to yt-dlp's per-fragment total_bytes_estimate
+PROGRESS_TOTAL_EMA_ALPHA: Final[float] = float(
+    os.getenv("VID_DL_PROGRESS_TOTAL_EMA_ALPHA", "0.2"),
+)
+
+# Minimum interval between progress label/bar repaints (seconds)
+PROGRESS_UI_MIN_INTERVAL_SECONDS: Final[float] = float(
+    os.getenv("VID_DL_PROGRESS_UI_MIN_INTERVAL_SECONDS", "0.2"),
+)
+
+# Hard cap on retained progress samples (memory safety net; time pruning normally wins)
+PROGRESS_MAX_SAMPLES: Final[int] = int(
+    os.getenv("VID_DL_PROGRESS_MAX_SAMPLES", "4000"),
+)
+
+# ============================================================================
 # Podcast Configuration
 # ============================================================================
 

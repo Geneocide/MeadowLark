@@ -150,6 +150,7 @@ from src.podcast_filtering import (
 )
 from src.podcast_helpers import fetch_latest_accessible_entry
 from src.pot_provider import check_pot_provider, start_deno_warmup
+from src.progress_smoothing import ProgressSmoother
 from src.release_status import (
     is_not_yet_released,
     parse_relative_release,
@@ -258,6 +259,7 @@ class MyWindow(QWidget):
         _init_runtime_settings()
         self._settings_dialog: SettingsDialog | None = None
         self._ready_text = LABEL_READY_TEXT
+        self._progress_smoother = ProgressSmoother()
 
         self._setup_ui_layout()
         self._pending_dialog: PendingDownloadsDialog | None = None
@@ -737,35 +739,48 @@ class MyWindow(QWidget):
 
     def handle_info_changed(self, d: dict) -> None:
         """
-        Update the progress bar and output label with current download status, including downloaded size, total size, speed, and ETA.
+        Update the progress bar and output label with smoothed download status.
+
+        Speed, ETA, and the total size are rolling-averaged by
+        ``src.progress_smoothing.ProgressSmoother``; the downloaded byte count is
+        exact and only clamped non-decreasing. Repaints are throttled, so this
+        returns without touching the widgets on most calls.
 
         Args:
             d (dict): Dictionary containing download progress information.
         """
-        max_int = MAX_INT_PROGRESS
-        if d.get("status") == "downloading":
-            total = d.get("total_bytes") or d.get(
-                "total_bytes_estimate",
-                round(d.get("total_bytes_estimate", 0)),
-            )
-            downloaded = d.get("downloaded_bytes", 0)
-            speed = d.get("speed", 0)
-            if not speed:
-                speed = 0
-            output = f"{size(downloaded)} of {size(total)} at {size(speed)}/s"
-            if d.get("eta"):
-                output += f" | ETA: {timedelta(seconds=round(d.get('eta')))}"
-            self.labelOutput.setText(output)
-            if total is not None:
-                if total > max_int:
-                    self.barProgress.setMaximum(max_int)
-                    self.barProgress.setValue(int(downloaded / total * max_int))
-                else:
-                    self.barProgress.setMaximum(int(total))
-                    self.barProgress.setValue(downloaded)
+        status = d.get("status")
+        if status == "finished":
+            self._progress_smoother.mark_file_finished(d)
+            return
+        if status != "downloading":
+            return
+        smoothed = self._progress_smoother.update(d)
+        if smoothed is None:
+            return
+
+        total = smoothed.total
+        speed = smoothed.speed or 0
+        output = f"{size(smoothed.downloaded)} of {size(total or 0)} at {size(int(speed))}/s"
+        if smoothed.eta is not None:
+            output += f" | ETA: {timedelta(seconds=round(smoothed.eta))}"
+        self.labelOutput.setText(output)
+
+        if total:
+            if total > MAX_INT_PROGRESS:
+                self.barProgress.setMaximum(MAX_INT_PROGRESS)
+                self.barProgress.setValue(
+                    int(smoothed.downloaded / total * MAX_INT_PROGRESS),
+                )
+            else:
+                self.barProgress.setMaximum(total)
+                self.barProgress.setValue(smoothed.downloaded)
 
     def handle_queue_empty(self) -> None:
         """Update the output label to indicate that the download queue is ready and update podcast indicator if applicable."""
+        self._progress_smoother.reset()
+        self.barProgress.setRange(0, 1)
+        self.barProgress.setValue(0)
         self.labelOutput.setText(self._ready_text)
         # If podcast downloads finished, reflect pending/all_good state
         if self._podcast_pending_urls:
