@@ -487,7 +487,7 @@ class QYTQueue(QThread):
         site: str,
         error_str: str,
     ) -> tuple[bool, str]:
-        """Try downloading at 720p if 1080p format unavailable."""
+        """Try downloading at 720p if the requested rung was gated (legacy entry point)."""
         return self.executor._try_720_fallback(urls, options, title, site, error_str)
 
     def _try_without_sponsorblock(
@@ -513,8 +513,8 @@ class QYTQueue(QThread):
         """
         Download videos from URLs using yt-dlp with fallback strategies.
 
-        Attempts fallbacks for 720p (if 1080p unavailable) and without
-        SponsorBlock (if API down) before reporting final failure.
+        Attempts a descent to lower resolution rungs (if the requested one is gated) and a retry
+        without SponsorBlock (if API down) before reporting final failure.
 
         Args:
             urls (list): List of URLs to download.
