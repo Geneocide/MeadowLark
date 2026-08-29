@@ -16,6 +16,7 @@ from queue import Queue
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from tests.test_cache_early_exit import import_vid_module
@@ -567,12 +568,19 @@ def test_button_rows_stay_fixed_height_when_window_grows_tall(tmp_path: Path) ->
     resize. Pins the empirically-verified behaviour that it does not: the button
     row (shared across all columns) stays at its natural size and every column's
     button-row cell stays equal height, while the tile row absorbs all growth.
+
+    WA_DontShowOnScreen runs the container through the real show()/layout-activation
+    pipeline without letting Qt clamp its resize() to the runner's actual screen
+    geometry -- CI's virtual desktop is shorter than a dev screen, and without this
+    attribute the requested 700x1200 resize gets capped short of what the assertion
+    below requires.
     """
     vd = import_vid_module()
     window = _make_window(vd, tmp_path)
     _build_grid(vd, window, (1080, 720))
     container = window._resolution_container
     container.resize(700, 300)
+    container.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
     container.show()
     QApplication.processEvents()
 
