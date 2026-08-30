@@ -583,8 +583,8 @@ class MyWindow(QWidget):
                 playlist_data = []
                 last_comment = None
                 with Path(playlists_path).open("r", encoding="utf-8") as file:
-                    for line in file:
-                        line = line.strip()
+                    for raw_line in file:
+                        line = raw_line.strip()
                         if not line:
                             continue
                         if line.startswith("#"):
@@ -901,7 +901,9 @@ class MyWindow(QWidget):
 
         total = smoothed.total
         speed = smoothed.speed or 0
-        output = f"{size(smoothed.downloaded)} of {size(total or 0)} at {size(int(speed))}/s"
+        output = (
+            f"{size(smoothed.downloaded)} of {size(total or 0)} at {size(int(speed))}/s"
+        )
         if smoothed.eta is not None:
             output += f" | ETA: {timedelta(seconds=round(smoothed.eta))}"
         self.labelOutput.setText(output)
@@ -1460,7 +1462,9 @@ class MyWindow(QWidget):
         self.buttonFailed.setText(f"⚠ {count}")
         self.buttonFailed.setVisible(count > 0)
 
-    def _refresh_pending_button(self, records: list[PendingRecord] | None = None) -> None:
+    def _refresh_pending_button(
+        self, records: list[PendingRecord] | None = None
+    ) -> None:
         """Sync the pending button's count and visibility with the store."""
         if records is None:
             records = load_pending_queue(self.pending_queue_path)
@@ -1485,7 +1489,9 @@ class MyWindow(QWidget):
             else:
                 return
 
-        dialog = PendingDownloadsDialog(load_pending_queue(self.pending_queue_path), self)
+        dialog = PendingDownloadsDialog(
+            load_pending_queue(self.pending_queue_path), self
+        )
         dialog.download_now_requested.connect(self._download_pending_now)
         dialog.remove_requested.connect(self._remove_pending_download)
         dialog.destroyed.connect(self._on_pending_dialog_destroyed)
@@ -1508,7 +1514,9 @@ class MyWindow(QWidget):
         # failure path re-parks it with a fresh release time, and a success leaves the
         # pending list clean.
         self._remove_pending_download(url)
-        self.handle_log_entry(f"Downloading pending item now: {record.get('title') or url}")
+        self.handle_log_entry(
+            f"Downloading pending item now: {record.get('title') or url}"
+        )
         # enabled_heights() never returns an empty tuple (falls back to the default
         # pair), so [0] is safe. Falling back to the highest enabled rung rather than
         # a literal "1080" avoids silently dropping to 1080 for a user who only
@@ -1578,7 +1586,9 @@ class MyWindow(QWidget):
             else:
                 return
 
-        dialog = FailedDownloadsDialog(load_failed_downloads(FAILED_DOWNLOADS_FILE), self)
+        dialog = FailedDownloadsDialog(
+            load_failed_downloads(FAILED_DOWNLOADS_FILE), self
+        )
         dialog.retry_requested.connect(self._retry_failed_download)
         dialog.delete_requested.connect(self._delete_failed_download)
         dialog.destroyed.connect(self._on_failed_dialog_destroyed)
@@ -1735,7 +1745,9 @@ class MyWindow(QWidget):
             self._open_url_in_browser(latest_url, label)
             return
         # Fallback: resolve on-demand and cache (skip if we have no playlist URL)
-        resolved = self._resolve_latest_via_ytdlp(playlist_url) if playlist_url else None
+        resolved = (
+            self._resolve_latest_via_ytdlp(playlist_url) if playlist_url else None
+        )
         if resolved:
             self._cache_put(playlist_url, resolved["url"], resolved.get("ts"))
             self._open_url_in_browser(resolved["url"], label)
@@ -2296,7 +2308,7 @@ class MyWindow(QWidget):
         if last_checked:
             try:
                 last_dt = date.fromisoformat(str(last_checked))
-                if (date.today() - last_dt).days < 7:
+                if (datetime.now(tz=UTC).date() - last_dt).days < 7:
                     logger.info(
                         "Auto app update check skipped: last checked %s", last_checked
                     )
@@ -2316,7 +2328,10 @@ class MyWindow(QWidget):
     ) -> None:
         """Handle the result of the background app update check."""
         if auto:
-            _persist_setting("VID_DL_APP_UPDATE_LAST_CHECKED", date.today().isoformat())
+            _persist_setting(
+                "VID_DL_APP_UPDATE_LAST_CHECKED",
+                datetime.now(tz=UTC).date().isoformat(),
+            )
         if not update_available:
             if not auto:
                 QMessageBox.information(
@@ -2436,3 +2451,4 @@ if __name__ == "__main__":
 
 # TODO: size control for error logs (low priority)
 # TODO: make sure tests don't leave logs in the real error log
+# TODO: playlist numbering gets tricked by Members first. It counts them even if it can't download them, so as they come off the members first list you get the same numbered playlist video multiple times.

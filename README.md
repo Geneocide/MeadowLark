@@ -1,6 +1,16 @@
 # MeadowLark
 
+[![Latest release](https://img.shields.io/github/v/release/TheGeneCode/MeadowLark)](https://github.com/TheGeneCode/MeadowLark/releases)
+[![CI](https://github.com/TheGeneCode/MeadowLark/actions/workflows/ci.yml/badge.svg)](https://github.com/TheGeneCode/MeadowLark/actions/workflows/ci.yml)
+[![License: GPL v3](https://img.shields.io/github/license/TheGeneCode/MeadowLark)](LICENSE)
+
 A simple desktop app for downloading videos, playlists, and podcasts from YouTube and other sites. Built on top of [yt-dlp](https://github.com/yt-dlp/yt-dlp).
+
+![MeadowLark main window](docs/screenshot.png)
+
+> MeadowLark is meant for personal use — content you own the rights to, or that's public domain, Creative Commons, or otherwise fair to save for yourself. Respect copyright and the terms of the sites you download from. Not affiliated with YouTube, Google, or the yt-dlp project.
+
+💛 [Sponsor this project](https://github.com/sponsors/TheGeneCode) — and consider tipping the yt-dlp devs that do the work that this is built on [maintainers](https://github.com/yt-dlp/yt-dlp/blob/master/Maintainers.md#maintainers) too.
 
 ---
 
@@ -66,6 +76,8 @@ It also handles:
 1. Go to the [Releases page](https://github.com/TheGeneCode/MeadowLark/releases) and download `MeadowLark-Setup-{version}.exe`.
 2. Double-click the installer and follow the wizard. You can optionally create a desktop shortcut during setup.
 3. Launch MeadowLark from the Start Menu or your desktop shortcut.
+
+> **Seeing a blue "Windows protected your PC" screen?** That's Microsoft SmartScreen — it flags any new installer without an expensive code-signing certificate, not a sign of a problem. Click **More info**, then **Run anyway** to continue.
 
 ---
 
