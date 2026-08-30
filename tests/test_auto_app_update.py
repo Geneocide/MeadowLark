@@ -10,7 +10,7 @@ Covers:
 
 import importlib
 import os
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -49,6 +49,26 @@ _START_CHECK = "meadowlark._maybe_start_auto_app_update_check"  # unused; use in
 _QMSGBOX = "meadowlark.QMessageBox"
 _WEBBROWSER = "meadowlark.webbrowser"
 _DATE = "meadowlark.date"
+_DATETIME = "meadowlark.datetime"
+
+
+def _freeze_today(today: date) -> tuple[MagicMock, MagicMock]:
+    """
+    Return (fake_date, fake_datetime) mocks that pin "today".
+
+    Production code reads the current date via `datetime.now(tz=UTC).date()`,
+    not `date.today()` — both must be patched or the real wall-clock date
+    leaks in and throttle-window assertions drift once enough real time
+    passes since `today` was picked.
+    """
+    fake_date = MagicMock(wraps=date)
+    fake_date.today.return_value = today
+    fake_date.fromisoformat.side_effect = date.fromisoformat
+    fake_datetime = MagicMock(wraps=datetime)
+    fake_datetime.now.return_value = datetime(
+        today.year, today.month, today.day, tzinfo=UTC
+    )
+    return fake_date, fake_datetime
 
 
 # ===========================================================================
@@ -350,12 +370,11 @@ class TestMaybeStartAutoAppUpdateCheck:
     def test_last_checked_today_throttled(self) -> None:
         """Last checked today (0 days ago) → throttle, no check."""
         win, today, _get = self._setup_with_last_checked(0)
-        fake_date = MagicMock(wraps=date)
-        fake_date.today.return_value = today
-        fake_date.fromisoformat.side_effect = date.fromisoformat
+        fake_date, fake_datetime = _freeze_today(today)
         with (
             patch(_GET_SETTING, side_effect=_get),
             patch(_DATE, fake_date),
+            patch(_DATETIME, fake_datetime),
         ):
             win._maybe_start_auto_app_update_check()
         win._start_app_update_check.assert_not_called()
@@ -363,12 +382,11 @@ class TestMaybeStartAutoAppUpdateCheck:
     def test_last_checked_1_day_ago_throttled(self) -> None:
         """Last checked 1 day ago → still throttled."""
         win, today, _get = self._setup_with_last_checked(1)
-        fake_date = MagicMock(wraps=date)
-        fake_date.today.return_value = today
-        fake_date.fromisoformat.side_effect = date.fromisoformat
+        fake_date, fake_datetime = _freeze_today(today)
         with (
             patch(_GET_SETTING, side_effect=_get),
             patch(_DATE, fake_date),
+            patch(_DATETIME, fake_datetime),
         ):
             win._maybe_start_auto_app_update_check()
         win._start_app_update_check.assert_not_called()
@@ -376,12 +394,11 @@ class TestMaybeStartAutoAppUpdateCheck:
     def test_last_checked_6_days_ago_throttled(self) -> None:
         """Last checked exactly 6 days ago → still within 7-day window, throttled."""
         win, today, _get = self._setup_with_last_checked(6)
-        fake_date = MagicMock(wraps=date)
-        fake_date.today.return_value = today
-        fake_date.fromisoformat.side_effect = date.fromisoformat
+        fake_date, fake_datetime = _freeze_today(today)
         with (
             patch(_GET_SETTING, side_effect=_get),
             patch(_DATE, fake_date),
+            patch(_DATETIME, fake_datetime),
         ):
             win._maybe_start_auto_app_update_check()
         win._start_app_update_check.assert_not_called()
@@ -389,12 +406,11 @@ class TestMaybeStartAutoAppUpdateCheck:
     def test_last_checked_exactly_7_days_ago_fires(self) -> None:
         """Last checked exactly 7 days ago → window expired, check fires."""
         win, today, _get = self._setup_with_last_checked(7)
-        fake_date = MagicMock(wraps=date)
-        fake_date.today.return_value = today
-        fake_date.fromisoformat.side_effect = date.fromisoformat
+        fake_date, fake_datetime = _freeze_today(today)
         with (
             patch(_GET_SETTING, side_effect=_get),
             patch(_DATE, fake_date),
+            patch(_DATETIME, fake_datetime),
         ):
             win._maybe_start_auto_app_update_check()
         win._start_app_update_check.assert_called_once_with(auto=True)
@@ -402,12 +418,11 @@ class TestMaybeStartAutoAppUpdateCheck:
     def test_last_checked_8_days_ago_fires(self) -> None:
         """Last checked 8 days ago → window expired, check fires."""
         win, today, _get = self._setup_with_last_checked(8)
-        fake_date = MagicMock(wraps=date)
-        fake_date.today.return_value = today
-        fake_date.fromisoformat.side_effect = date.fromisoformat
+        fake_date, fake_datetime = _freeze_today(today)
         with (
             patch(_GET_SETTING, side_effect=_get),
             patch(_DATE, fake_date),
+            patch(_DATETIME, fake_datetime),
         ):
             win._maybe_start_auto_app_update_check()
         win._start_app_update_check.assert_called_once_with(auto=True)
@@ -429,12 +444,11 @@ class TestMaybeStartAutoAppUpdateCheck:
                 return True
             return future.isoformat()
 
-        fake_date = MagicMock(wraps=date)
-        fake_date.today.return_value = today
-        fake_date.fromisoformat.side_effect = date.fromisoformat
+        fake_date, fake_datetime = _freeze_today(today)
         with (
             patch(_GET_SETTING, side_effect=_get),
             patch(_DATE, fake_date),
+            patch(_DATETIME, fake_datetime),
         ):
             win._maybe_start_auto_app_update_check()
         win._start_app_update_check.assert_not_called()
@@ -509,8 +523,7 @@ class TestOnAppUpdateResult:
     ) -> tuple[MagicMock, MagicMock, MagicMock]:
         """Run _on_app_update_result and return (win, mock_qmsgbox, mock_persist)."""
         win = _make_window()
-        fake_date = MagicMock(wraps=date)
-        fake_date.today.return_value = self._TODAY
+        fake_date, fake_datetime = _freeze_today(self._TODAY)
         mock_persist = MagicMock()
         mock_qmsgbox = MagicMock()
         mock_web = MagicMock()
@@ -519,6 +532,7 @@ class TestOnAppUpdateResult:
             patch(_QMSGBOX, mock_qmsgbox),
             patch(_WEBBROWSER, mock_web),
             patch(_DATE, fake_date),
+            patch(_DATETIME, fake_datetime),
         ):
             win._on_app_update_result(
                 update_available, latest_tag, download_url, auto=auto
@@ -593,14 +607,14 @@ class TestOnAppUpdateResult:
         from PyQt6.QtWidgets import QMessageBox
 
         win = _make_window()
-        fake_date = MagicMock(wraps=date)
-        fake_date.today.return_value = self._TODAY
+        fake_date, fake_datetime = _freeze_today(self._TODAY)
         mock_persist = MagicMock()
         mock_web = MagicMock()
 
         with (
             patch(_PERSIST_SETTING, mock_persist),
             patch(_DATE, fake_date),
+            patch(_DATETIME, fake_datetime),
             patch(_WEBBROWSER, mock_web),
             patch(
                 _QMSGBOX + ".question",
@@ -617,14 +631,14 @@ class TestOnAppUpdateResult:
         from PyQt6.QtWidgets import QMessageBox
 
         win = _make_window()
-        fake_date = MagicMock(wraps=date)
-        fake_date.today.return_value = self._TODAY
+        fake_date, fake_datetime = _freeze_today(self._TODAY)
         mock_persist = MagicMock()
         mock_web = MagicMock()
 
         with (
             patch(_PERSIST_SETTING, mock_persist),
             patch(_DATE, fake_date),
+            patch(_DATETIME, fake_datetime),
             patch(_WEBBROWSER, mock_web),
             patch(
                 _QMSGBOX + ".question",
@@ -699,14 +713,14 @@ class TestOnAppUpdateResult:
         from PyQt6.QtWidgets import QMessageBox
 
         win = _make_window()
-        fake_date = MagicMock(wraps=date)
-        fake_date.today.return_value = self._TODAY
+        fake_date, fake_datetime = _freeze_today(self._TODAY)
         mock_persist = MagicMock()
         mock_web = MagicMock()
 
         with (
             patch(_PERSIST_SETTING, mock_persist),
             patch(_DATE, fake_date),
+            patch(_DATETIME, fake_datetime),
             patch(_WEBBROWSER, mock_web),
             patch(
                 _QMSGBOX + ".question",
@@ -763,9 +777,7 @@ class TestAutoCheckIntegration:
     def test_after_auto_check_no_update_next_call_is_throttled(self) -> None:
         """Simulates two startup calls: first fires, second (same day) is throttled."""
         today = date(2026, 5, 18)
-        fake_date = MagicMock(wraps=date)
-        fake_date.today.return_value = today
-        fake_date.fromisoformat.side_effect = date.fromisoformat
+        fake_date, fake_datetime = _freeze_today(today)
 
         win1 = _make_window()
         win2 = _make_window()
@@ -783,6 +795,7 @@ class TestAutoCheckIntegration:
         with (
             patch(_GET_SETTING, side_effect=_get_first),
             patch(_DATE, fake_date),
+            patch(_DATETIME, fake_datetime),
         ):
             win1._maybe_start_auto_app_update_check()
         win1._start_app_update_check.assert_called_once_with(auto=True)
@@ -793,6 +806,7 @@ class TestAutoCheckIntegration:
             patch(_QMSGBOX),
             patch(_WEBBROWSER),
             patch(_DATE, fake_date),
+            patch(_DATETIME, fake_datetime),
         ):
             win1._on_app_update_result(False, "", "", auto=True)
         assert persisted.get("VID_DL_APP_UPDATE_LAST_CHECKED") == "2026-05-18"
@@ -801,6 +815,7 @@ class TestAutoCheckIntegration:
         with (
             patch(_GET_SETTING, side_effect=_get_first),
             patch(_DATE, fake_date),
+            patch(_DATETIME, fake_datetime),
         ):
             win2._maybe_start_auto_app_update_check()
         win2._start_app_update_check.assert_not_called()

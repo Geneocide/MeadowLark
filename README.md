@@ -99,6 +99,9 @@ Pick your folders and click **OK**. The app remembers these choices in `AppData\
 1. Drag the URL from your browser's address bar and drop it onto one of the drop zones in the app window: one per enabled resolution (2160/1440/1080/720/480/360), plus **audio** which extracts audio only and saves as m4a. Each zone downloads the best available quality **at or below** its number, so a video that only exists at a lower resolution still downloads rather than being skipped — and if a resolution is blocked, the download automatically retries at the next lower enabled preset.
 2. The status bar at the bottom shows download progress. When it says **[ Ready ]** again, the file is in your folder.
 
+### Queuing
+MeadowLark queues tasks automatically — keep dragging/dropping without waiting. Videos and playlists download in order. Audio (podcasts/playlists) downloads concurrently while videos process, so you won't block on podcast queues.
+
 ### Downloading a Playlist
 
 MeadowLark can batch-download entire YouTube playlists. It tracks which videos it has already downloaded and skips them on future runs.
@@ -232,6 +235,85 @@ Browser cookies expire eventually (usually after a few weeks to a few months). I
 
 ---
 
+## Download History
+
+MeadowLark keeps two logs in its AppData folder:
+
+- **history_log.txt** — a record of every successful download (title, URL, timestamp)
+- **error_log.txt** — errors and failures
+
+You can view recent history inside the app via the **History** menu item (if available in your version). The archive file (`archive.txt`) is what yt-dlp uses internally to skip already-downloaded videos; you normally don't need to touch it. There is an **Ignore Archive?** checkbox that will download a video you have previously downloaded, if you need. Be careful to uncheck it when you no longer need it, or you could accidentally download whole playlists you've already seen.
+
+---
+
+## Failed Downloads
+
+When a download fails, MeadowLark records it instead of letting it scroll past in the log. A red **⚠ N** button appears in the top-right corner showing how many failures are waiting; it is hidden entirely when there are none.
+
+Click it to open the **Failed Downloads** window, a list of every failed item with the time it failed, the site, the download type (the resolution preset, audio, or playlist), and the title. Hover any row to see the error message that caused the failure.
+
+Select a row and use:
+
+- **Retry** — re-queues the download exactly as if you had dropped the URL again. Already-completed entries of a playlist are skipped via the archive, so only the failed parts download. If it fails a second time, it reappears in the list with a fresh timestamp.
+- **Delete** — removes the item from the list without downloading it.
+- **Right-click → Open in Browser** — opens the original URL so you can check whether the video still exists.
+
+Retry is disabled for any record whose download type can no longer be recognised (for example, a record written by an older version); Delete still works on those.
+
+The list lives in `failed_downloads.json` next to the app's other resources and survives restarts — if failures are pending when you close the app, the ⚠ button is there again at next launch.
+
+---
+
+## Pending Downloads
+
+A **⏳ N** button appears in the top-right corner showing how many downloads are parked waiting to become available; it is hidden when there are none.
+
+Click it to open the **Pending Downloads** window, a list of every parked item with its expected availability time, kind (`live` or `premiere`), download type, and title. Hover any row to see the error or reason why nothing has downloaded yet, or the URL.
+
+Select a row and use:
+
+- **Download Now** — force the item through the normal download pipeline immediately, ignoring its release time. If it's genuinely not available yet, it will simply re-park itself with a fresh release time.
+- **Remove** — drop it from the list without downloading it.
+- **Right-click → Open in Browser** — opens the original URL so you can check the video page.
+
+The list lives in `pending_queue.json` next to the app's other resources and survives restarts — if pending downloads are waiting when you close the app, the ⏳ button is there again at next launch.
+
+The app polls automatically every `VID_DL_LIVE_QUEUE_CHECK_INTERVAL_MINUTES` minutes (documented in the [Environment Variable Reference](#environment-variable-reference)).
+
+---
+
+## Updates
+
+MeadowLark checks GitHub for new releases once a week at startup. When an update is found, a dialog appears with a download link.
+
+To check manually: **Settings → About → Check for Updates**.
+
+To turn off automatic checks: **Settings → Interface → Auto-check for app updates** (uncheck).
+
+---
+
+## Developer Setup
+
+```sh
+git clone https://github.com/TheGeneCode/MeadowLark
+cd MeadowLark
+uv sync
+uv run python scripts/setup_pot_provider.py   # installs the vendored PO-token provider deps (needed for 1080p)
+cp .env.example .env
+git config core.hooksPath .githooks
+uv run python meadowlark.pyw
+```
+
+> Skipping `setup_pot_provider.py` means 1080p downloads fail with HTTP 403 and the app shows a "PO Token Providers: none" warning at startup. See [YouTube 1080p Downloads](#youtube-1080p-downloads--the-po-token-provider).
+
+### Prerequisites
+
+- **Python ≥ 3.10** and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**
+- **FFmpeg** — required for audio/podcast downloads. Install via [ffmpeg.org](https://ffmpeg.org/download.html) or a package manager, and make sure it's on `PATH`.
+- **Deno** — auto-installed into `.venv/Scripts` when you run `uv sync`.
+
+---
+
 ## YouTube 1080p Downloads & the PO-Token Provider
 
 YouTube gates 1080p (and higher) video streams behind a per-video **GVS PO token** (yt-dlp [#12482](https://github.com/yt-dlp/yt-dlp/issues/12482)). Without that token, the app can still fetch the metadata and *lower* resolutions, but every 1080p download fails at the media stage with:
@@ -318,87 +400,6 @@ Set `VID_DL_YTDLP_VERBOSE=true` to capture yt-dlp's own diagnostic stream to `re
 | `Invoking http downloader` — is `pot=` in the URL? | **decisive**: no `pot=` means the format came from a client that does not consume the token, and it will 403 on any gated video |
 
 > The capture contains PO tokens, visitor data and signed media URLs. It is gitignored; do not paste it into issues without redacting. Leave the setting off for normal use.
-
----
-
-## Download History
-
-MeadowLark keeps two logs in its AppData folder:
-
-- **history_log.txt** — a record of every successful download (title, URL, timestamp)
-- **error_log.txt** — errors and failures
-
-You can view recent history inside the app via the **History** menu item (if available in your version). The archive file (`archive.txt`) is what yt-dlp uses internally to skip already-downloaded videos; you normally don't need to touch it. There is an **Ignore Archive?** checkbox that will download a video you have previously downloaded, if you need. Be careful to uncheck it when you no longer need it, or you could accidentally download whole playlists you've already seen.
-
----
-
-## Failed Downloads
-
-When a download fails, MeadowLark records it instead of letting it scroll past in the log. A red **⚠ N** button appears in the top-right corner showing how many failures are waiting; it is hidden entirely when there are none.
-
-Click it to open the **Failed Downloads** window, a list of every failed item with the time it failed, the site, the download type (the resolution preset, audio, or playlist), and the title. Hover any row to see the error message that caused the failure.
-
-Select a row and use:
-
-- **Retry** — re-queues the download exactly as if you had dropped the URL again. Already-completed entries of a playlist are skipped via the archive, so only the failed parts download. If it fails a second time, it reappears in the list with a fresh timestamp.
-- **Delete** — removes the item from the list without downloading it.
-- **Right-click → Open in Browser** — opens the original URL so you can check whether the video still exists.
-
-Retry is disabled for any record whose download type can no longer be recognised (for example, a record written by an older version); Delete still works on those.
-
-The list lives in `failed_downloads.json` next to the app's other resources and survives restarts — if failures are pending when you close the app, the ⚠ button is there again at next launch.
-
----
-
-## Pending Downloads
-
-A **⏳ N** button appears in the top-right corner showing how many downloads are parked waiting to become available; it is hidden when there are none.
-
-Click it to open the **Pending Downloads** window, a list of every parked item with its expected availability time, kind (`live` or `premiere`), download type, and title. Hover any row to see the error or reason why nothing has downloaded yet, or the URL.
-
-Select a row and use:
-
-- **Download Now** — force the item through the normal download pipeline immediately, ignoring its release time. If it's genuinely not available yet, it will simply re-park itself with a fresh release time.
-- **Remove** — drop it from the list without downloading it.
-- **Right-click → Open in Browser** — opens the original URL so you can check the video page.
-
-The list lives in `pending_queue.json` next to the app's other resources and survives restarts — if pending downloads are waiting when you close the app, the ⏳ button is there again at next launch.
-
-The app polls automatically every `VID_DL_LIVE_QUEUE_CHECK_INTERVAL_MINUTES` minutes (documented in the [Environment Variable Reference](#environment-variable-reference)).
-
----
-
-## Updates
-
-MeadowLark checks GitHub for new releases once a week at startup. When an update is found, a dialog appears with a download link.
-
-To check manually: **Settings → About → Check for Updates**.
-
-To turn off automatic checks: **Settings → Interface → Auto-check for app updates** (uncheck).
-
----
-
-## Developer Setup
-
-```sh
-git clone https://github.com/TheGeneCode/MeadowLark
-cd MeadowLark
-uv sync
-uv run python scripts/setup_pot_provider.py   # installs the vendored PO-token provider deps (needed for 1080p)
-cp .env.example .env
-git config core.hooksPath .githooks
-uv run python meadowlark.pyw
-```
-
-> Skipping `setup_pot_provider.py` means 1080p downloads fail with HTTP 403 and the app shows a "PO Token Providers: none" warning at startup. See [YouTube 1080p Downloads](#youtube-1080p-downloads--the-po-token-provider).
-
-### Prerequisites
-
-- **Python ≥ 3.10** and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**
-- **FFmpeg** — required for audio/podcast downloads. Install via [ffmpeg.org](https://ffmpeg.org/download.html) or a package manager, and make sure it's on `PATH`.
-- **Deno** — auto-installed into `.venv/Scripts` when you run `uv sync`.
-
----
 
 ## Environment Variable Reference
 
