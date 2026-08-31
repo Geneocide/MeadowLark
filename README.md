@@ -10,7 +10,7 @@ A simple desktop app for downloading videos, playlists, and podcasts from YouTub
 
 > MeadowLark is meant for personal use — content you own the rights to, or that's public domain, Creative Commons, or otherwise fair to save for yourself. Respect copyright and the terms of the sites you download from. Not affiliated with YouTube, Google, or the yt-dlp project.
 
-💛 [Sponsor this project](https://github.com/sponsors/TheGeneCode) — and consider tipping the yt-dlp devs that do the work that this is built on [maintainers](https://github.com/yt-dlp/yt-dlp/blob/master/Maintainers.md#maintainers) too.
+💛 [Sponsor this project](https://github.com/sponsors/TheGeneCode) — and consider tipping the yt-dlp [maintainers](https://github.com/yt-dlp/yt-dlp/blob/master/Maintainers.md#maintainers) that do the work that this is built on, too.
 
 ---
 
