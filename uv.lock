@@ -234,7 +234,7 @@ wheels = [
 [[package]]
 name = "genekit"
 version = "0.1.0"
-source = { git = "https://github.com/TheGeneCode/genekit?subdirectory=python&tag=py-v0.1.0#e32cb241d20ae764fad84f35dd64bbde26abf498" }
+source = { git = "https://github.com/TheGeneCode/genekit?subdirectory=python&tag=py-v0.1.0#c82246c4b5f327338751a47e7909c5b4316794cf" }
 
 [[package]]
 name = "hurry-filesize"
