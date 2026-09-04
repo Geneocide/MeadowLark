@@ -8,7 +8,6 @@ dependencies = [
     "deno>=2.5.4",
     "python-dotenv>=1.0.0",
     "hurry-filesize>=0.9",
-    "keyring>=25.6.0",
     "pyqt6>=6.9.1",
     "pytest-cov>=7.1.0",
     "requests>=2.32.5",

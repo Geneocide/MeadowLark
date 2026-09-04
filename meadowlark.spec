@@ -23,7 +23,6 @@ a = Analysis(
         "yt_dlp_plugins.extractor.getpot_bgutil",
         "yt_dlp_plugins.extractor.getpot_bgutil_http",
         "yt_dlp_plugins.extractor.getpot_bgutil_script",
-        "keyring.backends.Windows",
         "wakepy._implementations",
     ],
     hookspath=[],

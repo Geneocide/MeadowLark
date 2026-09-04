@@ -6,10 +6,18 @@ APP_VERSION (src/version_utils.py) is read from installed package metadata
 install refreshes it. These tests pin the two places that must stay in sync
 so a future edit can't silently drop the refresh step or re-track the
 generated metadata directory.
+
+A second group of tests audits the declared dependency set against what is
+actually imported, so a dependency nothing uses (as `keyring` was) cannot sit
+in pyproject.toml unnoticed.
 """
 
+import ast
+import importlib.metadata
+import re
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -54,3 +62,409 @@ def test_egg_info_is_gitignored_and_not_tracked() -> None:
         "`uv pip install -e .` and a stale committed copy overrides the real "
         "version whenever this repo is on sys.path (see release.ps1)."
     )
+
+
+_SOURCE_SUFFIXES = (".py", ".pyw")
+
+# Declared runtime dependencies that are legitimately never `import`ed by this
+# codebase. Every entry must say why it still has to ship -- an unjustified
+# entry is exactly how `keyring` survived here unimported for months.
+_NOT_DIRECTLY_IMPORTED: dict[str, str] = {
+    "deno": (
+        "Ships the deno.exe binary that meadowlark.spec bundles from "
+        ".venv/Scripts; invoked as a subprocess, never imported."
+    ),
+    "yt-dlp-ejs": (
+        "yt-dlp's JS-challenge solver; discovered and loaded by yt-dlp at "
+        "runtime, not by this codebase."
+    ),
+    # bgutil-ytdlp-pot-provider is deliberately absent: it provides the
+    # top-level `yt_dlp_plugins` namespace, and tests/test_pot_provider.py
+    # imports getpot_bgutil_script from it directly, so the audit resolves it
+    # normally. Do not re-add it here.
+    "pytest-cov": (
+        "pytest plugin, activated by the --cov flag rather than an import. "
+        "Note it sits in [project] dependencies rather than the dev group, so "
+        "it ships in the frozen build's dependency closure."
+    ),
+}
+
+
+def _normalize(name: str) -> str:
+    """PEP 503: lowercase, and collapse runs of - _ . into a single hyphen."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _dependency_name(requirement: str) -> str:
+    """
+    Extract and normalize the distribution name from a PEP 508 requirement.
+
+    Strips extras, version specifiers and environment markers:
+    "yt-dlp[default]>=2025.7.21 ; sys_platform == 'win32'" -> "yt-dlp"
+    """
+    return _normalize(re.split(r"[\[<>=!~;\s]", requirement, maxsplit=1)[0])
+
+
+def _declared_dependencies() -> frozenset[str]:
+    with (_REPO_ROOT / "pyproject.toml").open("rb") as handle:
+        pyproject = tomllib.load(handle)
+    return frozenset(
+        _dependency_name(requirement)
+        for requirement in pyproject["project"]["dependencies"]
+    )
+
+
+def _tracked_source_files() -> list[Path]:
+    assert _GIT is not None, "git must be on PATH to run this test"
+    tracked = subprocess.run(  # noqa: S603 -- fixed argv, no shell, trusted git binary
+        [_GIT, "ls-files", "-z"],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return [
+        _REPO_ROOT / relative
+        for relative in tracked.split("\0")
+        if relative.endswith(_SOURCE_SUFFIXES)
+    ]
+
+
+def _top_level_imports(paths: list[Path]) -> frozenset[str]:
+    """Every top-level module name imported anywhere in the given sources."""
+    names: set[str] = set()
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names.update(alias.name.split(".")[0] for alias in node.names)
+            # node.level > 0 is a relative import -- no distribution behind it.
+            elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+                names.add(node.module.split(".")[0])
+    return frozenset(names)
+
+
+@pytest.fixture(scope="module")
+def declared_deps() -> frozenset[str]:
+    return _declared_dependencies()
+
+
+@pytest.fixture(scope="module")
+def imported_dists() -> frozenset[str]:
+    """Distributions that actually back the imports in tracked source files."""
+    provided = importlib.metadata.packages_distributions()
+    return frozenset(
+        _normalize(distribution)
+        for name in _top_level_imports(_tracked_source_files())
+        for distribution in provided.get(name, ())
+    )
+
+
+def _unexplained_dependencies(
+    declared: frozenset[str],
+    imported: frozenset[str],
+    allowlist: dict[str, str],
+) -> frozenset[str]:
+    """Return declared dependencies that are neither imported nor allowlisted."""
+    return declared - imported - allowlist.keys()
+
+
+def _stale_allowlist_entries(
+    declared: frozenset[str],
+    allowlist: dict[str, str],
+) -> frozenset[str]:
+    """Allowlist entries that no longer correspond to a declared dependency."""
+    return allowlist.keys() - declared
+
+
+def _reintroduced_allowlist_entries(
+    imported: frozenset[str],
+    allowlist: dict[str, str],
+) -> frozenset[str]:
+    """Allowlist entries that are now directly imported after all."""
+    return allowlist.keys() & imported
+
+
+def test_dependency_audit_is_not_vacuous(imported_dists) -> None:
+    # If the environment is unsynced, packages_distributions() resolves almost
+    # nothing and the audit below would pass or fail for the wrong reason. Fail
+    # loudly here instead, with the fix in the message.
+    assert "pyqt6" in imported_dists, (
+        "PyQt6 did not resolve through importlib.metadata, so this audit cannot "
+        "see what is installed. Run `uv sync --group dev` and re-run; an "
+        "unsynced environment makes the dependency audit meaningless."
+    )
+
+
+def test_every_declared_dependency_is_imported_or_justified(
+    declared_deps,
+    imported_dists,
+) -> None:
+    unexplained = _unexplained_dependencies(
+        declared_deps,
+        imported_dists,
+        _NOT_DIRECTLY_IMPORTED,
+    )
+    assert not unexplained, (
+        f"{sorted(unexplained)} are declared in pyproject.toml [project] "
+        "dependencies but are never imported by any tracked source file. "
+        "Either drop them -- as `keyring` was, which also shed pywin32-ctypes "
+        "and the jaraco.* chain -- or add each to _NOT_DIRECTLY_IMPORTED with "
+        "the reason it still has to ship."
+    )
+
+
+def test_not_directly_imported_allowlist_has_no_stale_entries(
+    declared_deps,
+    imported_dists,
+) -> None:
+    undeclared = _stale_allowlist_entries(declared_deps, _NOT_DIRECTLY_IMPORTED)
+    assert not undeclared, (
+        f"{sorted(undeclared)} are allowlisted in _NOT_DIRECTLY_IMPORTED but no "
+        "longer declared in pyproject.toml -- delete those entries."
+    )
+    now_imported = _reintroduced_allowlist_entries(
+        imported_dists,
+        _NOT_DIRECTLY_IMPORTED,
+    )
+    assert not now_imported, (
+        f"{sorted(now_imported)} are now imported directly -- remove them from "
+        "_NOT_DIRECTLY_IMPORTED so the audit tracks them normally."
+    )
+
+
+def test_keyring_is_not_reintroduced() -> None:
+    for relative in ("pyproject.toml", "meadowlark.spec", "meadowlark.pyw"):
+        text = (_REPO_ROOT / relative).read_text(encoding="utf-8")
+        assert "keyring" not in text.lower(), (
+            f"{relative} re-introduces keyring. Nothing in this codebase imports "
+            "it; it was removed as dead weight along with pywin32-ctypes and the "
+            "jaraco.* chain. If a real credential feature is being added, delete "
+            "this test in the same commit as the first `import keyring`."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Boundary coverage for the pure helpers above. These exercise `_normalize`,
+# `_dependency_name` and `_top_level_imports` directly against crafted input
+# rather than only indirectly through the live pyproject.toml / tracked
+# sources, and prove the two audit tests' failure paths actually fire.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("", ""),
+        ("a", "a"),
+        ("ab", "ab"),
+        ("PyYAML", "pyyaml"),
+        ("requests_oauthlib", "requests-oauthlib"),
+        ("foo--bar", "foo-bar"),
+        ("foo___bar", "foo-bar"),
+        ("foo..bar", "foo-bar"),
+        ("foo-_.bar", "foo-bar"),
+        ("-foo", "-foo"),
+        ("foo-", "foo-"),
+        ("foo-bar", "foo-bar"),
+        ("FOO", "foo"),
+        ("2to3", "2to3"),
+        ("café", "café"),
+    ],
+    ids=[
+        "empty",
+        "single-char",
+        "two-chars",
+        "mixed-case",
+        "single-underscore",
+        "double-hyphen",
+        "triple-underscore",
+        "double-dot",
+        "mixed-separator-run",
+        "leading-hyphen",
+        "trailing-hyphen",
+        "already-normalized-idempotent",
+        "all-uppercase",
+        "leading-digit",
+        "unicode-accented",
+    ],
+)
+def test_normalize_boundary_values(raw: str, expected: str) -> None:
+    assert _normalize(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("requirement", "expected"),
+    [
+        ("requests", "requests"),
+        ("yt-dlp[default]", "yt-dlp"),
+        ("package>=1.0", "package"),
+        ("package==1.0.0", "package"),
+        ("package~=1.0", "package"),
+        ("package!=1.0", "package"),
+        ("package<=2.0", "package"),
+        ("package<2.0", "package"),
+        ("package>2.0", "package"),
+        ("package; sys_platform == 'win32'", "package"),
+        ("package ; extra == 'foo'", "package"),
+        (
+            "yt-dlp[default]>=2025.7.21 ; sys_platform == 'win32'",
+            "yt-dlp",
+        ),
+        ("Some_Package.Name>=1.0", "some-package-name"),
+        ("package [extra]", "package"),
+        ("", ""),
+    ],
+    ids=[
+        "bare-name",
+        "extras-only",
+        "specifier-gte",
+        "specifier-eq",
+        "specifier-compatible",
+        "specifier-ne",
+        "specifier-lte",
+        "specifier-lt",
+        "specifier-gt",
+        "marker-no-space",
+        "marker-with-space",
+        "extras-specifier-marker-combo",
+        "name-needs-normalization",
+        "space-before-extras",
+        "empty-requirement",
+    ],
+)
+def test_dependency_name_boundary_values(requirement: str, expected: str) -> None:
+    assert _dependency_name(requirement) == expected
+
+
+def _write_source(tmp_path: Path, name: str, content: str) -> Path:
+    path = tmp_path / name
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def test_top_level_imports_empty_file_yields_empty_set(tmp_path: Path) -> None:
+    path = _write_source(tmp_path, "empty.py", "")
+    assert _top_level_imports([path]) == frozenset()
+
+
+def test_top_level_imports_plain_import(tmp_path: Path) -> None:
+    path = _write_source(tmp_path, "plain.py", "import os\n")
+    assert _top_level_imports([path]) == frozenset({"os"})
+
+
+def test_top_level_imports_dotted_import_takes_first_segment(
+    tmp_path: Path,
+) -> None:
+    path = _write_source(tmp_path, "dotted.py", "import os.path\n")
+    assert _top_level_imports([path]) == frozenset({"os"})
+
+
+def test_top_level_imports_comma_separated_import(tmp_path: Path) -> None:
+    path = _write_source(tmp_path, "multi.py", "import os, sys\n")
+    assert _top_level_imports([path]) == frozenset({"os", "sys"})
+
+
+def test_top_level_imports_from_import(tmp_path: Path) -> None:
+    path = _write_source(
+        tmp_path,
+        "from_import.py",
+        "from collections import OrderedDict\n",
+    )
+    assert _top_level_imports([path]) == frozenset({"collections"})
+
+
+def test_top_level_imports_from_import_dotted_module(tmp_path: Path) -> None:
+    path = _write_source(tmp_path, "from_dotted.py", "from os.path import join\n")
+    assert _top_level_imports([path]) == frozenset({"os"})
+
+
+def test_top_level_imports_aliased_import(tmp_path: Path) -> None:
+    path = _write_source(tmp_path, "aliased.py", "import numpy as np\n")
+    assert _top_level_imports([path]) == frozenset({"numpy"})
+
+
+def test_top_level_imports_excludes_relative_imports(tmp_path: Path) -> None:
+    path = _write_source(
+        tmp_path,
+        "relative.py",
+        "from . import foo\nfrom .utils import bar\n",
+    )
+    assert _top_level_imports([path]) == frozenset()
+
+
+def test_top_level_imports_descends_into_function_body(tmp_path: Path) -> None:
+    path = _write_source(tmp_path, "nested_func.py", "def f() -> None:\n    import json\n")
+    assert _top_level_imports([path]) == frozenset({"json"})
+
+
+def test_top_level_imports_descends_into_try_except(tmp_path: Path) -> None:
+    content = (
+        "try:\n"
+        "    import tomllib\n"
+        "except ImportError:\n"
+        "    import tomli as tomllib\n"
+    )
+    path = _write_source(tmp_path, "try_except.py", content)
+    assert _top_level_imports([path]) == frozenset({"tomllib", "tomli"})
+
+
+def test_top_level_imports_descends_into_if_block(tmp_path: Path) -> None:
+    path = _write_source(tmp_path, "if_block.py", "if True:\n    import sys\n")
+    assert _top_level_imports([path]) == frozenset({"sys"})
+
+
+def test_top_level_imports_unions_across_multiple_files(tmp_path: Path) -> None:
+    first = _write_source(tmp_path, "first.py", "import os\n")
+    second = _write_source(tmp_path, "second.py", "import sys\n")
+    assert _top_level_imports([first, second]) == frozenset({"os", "sys"})
+
+
+def test_dependency_audit_flags_undeclared_unimported_dependency() -> None:
+    """
+    Regression for the exact failure `keyring` should have tripped.
+
+    A dependency present in `declared` but neither imported nor allowlisted
+    must be reported by `_unexplained_dependencies`, proving the audit's
+    failing path actually fires rather than only ever passing.
+    """
+    declared = frozenset({"keyring", "pyqt6"})
+    imported = frozenset({"pyqt6"})
+    unexplained = _unexplained_dependencies(declared, imported, _NOT_DIRECTLY_IMPORTED)
+    assert unexplained == frozenset({"keyring"})
+
+
+def test_dependency_audit_passes_when_allowlisted() -> None:
+    """A declared-but-unimported dependency that IS allowlisted is not flagged."""
+    declared = frozenset({"deno", "pyqt6"})
+    imported = frozenset({"pyqt6"})
+    unexplained = _unexplained_dependencies(declared, imported, _NOT_DIRECTLY_IMPORTED)
+    assert unexplained == frozenset()
+
+
+def test_allowlist_audit_flags_entry_no_longer_declared() -> None:
+    """
+    Regression: an allowlist key that drifts away from pyproject.toml.
+
+    Simulates dropping a dependency from pyproject.toml (or a typo mutating
+    the allowlist key) without removing the now-stale `_NOT_DIRECTLY_IMPORTED`
+    entry -- `_stale_allowlist_entries` must catch it.
+    """
+    declared = frozenset({"pyqt6"})
+    mutated_allowlist = {"mutated-key-not-declared": "stale reason"}
+    stale = _stale_allowlist_entries(declared, mutated_allowlist)
+    assert stale == frozenset({"mutated-key-not-declared"})
+
+
+def test_allowlist_audit_flags_entry_now_imported() -> None:
+    """
+    Regression: an allowlisted dependency that starts being imported.
+
+    Once code imports what the allowlist claims is never imported, the entry
+    is stale in the other direction -- `_reintroduced_allowlist_entries` must
+    catch it so the allowlist gets trimmed instead of masking real usage.
+    """
+    imported = frozenset({"deno", "pyqt6"})
+    allowlist = {"deno": "no longer accurate once this fires"}
+    now_imported = _reintroduced_allowlist_entries(imported, allowlist)
+    assert now_imported == frozenset({"deno"})

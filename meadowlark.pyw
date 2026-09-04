@@ -12,7 +12,6 @@ Features:
 - Automatic detection and login for supported platforms (e.g., Nebula).
 - Cookie-based authentication for YouTube.
 - Update checker and one-click upgrade for yt-dlp.
-- Integration with system keyring for secure credential storage.
 - Opens download directory and sets up application icon resources on startup.
 
 Usage:
@@ -26,7 +25,6 @@ Dependencies:
 - PyQt6
 - yt-dlp
 - hurry.filesize
-- keyring
 - Custom modules: QYT, UIClasses
 
 Author: Gene
@@ -289,7 +287,7 @@ class MyWindow(QWidget):
         """
         MeadowLark is a PyQt6-based GUI application for downloading and managing video and audio content from YouTube and other platforms using yt-dlp.
 
-        Provides a user-friendly interface for batch downloading videos, playlists, and audio files with customizable options. Features include drag-and-drop support, playlist selection, progress tracking, real-time logging, archive checking, automatic yt-dlp updates, and secure credential storage via keyring.
+        Provides a user-friendly interface for batch downloading videos, playlists, and audio files with customizable options. Features include drag-and-drop support, playlist selection, progress tracking, real-time logging, archive checking, and automatic yt-dlp updates.
 
         Run this script to launch the GUI, queue downloads, monitor progress, and manage updates.
         """
