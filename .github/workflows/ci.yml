@@ -1,20 +1,93 @@
 name: CI
+
 on:
   push:
     branches: [main]
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
+    name: py${{ matrix.python-version }}
     runs-on: windows-latest
+    strategy:
+      # A failure on the floor must not cancel the ceiling — the whole point of the
+      # matrix is knowing WHICH interpreters broke.
+      fail-fast: false
+      matrix:
+        # Must cover the full `requires-python` range in pyproject.toml. Lowering that
+        # floor means adding a leg here (see docs/plans/roadmap-python-floor-311.md).
+        python-version: ["3.12", "3.13", "3.14"]
+    env:
+      # Selects the interpreter for every uv command in this job. Takes precedence over
+      # .python-version, which stays 3.14 for local dev and the release build. Note that
+      # astral-sh/setup-uv@v3 has no `python-version` input, so this env var — not a
+      # `with:` key — is the mechanism.
+      UV_PYTHON: ${{ matrix.python-version }}
+      # Eight test modules build a QApplication at import time. windows-latest happens to
+      # give Qt's default "windows" plugin a usable desktop session, but that is a property
+      # of the runner image, not of the suite. Pin the headless platform explicitly.
+      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          # Without a per-leg suffix all three legs share one cache key and thrash it.
+          cache-suffix: py${{ matrix.python-version }}
+
       # genekit is a private repo; uv shells out to git, which has no credentials
       # of its own on the runner. Rewrite github.com HTTPS URLs to carry the PAT.
+      # Must run before any uv command that resolves dependencies.
       - name: Authenticate git for private genekit dependency
         env:
           GENEKIT_TOKEN: ${{ secrets.GENEKIT_TOKEN }}
         run: git config --global url."https://x-access-token:$env:GENEKIT_TOKEN@github.com/".insteadOf "https://github.com/"
-      - run: uv sync --group dev
-      - run: uv run pytest
-      - run: uv run ruff check
+
+      - name: Install the matrix interpreter
+        run: uv python install ${{ matrix.python-version }}
+
+      # --locked (not the bare `uv sync`) so every leg installs the SAME resolved set and a
+      # uv.lock that has drifted from pyproject.toml fails CI. Without it, a 3.12 failure
+      # cannot be attributed to the interpreter rather than to a different resolution.
+      - name: Sync the locked dependency set
+        run: uv sync --locked --group dev
+
+      # If UV_PYTHON were ever ignored, all three legs would silently run 3.14 and the
+      # matrix would go green while covering nothing. Assert the env we are about to test in.
+      - name: Assert the synced environment matches the matrix leg
+        run: uv run --no-sync python -c "import sys; got = '.'.join(map(str, sys.version_info[:2])); want = '${{ matrix.python-version }}'; assert got == want, f'matrix leg wants {want}, environment is {got}'"
+
+      - run: uv run --no-sync pytest -q
+
+  lint:
+    name: ruff
+    runs-on: windows-latest
+    env:
+      # Arbitrary: ruff reads target-version from requires-python, not from the interpreter
+      # it runs on. Pinned only so this job does not drift with .python-version.
+      UV_PYTHON: "3.14"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-suffix: lint
+
+      # --only-group dev does not install genekit, but keep the auth step so the job cannot
+      # break if the sync scope is ever widened.
+      - name: Authenticate git for private genekit dependency
+        env:
+          GENEKIT_TOKEN: ${{ secrets.GENEKIT_TOKEN }}
+        run: git config --global url."https://x-access-token:$env:GENEKIT_TOKEN@github.com/".insteadOf "https://github.com/"
+
+      # --only-group dev installs ruff + pyinstaller and skips PyQt6 (~60 MB) and deno
+      # (~44 MB): a few seconds instead of a full environment, which is what makes a
+      # separate job cheaper than an `if:`-guarded step on the 3.14 leg.
+      - name: Sync only the dev group
+        run: uv sync --locked --only-group dev
+
+      - run: uv run --no-sync ruff check
