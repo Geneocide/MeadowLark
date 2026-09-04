@@ -20,7 +20,7 @@ jobs:
       matrix:
         # Must cover the full `requires-python` range in pyproject.toml. Lowering that
         # floor means adding a leg here (see docs/plans/roadmap-python-floor-311.md).
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     env:
       # Selects the interpreter for every uv command in this job. Takes precedence over
       # .python-version, which stays 3.14 for local dev and the release build. Note that

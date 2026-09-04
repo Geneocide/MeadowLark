@@ -3,7 +3,7 @@ name = "meadowlark"
 version = "0.4.5"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "deno>=2.5.4",
     "python-dotenv>=1.0.0",
@@ -81,4 +81,4 @@ ignore = [
 "scripts/**" = ["INP001"]
 
 [tool.uv.sources]
-genekit = { git = "https://github.com/TheGeneCode/genekit", subdirectory = "python", tag = "py-v0.1.0" }
+genekit = { git = "https://github.com/TheGeneCode/genekit", subdirectory = "python", tag = "py-v0.2.2" }

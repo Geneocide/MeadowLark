@@ -21,7 +21,7 @@ Usage:
 - Use the update button to check for and install yt-dlp updates.
 
 Dependencies:
-- Python 3.10+
+- Python 3.11+
 - PyQt6
 - yt-dlp
 - hurry.filesize
